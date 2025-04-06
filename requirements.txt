@@ -1,0 +1,41 @@
+# 핵심 의존성
+openai>=1.0.0
+python-dotenv>=1.0.0
+langchain>=0.1.0
+langchain-openai>=0.0.5
+langchain-core>=0.1.0
+pinecone-client>=2.2.4
+
+# 벡터 데이터베이스
+chromadb>=0.4.0
+sentence-transformers>=2.2.2  # 임베딩 생성용
+langchain-community>=0.0.10  # Chroma 통합용
+
+# 음성 인식 및 합성
+SpeechRecognition>=3.10.0
+pyttsx3>=2.90
+pyaudio>=0.2.13
+numpy>=1.24.0
+
+# 웹 프레임워크
+fastapi>=0.100.0
+uvicorn>=0.23.0
+pydantic>=2.0.0
+
+# 데이터베이스
+mysql-connector-python>=8.0.33
+sqlalchemy>=2.0.0
+
+# 클라우드 스토리지
+boto3>=1.28.0
+
+# 유틸리티
+requests>=2.31.0
+python-multipart>=0.0.6
+tqdm>=4.65.0
+pytest>=7.4.0
+jupyter>=1.0.0
+
+# 선택사항: SWivid TTS 구현 시 필요 (주석 해제)
+# torch>=2.0.0
+# transformers>=4.30.0
