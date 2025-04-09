@@ -16,6 +16,10 @@ SpeechRecognition>=3.10.0
 pyttsx3>=2.90
 pyaudio>=0.2.13
 numpy>=1.24.0
+sounddevice>=0.4.6
+wavio>=0.0.7
+elevenlabs>=0.2.24
+rnnoise-python>=0.3.0  # 노이즈 필터링
 
 # 웹 프레임워크
 fastapi>=0.100.0
@@ -29,6 +33,9 @@ sqlalchemy>=2.0.0
 # 클라우드 스토리지
 boto3>=1.28.0
 
+# 이미지 처리
+Pillow>=10.0.0
+
 # 유틸리티
 requests>=2.31.0
 python-multipart>=0.0.6
@@ -36,6 +43,3 @@ tqdm>=4.65.0
 pytest>=7.4.0
 jupyter>=1.0.0
 
-# 선택사항: SWivid TTS 구현 시 필요 (주석 해제)
-# torch>=2.0.0
-# transformers>=4.30.0

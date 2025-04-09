@@ -1,4 +1,7 @@
-from chat_bot import ChildChatBot
+import sys
+import os
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from models.chat_bot import ChildChatBot
 import argparse
 
 def test_text_chat():
