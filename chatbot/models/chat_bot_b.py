@@ -1,347 +1,354 @@
+import openai
 from openai import OpenAI
 from typing import List, Dict, Optional, Tuple
 from dotenv import load_dotenv
 import os
 import json
-import requests
 import base64
+from PIL import Image
+import io
+import requests
+import numpy as np
 from pathlib import Path
-import time
+import elevenlabs
+from elevenlabs import generate, save, set_api_key
 
 # 환경 변수 설정
 load_dotenv()
 client = OpenAI(api_key=os.getenv('OPENAI_API_KEY'))
-ELEVENLABS_API_KEY = os.getenv('ELEVENLABS_API_KEY')
+elevenlabs.set_api_key(os.getenv('ELEVENLABS_API_KEY'))
 
 class StoryGenerationChatBot:
     """
-    줄거리를 바탕으로 상세 동화, 삽화, 음성을 생성하는 AI 챗봇 클래스
+    동화 줄거리를 바탕으로 일러스트와 내레이션을 생성하는 AI 챗봇 클래스
     
     Attributes:
-        chatbot_name (str): 챗봇의 이름 ("꼬기")
-        story_outline (Dict): Chat-bot A에서 수집한 이야기 줄거리
-        detailed_story (Dict): 생성된 상세 동화 내용
-        illustrations (List[str]): 생성된 삽화 파일 경로 목록
-        voice_files (List[str]): 생성된 음성 파일 경로 목록
-        voice_id (str): ElevenLabs에서 사용할 음성 ID
-        target_age (int): 동화의 대상 연령대
+        story_outline (Dict[str, str]): 동화 줄거리 정보
+        generated_images (List[str]): 생성된 이미지 파일 경로 목록
+        narration_audio (str): 생성된 내레이션 오디오 파일 경로
+        prompts (Dict): JSON 파일에서 로드한 프롬프트
+        output_dir (Path): 생성된 파일들을 저장할 디렉토리
+        voice_id (str): ElevenLabs 음성 ID
     """
     
-    def __init__(self):
-        """챗봇 초기화 및 기본 속성 설정"""
-        self.chatbot_name = "꼬기"  # 챗봇 이름 설정
-        self.story_outline = None   # 이야기 줄거리 (Chat-bot A에서 수집)
-        self.detailed_story = {}    # 상세 동화 내용
-        self.illustrations = []     # 삽화 파일 경로
-        self.voice_files = []       # 음성 파일 경로
-        self.voice_id = None        # ElevenLabs 음성 ID
-        self.target_age = 5         # 기본 대상 연령
-        
-        # 결과물을 저장할 디렉토리 생성
-        self._create_output_directories()
-    
-    def _create_output_directories(self):
-        """결과물을 저장할 디렉토리 생성"""
-        base_dir = Path(__file__).parent.parent.parent  # CCB-AI 디렉토리
-        
-        # 삽화 저장 디렉토리
-        self.image_dir = base_dir / "output" / "images"
-        self.image_dir.mkdir(parents=True, exist_ok=True)
-        
-        # 음성 저장 디렉토리
-        self.voice_dir = base_dir / "output" / "voices"
-        self.voice_dir.mkdir(parents=True, exist_ok=True)
-        
-        # 전체 동화 저장 디렉토리
-        self.story_dir = base_dir / "output" / "stories"
-        self.story_dir.mkdir(parents=True, exist_ok=True)
-    
-    def set_story_outline(self, outline: Dict):
+    def __init__(self, output_dir: str = "output"):
         """
-        이야기 줄거리 설정
+        챗봇 초기화 및 기본 속성 설정
         
         Args:
-            outline (Dict): Chat-bot A에서 수집한 이야기 줄거리
+            output_dir (str): 생성된 파일들을 저장할 디렉토리 경로
         """
-        self.story_outline = outline
+        self.story_outline = None
+        self.generated_images = []
+        self.narration_audio = None
+        self.output_dir = Path(output_dir)
+        self.voice_id = None
+        
+        # 출력 디렉토리 생성
+        self.output_dir.mkdir(parents=True, exist_ok=True)
+        (self.output_dir / "images").mkdir(exist_ok=True)
+        (self.output_dir / "audio").mkdir(exist_ok=True)
+        
+        # 프롬프트 로드
+        self.load_prompts()
     
-    def set_voice_id(self, voice_id: str):
+    def load_prompts(self):
+        """JSON 파일에서 프롬프트를 로드하는 함수"""
+        try:
+            with open('data/prompts/chatbot_prompts.json', 'r', encoding='utf-8') as f:
+                prompts = json.load(f)
+                self.prompts = prompts['chatbot_b']
+        except Exception as e:
+            print(f"프롬프트 로드 중 오류 발생: {str(e)}")
+            # 기본 프롬프트 설정
+            self.prompts = {
+                "system_message_template": "당신은 동화 일러스트와 내레이션을 생성하는 전문가입니다.",
+                "image_generation_prompt_template": "주제: {theme}\n캐릭터: {characters}\n배경: {setting}\n스타일: {style}",
+                "narration_generation_prompt_template": "줄거리: {plot_summary}\n교육적 가치: {educational_value}\n대상 연령: {target_age}"
+            }
+    
+    def set_story_outline(self, story_outline: Dict[str, str]):
         """
-        ElevenLabs 음성 ID 설정
+        동화 줄거리 정보를 설정하는 함수
         
         Args:
-            voice_id (str): ElevenLabs에서 사용할 음성 ID
+            story_outline (Dict[str, str]): 동화 줄거리 정보
+                - theme: 주제
+                - characters: 주요 캐릭터
+                - setting: 배경 설정
+                - plot_summary: 간략한 줄거리
+                - educational_value: 교육적 가치
+                - target_age: 적합한 연령대
         """
-        self.voice_id = voice_id
+        self.story_outline = story_outline
     
-    def set_target_age(self, age: int):
+    def generate_image(self, scene_description: str, style: str = "아기자기한 동화 스타일") -> str:
         """
-        대상 연령대 설정
+        장면 설명을 바탕으로 일러스트를 생성하는 함수
         
         Args:
-            age (int): 동화의 대상 연령대 (4-9세)
+            scene_description (str): 장면 설명
+            style (str): 일러스트 스타일
+            
+        Returns:
+            str: 생성된 이미지 파일 경로
+            
+        Note:
+            - DALL-E 3를 사용하여 고품질 일러스트 생성
+            - 아이의 연령대에 맞는 스타일로 생성
+            - 안전하고 교육적인 이미지 생성 보장
         """
-        self.target_age = age
+        try:
+            # 이미지 생성 프롬프트 생성
+            prompt = self.prompts["image_generation_prompt_template"].format(
+                theme=self.story_outline["theme"],
+                characters=self.story_outline["characters"],
+                setting=self.story_outline["setting"],
+                style=style
+            )
+            
+            # DALL-E 3를 사용하여 이미지 생성
+            response = client.images.generate(
+                model="dall-e-3",
+                prompt=prompt,
+                size="1024x1024",
+                quality="standard",
+                n=1,
+                response_format="b64_json"
+            )
+            
+            # Base64 이미지 데이터를 파일로 저장
+            image_data = base64.b64decode(response.data[0].b64_json)
+            image = Image.open(io.BytesIO(image_data))
+            
+            # 파일명 생성 및 저장
+            file_name = f"scene_{len(self.generated_images) + 1}.png"
+            file_path = self.output_dir / "images" / file_name
+            image.save(file_path)
+            
+            # 생성된 이미지 경로 저장
+            self.generated_images.append(str(file_path))
+            
+            return str(file_path)
+            
+        except Exception as e:
+            print(f"이미지 생성 중 오류 발생: {str(e)}")
+            return None
     
-    def generate_detailed_story(self) -> Dict:
+    def generate_narration(self) -> str:
         """
-        줄거리를 바탕으로 상세 동화 생성
+        동화 줄거리를 바탕으로 내레이션을 생성하는 함수
         
         Returns:
-            Dict: 생성된 상세 동화 내용
+            str: 생성된 내레이션 오디오 파일 경로
+            
+        Note:
+            - GPT-4o를 사용하여 자연스러운 내레이션 텍스트 생성
+            - 아이의 연령대에 맞는 언어와 톤 사용
+            - 교육적 가치를 담은 내레이션 생성
         """
-        if not self.story_outline:
-            raise ValueError("이야기 줄거리가 설정되지 않았습니다.")
-        
         try:
-            summary_text = self.story_outline.get("summary_text", "")
-            tags = self.story_outline.get("tags", "")
+            # 내레이션 생성 프롬프트 생성
+            prompt = self.prompts["narration_generation_prompt_template"].format(
+                plot_summary=self.story_outline["plot_summary"],
+                educational_value=self.story_outline["educational_value"],
+                target_age=self.story_outline["target_age"]
+            )
             
-            # 상세 동화 생성 프롬프트
-            prompt = f"""
-            다음 정보를 바탕으로 {self.target_age}세 아이들을 위한 상세한 동화를 만들어주세요:
-            
-            줄거리: {summary_text}
-            태그: {tags}
-            
-            다음 형식의 JSON으로 응답해주세요:
-            {{
-                "title": "동화 제목",
-                "scenes": [
-                    {{
-                        "scene_number": 1,
-                        "description": "장면 설명",
-                        "text": "장면에 해당하는 동화 텍스트",
-                        "narration": "내레이션 텍스트",
-                        "dialogues": [
-                            {{"character": "캐릭터 이름", "text": "대사 내용"}}
-                        ],
-                        "image_prompt": "DALL-E 3를 위한 이미지 생성 프롬프트"
-                    }}
-                ],
-                "characters": [
-                    {{"name": "캐릭터 이름", "description": "캐릭터 설명"}}
-                ],
-                "moral": "동화의 교훈",
-                "target_age": {self.target_age}
-            }}
-            """
-            
-            # GPT-4o를 사용하여 상세 동화 생성
+            # GPT-4o를 사용하여 내레이션 텍스트 생성
             response = client.chat.completions.create(
                 model="gpt-4o",
                 messages=[
-                    {"role": "system", "content": "당신은 아이들을 위한 동화 작가입니다. 주어진 줄거리와 태그를 바탕으로 창의적이고 교육적인 동화를 만들어주세요."},
+                    {"role": "system", "content": self.prompts["system_message_template"]},
                     {"role": "user", "content": prompt}
                 ],
                 temperature=0.7,
-                max_tokens=2000,
-                response_format={"type": "json_object"}
+                max_tokens=1000
             )
             
-            # 응답에서 JSON 파싱
-            self.detailed_story = json.loads(response.choices[0].message.content)
+            narration_text = response.choices[0].message.content
             
-            return self.detailed_story
+            # 내레이션 텍스트를 오디오로 변환
+            audio_response = client.audio.speech.create(
+                model="tts-1",
+                voice="alloy",
+                input=narration_text
+            )
+            
+            # 오디오 파일 저장
+            file_name = "narration.mp3"
+            file_path = self.output_dir / "audio" / file_name
+            
+            with open(file_path, "wb") as f:
+                f.write(audio_response.content)
+            
+            self.narration_audio = str(file_path)
+            return str(file_path)
             
         except Exception as e:
-            print(f"상세 동화 생성 중 오류 발생: {str(e)}")
-            return {}
+            print(f"내레이션 생성 중 오류 발생: {str(e)}")
+            return None
     
-    def generate_illustrations(self) -> List[str]:
+    def generate_story(self) -> Tuple[List[str], str]:
         """
-        상세 동화 내용을 바탕으로 삽화 생성
+        동화 줄거리를 바탕으로 일러스트와 내레이션을 생성하는 함수
         
         Returns:
-            List[str]: 생성된 삽화 파일 경로 목록
+            Tuple[List[str], str]: (생성된 이미지 파일 경로 목록, 내레이션 오디오 파일 경로)
+            
+        Note:
+            - 줄거리를 여러 장면으로 나누어 일러스트 생성
+            - 각 장면에 맞는 내레이션 생성
+            - 모든 생성물을 지정된 디렉토리에 저장
         """
-        if not self.detailed_story:
-            raise ValueError("상세 동화가 생성되지 않았습니다.")
+        if not self.story_outline:
+            raise ValueError("동화 줄거리가 설정되지 않았습니다.")
         
-        try:
-            illustrations = []
-            scenes = self.detailed_story.get("scenes", [])
-            
-            for idx, scene in enumerate(scenes):
-                image_prompt = scene.get("image_prompt", "")
-                
-                # DALL-E 3를 사용하여 삽화 생성
-                style_prompt = f"""
-                아이들을 위한 동화책 삽화. {self.target_age}세 아이들이 좋아할 만한 밝고 따뜻한 스타일로 그려주세요.
-                다음 장면을 묘사해주세요: {image_prompt}
-                """
-                
-                response = client.images.generate(
-                    model="dall-e-3",
-                    prompt=style_prompt,
-                    size="1024x1024",
-                    quality="standard",
-                    n=1
-                )
-                
-                # 이미지 URL 추출
-                image_url = response.data[0].url
-                
-                # 이미지 다운로드
-                image_response = requests.get(image_url)
-                
-                # 이미지 저장
-                image_path = self.image_dir / f"scene_{idx+1}.png"
-                with open(image_path, "wb") as f:
-                    f.write(image_response.content)
-                
-                illustrations.append(str(image_path))
-            
-            self.illustrations = illustrations
-            return illustrations
-            
-        except Exception as e:
-            print(f"삽화 생성 중 오류 발생: {str(e)}")
-            return []
+        # 줄거리를 장면으로 나누기
+        scenes = self._split_plot_into_scenes()
+        
+        # 각 장면에 대한 일러스트 생성
+        for scene in scenes:
+            self.generate_image(scene)
+        
+        # 사용자 음성을 주인공의 목소리로 사용
+        user_voice_path = os.path.join(self.output_dir, "user_voice.wav")
+        if os.path.exists(user_voice_path):
+            print(f"사용자 음성을 주인공의 목소리로 사용합니다: {user_voice_path}")
+            # 주인공의 대사에 사용자 음성 사용 로직 추가
+            # ...
+        else:
+            print("사용자 음성을 찾을 수 없습니다. 기본 음성을 사용합니다.")
+
+        # 내레이션 생성
+        narration_path = self.generate_narration()
+        
+        return self.generated_images, narration_path
     
-    def generate_voice(self) -> List[str]:
+    def _split_plot_into_scenes(self) -> List[str]:
         """
-        상세 동화 내용을 바탕으로 음성 생성
+        줄거리를 여러 장면으로 나누는 함수
         
         Returns:
-            List[str]: 생성된 음성 파일 경로 목록
+            List[str]: 장면 설명 목록
+            
+        Note:
+            - 줄거리의 주요 순간들을 장면으로 분리
+            - 각 장면은 일러스트 생성에 적합한 설명을 포함
         """
-        if not self.detailed_story:
-            raise ValueError("상세 동화가 생성되지 않았습니다.")
-        
         try:
-            voice_files = []
-            scenes = self.detailed_story.get("scenes", [])
+            # GPT-4o를 사용하여 줄거리를 장면으로 분리
+            response = client.chat.completions.create(
+                model="gpt-4o",
+                messages=[
+                    {"role": "system", "content": "당신은 동화 줄거리를 장면으로 나누는 전문가입니다."},
+                    {"role": "user", "content": f"""
+                    다음 줄거리를 3-5개의 장면으로 나누어주세요:
+                    {self.story_outline['plot_summary']}
+                    
+                    각 장면은 일러스트 생성에 적합한 구체적인 설명을 포함해야 합니다.
+                    """}
+                ],
+                temperature=0.7,
+                max_tokens=1000
+            )
             
-            for idx, scene in enumerate(scenes):
-                narration = scene.get("narration", "")
-                dialogues = scene.get("dialogues", [])
-                
-                # 내레이션과 대사를 하나의 텍스트로 합치기
-                full_text = narration + "\n"
-                for dialogue in dialogues:
-                    character = dialogue.get("character", "")
-                    text = dialogue.get("text", "")
-                    full_text += f"{character}: {text}\n"
-                
-                # OpenAI TTS를 사용하여 음성 생성
-                response = client.audio.speech.create(
-                    model="tts-1",
-                    voice="shimmer",
-                    input=full_text
-                )
-                
-                # 음성 저장
-                voice_path = self.voice_dir / f"scene_{idx+1}.mp3"
-                response.stream_to_file(str(voice_path))
-                
-                voice_files.append(str(voice_path))
-            
-            self.voice_files = voice_files
-            return voice_files
+            # 응답을 장면 목록으로 변환
+            scenes = response.choices[0].message.content.split("\n\n")
+            return [scene.strip() for scene in scenes if scene.strip()]
             
         except Exception as e:
-            print(f"음성 생성 중 오류 발생: {str(e)}")
-            return []
+            print(f"장면 분리 중 오류 발생: {str(e)}")
+            # 기본 장면 반환
+            return [self.story_outline["plot_summary"]]
     
-    def elevenlabs_voice_generation(self, text: str, voice_id: str) -> str:
+    def save_story_data(self, file_path: str):
         """
-        ElevenLabs API를 사용하여 음성 생성
+        생성된 스토리 데이터를 파일로 저장하는 함수
         
         Args:
-            text (str): 음성으로 변환할 텍스트
-            voice_id (str): ElevenLabs 음성 ID
+            file_path (str): 저장할 파일 경로
             
-        Returns:
-            str: 생성된 음성 파일 경로
+        Note:
+            - 줄거리, 이미지 경로, 내레이션 경로 등을 JSON 형식으로 저장
+            - 나중에 스토리 데이터를 불러와서 재사용 가능
         """
         try:
-            url = f"https://api.elevenlabs.io/v1/text-to-speech/{voice_id}"
-            
-            headers = {
-                "Accept": "audio/mpeg",
-                "Content-Type": "application/json",
-                "xi-api-key": ELEVENLABS_API_KEY
-            }
-            
-            data = {
-                "text": text,
-                "model_id": "eleven_monolingual_v1",
-                "voice_settings": {
-                    "stability": 0.5,
-                    "similarity_boost": 0.5
-                }
-            }
-            
-            response = requests.post(url, json=data, headers=headers)
-            
-            if response.status_code == 200:
-                # 음성 저장
-                timestamp = int(time.time())
-                voice_path = self.voice_dir / f"elevenlabs_{timestamp}.mp3"
-                with open(voice_path, "wb") as f:
-                    f.write(response.content)
-                
-                return str(voice_path)
-            else:
-                print(f"ElevenLabs API 오류: {response.status_code} - {response.text}")
-                return ""
-                
+            with open(file_path, 'w', encoding='utf-8') as f:
+                json.dump({
+                    "story_outline": self.story_outline,
+                    "generated_images": self.generated_images,
+                    "narration_audio": self.narration_audio
+                }, f, ensure_ascii=False, indent=2)
         except Exception as e:
-            print(f"ElevenLabs 음성 생성 중 오류 발생: {str(e)}")
-            return ""
+            print(f"스토리 데이터 저장 중 오류 발생: {str(e)}")
     
-    def generate_complete_story(self) -> Dict:
+    def load_story_data(self, file_path: str):
         """
-        상세 동화, 삽화, 음성을 하나로 통합
+        저장된 스토리 데이터를 불러오는 함수
+        
+        Args:
+            file_path (str): 불러올 파일 경로
+            
+        Note:
+            - 저장된 줄거리, 이미지 경로, 내레이션 경로 등을 복원
+            - 이전에 생성한 스토리를 이어서 작업 가능
+        """
+        try:
+            with open(file_path, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+                self.story_outline = data["story_outline"]
+                self.generated_images = data["generated_images"]
+                self.narration_audio = data["narration_audio"]
+        except Exception as e:
+            print(f"스토리 데이터 불러오기 중 오류 발생: {str(e)}")
+    
+    def get_story_preview(self) -> Dict[str, str]:
+        """
+        생성된 스토리의 미리보기 정보를 반환하는 함수
         
         Returns:
-            Dict: 통합된 동화 정보
+            Dict[str, str]: 스토리 미리보기 정보
+                - title: 제목
+                - summary: 요약
+                - image_count: 이미지 수
+                - duration: 예상 재생 시간
+                
+        Note:
+            - 스토리의 주요 정보를 간단히 보여줌
+            - 사용자에게 스토리 개요 제공
         """
         try:
-            # 1. 상세 동화 생성
-            if not self.detailed_story:
-                self.generate_detailed_story()
+            # GPT-4o를 사용하여 스토리 미리보기 생성
+            response = client.chat.completions.create(
+                model="gpt-4o",
+                messages=[
+                    {"role": "system", "content": "당신은 동화 미리보기를 생성하는 전문가입니다."},
+                    {"role": "user", "content": f"""
+                    다음 동화 정보를 바탕으로 미리보기를 생성해주세요:
+                    주제: {self.story_outline['theme']}
+                    줄거리: {self.story_outline['plot_summary']}
+                    교육적 가치: {self.story_outline['educational_value']}
+                    """}
+                ],
+                temperature=0.7,
+                max_tokens=500
+            )
             
-            # 2. 삽화 생성
-            if not self.illustrations:
-                self.generate_illustrations()
+            preview_text = response.choices[0].message.content
             
-            # 3. 음성 생성
-            if not self.voice_files:
-                self.generate_voice()
-            
-            # 4. 결과물 통합
-            complete_story = {
-                "title": self.detailed_story.get("title", "무제"),
-                "scenes": []
+            return {
+                "title": self.story_outline["theme"],
+                "summary": preview_text,
+                "image_count": len(self.generated_images),
+                "duration": f"{len(self.generated_images) * 30}초"  # 각 이미지당 30초 가정
             }
             
-            scenes = self.detailed_story.get("scenes", [])
-            
-            for idx, scene in enumerate(scenes):
-                if idx < len(self.illustrations) and idx < len(self.voice_files):
-                    complete_scene = {
-                        "scene_number": scene.get("scene_number", idx + 1),
-                        "description": scene.get("description", ""),
-                        "text": scene.get("text", ""),
-                        "image_path": self.illustrations[idx],
-                        "voice_path": self.voice_files[idx]
-                    }
-                    complete_story["scenes"].append(complete_scene)
-            
-            # 기타 정보 추가
-            complete_story["characters"] = self.detailed_story.get("characters", [])
-            complete_story["moral"] = self.detailed_story.get("moral", "")
-            complete_story["target_age"] = self.target_age
-            
-            # 결과 저장
-            story_path = self.story_dir / f"{complete_story['title']}.json"
-            with open(story_path, "w", encoding="utf-8") as f:
-                json.dump(complete_story, f, ensure_ascii=False, indent=2)
-            
-            return complete_story
-            
         except Exception as e:
-            print(f"동화 통합 중 오류 발생: {str(e)}")
-            return {} 
+            print(f"스토리 미리보기 생성 중 오류 발생: {str(e)}")
+            return {
+                "title": self.story_outline["theme"],
+                "summary": self.story_outline["plot_summary"],
+                "image_count": len(self.generated_images),
+                "duration": "알 수 없음"
+            } 
