@@ -12,7 +12,7 @@
 - **모델**: `gpt-4o-mini`
 - **기술 요소**:
   - 실시간 음성 스트리밍 수신 (WebSocket 기반)
-  - `RNNoise`로 노이즈 제도
+  - `RNNoise`로 노이즈 제거
   - `Whisper`를 이용한 음성 → 텍스트 변환
   - GPT-4o-mini로 대화 요약 및 줄거리 생성
   - `ElevenLabs` API를 통해 음성 클로닝 요청

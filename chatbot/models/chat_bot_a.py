@@ -31,7 +31,7 @@ class StoryCollectionChatBot:
         self.child_name = None         # 아이의 이름
         self.interests = []            # 아이의 관심사
         
-        self.chatbot_name = "흠"
+        self.chatbot_name = "꼬기"
         
         # 프롬프트 로드
         self.prompts = self._load_prompts()   
