@@ -1,16 +1,9 @@
-import openai
 from openai import OpenAI
 from typing import List, Dict, Optional
 from dotenv import load_dotenv
 import os
 import json
-import speech_recognition as sr
-import pyttsx3
-import numpy as np
 import random
-import sounddevice as sd
-import wavio
-import rnnoise
 from pathlib import Path
 
 # 환경 변수 설정
@@ -26,13 +19,9 @@ class StoryCollectionChatBot:
         age_group (int): 아이의 연령대 (4-9세)
         child_name (str): 아이의 이름
         interests (List[str]): 아이의 관심사 목록
-        recognizer (sr.Recognizer): 음성 인식기
-        engine (pyttsx3.Engine): 음성 합성 엔진
-        is_listening (bool): 음성 인식 상태
         chatbot_name (str): 챗봇의 이름
         prompts (Dict): JSON 파일에서 로드한 프롬프트
         story_outline (Dict): 수집된 이야기 줄거리
-        noise_filter (rnnoise.Denoiser): RNNoise 노이즈 필터링 객체
     """
     
     def __init__(self):
@@ -42,25 +31,10 @@ class StoryCollectionChatBot:
         self.child_name = None         # 아이의 이름
         self.interests = []            # 아이의 관심사
         
-        # 음성 관련 초기화
-        self.recognizer = sr.Recognizer()
-        self.engine = pyttsx3.init()
-        self.is_listening = False
-        
-        # 음성 설정
-        self.engine.setProperty('rate', 150)    # 말하기 속도
-        self.engine.setProperty('volume', 0.9)  # 볼륨
-        
-        # 음성 인식 설정
-        with sr.Microphone() as source:
-            self.recognizer.adjust_for_ambient_noise(source)
-            self.recognizer.dynamic_energy_threshold = True
-            self.recognizer.energy_threshold = 4000  # 음성 감지 임계값
-        
-        self.chatbot_name = "꼬꼬"
+        self.chatbot_name = "흠"
         
         # 프롬프트 로드
-        self.load_prompts()
+        self.prompts = self._load_prompts()   
         
         # 인사말 템플릿
         self.greeting_templates = [
@@ -83,28 +57,172 @@ class StoryCollectionChatBot:
         
         # 이야기 줄거리 초기화
         self.story_outline = None
-        
-        # RNNoise 노이즈 필터링 초기화
-        try:
-            self.noise_filter = rnnoise.Denoiser()
-            print("RNNoise 노이즈 필터링이 초기화되었습니다.")
-        except Exception as e:
-            print(f"RNNoise 초기화 중 오류 발생: {str(e)}")
-            self.noise_filter = None
     
-    def load_prompts(self):
-        """JSON 파일에서 프롬프트를 로드하는 함수"""
+    def _load_prompts(self) -> Dict:
+        """프롬프트 JSON 파일을 로드하는 메서드"""
         try:
-            with open('data/prompts/chatbot_prompts.json', 'r', encoding='utf-8') as f:
+            current_dir = os.path.dirname(os.path.abspath(__file__))
+            prompts_path = os.path.join(current_dir, '..', 'data', 'prompts', 'chatbot_prompts.json')
+            
+            with open(prompts_path, 'r', encoding='utf-8') as f:
                 prompts = json.load(f)
-                self.prompts = prompts['chatbot_a']
+                return prompts['chatbot_a']
         except Exception as e:
-            print(f"프롬프트 로드 중 오류 발생: {str(e)}")
-            # 기본 프롬프트 설정
-            self.prompts = {
-                "system_message_template": "당신은 {age}세 아이들과 대화하며 동화 줄거리를 수집하는 친근한 AI 챗봇 {chatbot_name}입니다.",
-                "story_collection_prompt_template": "주제: {theme}\n캐릭터: {characters}\n배경: {setting}\n줄거리: {plot_summary}\n교육적 가치: {educational_value}\n대상 연령: {target_age}"
-            }
+            print(f"프롬프트 로드 중 오류 발생: {e}")
+            return {}
+    
+    def _has_final_consonant(self, char: str) -> bool:
+        """
+        한글 문자의 마지막 음절이 받침을 갖는지 확인하는 메서드
+        
+        Args:
+            char (str): 확인할 한글 문자
+            
+        Returns:
+            bool: 받침이 있으면 True, 없으면 False
+        """
+        if not char:
+            return False
+            
+        # 마지막 문자 추출
+        last_char = char[-1]
+        
+        # 한글이 아닌 경우 기본값 반환
+        if not ord('가') <= ord(last_char) <= ord('힣'):
+            return False
+            
+        # 받침 유무 확인
+        return (ord(last_char) - 0xAC00) % 28 > 0
+    
+    def _get_josa(self, word: str, josa_type: str) -> str:
+        """
+        단어에 맞는 조사를 반환하는 메서드
+        
+        Args:
+            word (str): 조사를 붙일 단어
+            josa_type (str): 조사 유형 ('은/는', '이/가', '을/를', '와/과', '으로/로')
+            
+        Returns:
+            str: 선택된 조사
+        """
+        has_final = self._has_final_consonant(word)
+        
+        josa_map = {
+            '은/는': '은' if has_final else '는',
+            '이/가': '이' if has_final else '가',
+            '을/를': '을' if has_final else '를',
+            '와/과': '과' if has_final else '와',
+            '으로/로': '으로' if has_final else '로'
+        }
+        
+        return josa_map.get(josa_type, '')
+    
+    def format_with_josa(self, word: str, josa_type: str) -> str:
+        """
+        단어에 조사를 붙여 반환하는 메서드
+        
+        Args:
+            word (str): 조사를 붙일 단어
+            josa_type (str): 조사 유형
+            
+        Returns:
+            str: 조사가 붙은 단어
+        """
+        josa = self._get_josa(word, josa_type)
+        return f"{word}{josa}"
+    
+    def get_system_message(self) -> str:
+        """시스템 메시지 반환"""
+        return self.prompts.get('system_message_template', '')
+    
+    def get_greeting(self, child_name: Optional[str] = None) -> str:
+        """
+        랜덤한 인사말 반환
+        
+        Args:
+            child_name (Optional[str]): 아이의 이름
+            
+        Returns:
+            str: 인사말
+        """
+        greetings = self.prompts.get('greeting_templates', [])
+        greeting = random.choice(greetings) if greetings else "안녕하세요!"
+        
+        if child_name:
+            # 이름에 맞는 조사 선택
+            josa = self._get_josa(child_name, '은/는')
+            greeting = greeting.replace("{name}", f"{child_name}{josa}")
+            
+        return greeting
+    
+    def get_follow_up_question(self, child_name: Optional[str] = None) -> str:
+        """
+        랜덤한 후속 질문 반환
+        
+        Args:
+            child_name (Optional[str]): 아이의 이름
+            
+        Returns:
+            str: 후속 질문
+        """
+        questions = self.prompts.get('follow_up_questions', [])
+        question = random.choice(questions) if questions else "더 자세히 이야기해 주세요."
+        
+        if child_name:
+            # 이름에 맞는 조사 선택
+            josa = self._get_josa(child_name, '이/가')
+            question = question.replace("{name}", f"{child_name}{josa}")
+            
+        return question
+    
+    def get_encouragement(self, child_name: Optional[str] = None) -> str:
+        """
+        랜덤한 격려 문구 반환
+        
+        Args:
+            child_name (Optional[str]): 아이의 이름
+            
+        Returns:
+            str: 격려 문구
+        """
+        encouragements = self.prompts.get('encouragement_phrases', [])
+        encouragement = random.choice(encouragements) if encouragements else "좋아요!"
+        
+        if child_name:
+            # 이름에 맞는 조사 선택
+            josa = self._get_josa(child_name, '이/가')
+            encouragement = encouragement.replace("{name}", f"{child_name}{josa}")
+            
+        return encouragement
+    
+    def get_age_appropriate_language(self, age: int) -> Dict:
+        """연령대에 맞는 언어 설정 반환"""
+        age_ranges = self.prompts.get('age_appropriate_language', {})
+        
+        if 4 <= age <= 5:
+            return age_ranges.get('4-5', {})
+        elif 6 <= age <= 7:
+            return age_ranges.get('6-7', {})
+        elif 8 <= age <= 9:
+            return age_ranges.get('8-9', {})
+        else:
+            return {}
+    
+    def format_story_collection_prompt(self, **kwargs) -> str:
+        """스토리 수집 프롬프트 포맷팅"""
+        template = self.prompts.get('story_collection_prompt_template', '')
+        return template.format(**kwargs)
+    
+    def add_to_conversation(self, role: str, content: str):
+        """대화 내역에 메시지 추가"""
+        self.conversation_history.append({
+            "role": role,
+            "content": content
+        })
+    
+    def get_conversation_history(self) -> List[Dict]:
+        """대화 내역 반환"""
+        return self.conversation_history
     
     def get_korean_postposition(self, name: str) -> str:
         """
@@ -115,10 +233,6 @@ class StoryCollectionChatBot:
             
         Returns:
             str: 이름에 맞는 조사 (이/가, 을/를, 와/과, 의)
-            
-        Note:
-            - 이름의 마지막 글자에 따라 적절한 조사를 선택
-            - 받침 유무에 따라 다른 조사 사용
         """
         # 이름이 비어있는 경우 처리
         if not name:
@@ -132,8 +246,6 @@ class StoryCollectionChatBot:
             return "와"
             
         # 받침 유무 확인 (Unicode 활용)
-        # 한글 유니코드에서 받침은 (글자코드 - 0xAC00) % 28로 계산
-        # 0이면 받침 없음, 1 이상이면 받침 있음
         has_jongseong = (ord(last_char) - 0xAC00) % 28 > 0
         
         # 조사 선택
@@ -177,25 +289,8 @@ class StoryCollectionChatBot:
             chatbot_name=chatbot_name
         )
         
-        self.add_message("assistant", greeting)
+        self.add_to_conversation("assistant", greeting)
         return greeting
-    
-    def add_message(self, role: str, content: str):
-        """
-        대화 내역에 새로운 메시지를 추가하는 함수
-        
-        Args:
-            role (str): 메시지 발신자 역할 ('user' 또는 'assistant')
-            content (str): 메시지 내용
-            
-        Note:
-            - 대화 내역을 저장하여 문맥을 유지
-            - GPT-4o-mini가 이전 대화 내용을 참고하여 응답할 수 있도록 함
-        """
-        self.conversation_history.append({
-            "role": role,
-            "content": content
-        })
     
     def get_response(self, user_input: str) -> str:
         """
@@ -206,15 +301,10 @@ class StoryCollectionChatBot:
             
         Returns:
             str: AI가 생성한 응답 메시지
-            
-        Note:
-            - GPT-4o-mini를 사용하여 문맥을 고려한 응답 생성
-            - 대화 내역을 포함하여 일관된 대화 유지
-            - 에러 발생 시 사용자 친화적인 에러 메시지 반환
         """
         try:
             # 사용자 메시지 추가
-            self.add_message("user", user_input)
+            self.add_to_conversation("user", user_input)
             
             # GPT-4o-mini를 사용하여 응답 생성
             response = client.chat.completions.create(
@@ -229,7 +319,7 @@ class StoryCollectionChatBot:
             
             # 응답 추출 및 저장
             assistant_response = response.choices[0].message.content
-            self.add_message("assistant", assistant_response)
+            self.add_to_conversation("assistant", assistant_response)
             
             return assistant_response
             
@@ -237,96 +327,62 @@ class StoryCollectionChatBot:
             print(f"응답 생성 중 오류 발생: {str(e)}")
             return "미안해. 지금은 잠시 후 다시 시도해주세요."
     
-    def record_voice(self, duration: int, file_path: str):
-        """
-        사용자의 음성을 녹음하여 파일로 저장
-        
-        Args:
-            duration (int): 녹음 시간 (초)
-            file_path (str): 저장할 파일 경로
-        """
-        try:
-            print("음성 녹음을 시작합니다...")
-            fs = 44100  # 샘플링 주파수
-            recording = sd.rec(int(duration * fs), samplerate=fs, channels=2)
-            sd.wait()  # 녹음 완료 대기
-            
-            # RNNoise를 사용한 노이즈 필터링
-            if self.noise_filter:
-                # 스테레오를 모노로 변환
-                mono_recording = np.mean(recording, axis=1)
-                
-                # RNNoise로 노이즈 필터링
-                filtered_audio = self.noise_filter.process(mono_recording)
-                
-                # 필터링된 오디오를 스테레오로 변환
-                filtered_stereo = np.column_stack((filtered_audio, filtered_audio))
-                
-                # 필터링된 오디오 저장
-                wavio.write(file_path, filtered_stereo, fs, sampwidth=2)
-            else:
-                # 필터링 없이 저장
-                wavio.write(file_path, recording, fs, sampwidth=2)
-                
-            print(f"음성이 {file_path}에 저장되었습니다.")
-        except Exception as e:
-            print(f"음성 녹음 중 오류 발생: {str(e)}")
-    
     def collect_story_outline(self) -> Dict:
         """
-        대화 내용을 바탕으로 동화 줄거리를 수집하는 함수
+        대화 내용을 바탕으로 동화 줄거리 요약 및 태그를 추출하는 함수
         
         Returns:
-            Dict: 수집된 동화 줄거리 정보
-                - theme: 주제
-                - characters: 주요 캐릭터
-                - setting: 배경 설정
-                - plot_summary: 간략한 줄거리
-                - educational_value: 교육적 가치
-                - target_age: 적합한 연령대
-                
-        Note:
-            - 아이의 연령대와 관심사를 고려한 줄거리 수집
-            - 교육적 가치가 있는 줄거리 선정
-            - JSON 형식으로 구조화된 응답 반환
+            Dict: 수집된 정보 (summary_text, tags)
         """
         try:
-            # 대화 내용을 바탕으로 줄거리 수집 프롬프트 생성
-            prompt = self.prompts["story_collection_prompt_template"].format(
-                child_name=self.child_name,
-                age_group=self.age_group,
-                interests=", ".join(self.interests)
-            )
+            # 대화 내용을 바탕으로 줄거리 및 태그 추출 프롬프트 생성
+            prompt = f"""
+            아이 정보:
+            - 이름: {self.child_name}
+            - 나이: {self.age_group}
+            - 관심사: {', '.join(self.interests)}
+            
+            대화 내용:
+            {self.conversation_history}
+            
+            위 정보를 바탕으로 다음 두 가지를 추출해주세요:
+            1.  간단한 동화 줄거리 (summary_text)
+            2.  이야기와 관련된 핵심 태그 (tags) - 쉼표로 구분된 문자열 형태 (예: 공룡,모험,친구)
+            
+            출력 형식 (JSON):
+            {{
+                "summary_text": "[생성된 줄거리]",
+                "tags": "[추출된 태그]"
+            }}
+            """
             
             response = client.chat.completions.create(
                 model="gpt-4o-mini",
                 messages=[
-                    {"role": "system", "content": "당신은 동화 줄거리를 수집하는 전문가입니다."},
+                    {"role": "system", "content": "당신은 대화 내용을 바탕으로 동화 줄거리 요약과 관련 태그를 추출하는 전문가입니다."},
                     {"role": "user", "content": prompt}
                 ],
                 temperature=0.7,
-                max_tokens=1000,
-                response_format={"type": "json_object"}
+                max_tokens=600,
+                response_format={"type": "json_object"} # JSON 형식으로 응답 요청
             )
             
-            # 응답을 JSON 형식으로 파싱
-            story_outline = json.loads(response.choices[0].message.content)
-            self.story_outline = story_outline
+            # 응답에서 JSON 파싱
+            result = json.loads(response.choices[0].message.content)
             
-            # 음성 녹음 추가
-            self.record_voice(duration=10, file_path="output/user_voice.wav")
+            # 관심사를 태그에 추가 (선택 사항)
+            # existing_tags = set(result.get("tags", "").split(','))
+            # existing_tags.update(self.interests)
+            # result["tags"] = ",".join(filter(None, existing_tags))
             
-            return story_outline
+            return result
             
         except Exception as e:
-            print(f"동화 줄거리 수집 중 오류 발생: {str(e)}")
+            print(f"동화 줄거리 및 태그 추출 중 오류 발생: {str(e)}")
+            # 기본값 반환 시 아이의 관심사를 태그로 사용
             return {
-                "theme": "우정과 용기",
-                "characters": ["주인공 아이", "친구"],
-                "setting": "학교와 공원",
-                "plot_summary": "주인공 아이가 친구와 함께 모험을 하며 용기와 우정의 가치를 배우는 이야기입니다.",
-                "educational_value": "협동과 용기의 가치를 배울 수 있습니다.",
-                "target_age": self.age_group
+                "summary_text": "주인공이 친구와 함께 모험을 하며 용기와 우정의 가치를 배우는 이야기입니다.",
+                "tags": ",".join(self.interests) if self.interests else "모험,우정"
             }
     
     def get_conversation_summary(self) -> str:
@@ -335,11 +391,6 @@ class StoryCollectionChatBot:
         
         Returns:
             str: 대화 내용 요약
-            
-        Note:
-            - 주요 토픽, 관심사, 학습 순간 등을 요약
-            - 동화 줄거리 도출을 위한 인사이트 제공
-            - 대화 분석을 통한 교육적 가치 추출
         """
         try:
             # 대화 내용 요약 프롬프트 생성
@@ -374,10 +425,6 @@ class StoryCollectionChatBot:
         
         Args:
             file_path (str): 저장할 파일 경로
-            
-        Note:
-            - 아이 정보, 대화 내역, 요약을 JSON 형식으로 저장
-            - 나중에 대화 내용을 불러와서 분석하거나 이어서 대화 가능
         """
         try:
             with open(file_path, 'w', encoding='utf-8') as f:
@@ -400,10 +447,6 @@ class StoryCollectionChatBot:
         
         Args:
             file_path (str): 불러올 파일 경로
-            
-        Note:
-            - 저장된 아이 정보와 대화 내역을 복원
-            - 이전 대화를 이어서 진행할 수 있도록 함
         """
         try:
             with open(file_path, 'r', encoding='utf-8') as f:
@@ -414,102 +457,4 @@ class StoryCollectionChatBot:
                 self.conversation_history = data["conversation"]
                 self.story_outline = data["story_outline"]
         except Exception as e:
-            print(f"대화 불러오기 중 오류 발생: {str(e)}")
-    
-    def speak(self, text: str):
-        """
-        텍스트를 음성으로 변환하여 출력하는 함수
-        
-        Args:
-            text (str): 변환할 텍스트
-            
-        Note:
-            - pyttsx3를 사용하여 텍스트를 음성으로 변환
-            - 아이의 연령대에 맞는 속도와 톤으로 출력
-        """
-        try:
-            # 연령대에 따른 음성 속도 조정
-            if self.age_group <= 5:
-                self.engine.setProperty('rate', 130)  # 더 천천히
-            elif self.age_group <= 8:
-                self.engine.setProperty('rate', 150)  # 중간 속도
-            else:
-                self.engine.setProperty('rate', 170)  # 더 빠르게
-            
-            self.engine.say(text)
-            self.engine.runAndWait()
-        except Exception as e:
-            print(f"음성 합성 중 오류 발생: {str(e)}")
-    
-    def listen(self) -> Optional[str]:
-        """
-        마이크로 입력된 음성을 텍스트로 변환하는 함수
-        
-        Returns:
-            Optional[str]: 변환된 텍스트 또는 None
-            
-        Note:
-            - 음성 인식 실패 시 None 반환
-            - 배경 소음 조정 및 에러 처리 포함
-        """
-        try:
-            with sr.Microphone() as source:
-                print("듣고 있어요...")
-                audio = self.recognizer.listen(source, timeout=5, phrase_time_limit=10)
-                
-                # Google Speech Recognition 사용
-                text = self.recognizer.recognize_google(audio, language='ko-KR')
-                print(f"인식된 텍스트: {text}")
-                return text
-                
-        except sr.WaitTimeoutError:
-            print("음성이 감지되지 않았습니다.")
-            return None
-        except sr.UnknownValueError:
-            print("음성을 인식할 수 없습니다.")
-            return None
-        except sr.RequestError as e:
-            print(f"음성 인식 서비스 오류: {str(e)}")
-            return None
-        except Exception as e:
-            print(f"음성 인식 중 오류 발생: {str(e)}")
-            return None
-    
-    def start_voice_chat(self):
-        """
-        음성 대화를 시작하는 함수
-        
-        Note:
-            - 음성 인식 및 응답을 반복적으로 수행
-            - '종료' 또는 '끝내기' 입력 시 대화 종료
-        """
-        self.is_listening = True
-        print(f"{self.chatbot_name}: 안녕하세요! {self.child_name}와(과) 대화를 시작할게요.")
-        self.speak(f"안녕하세요! {self.child_name}와(과) 대화를 시작할게요.")
-        
-        while self.is_listening:
-            # 음성 입력 받기
-            user_input = self.listen()
-            
-            if user_input is None:
-                continue
-                
-            # 종료 명령 확인
-            if user_input in ['종료', '끝내기', '그만']:
-                self.speak("오늘도 즐거운 대화 감사합니다. 다음에 또 만나요!")
-                self.is_listening = False
-                break
-            
-            # AI 응답 생성 및 음성 출력
-            response = self.get_response(user_input)
-            self.speak(response)
-    
-    def stop_voice_chat(self):
-        """
-        음성 대화를 종료하는 함수
-        
-        Note:
-            - 음성 인식 상태를 False로 변경하여 대화 종료
-        """
-        self.is_listening = False
-        print("음성 대화가 종료되었습니다.") 
+            print(f"대화 불러오기 중 오류 발생: {str(e)}") 
