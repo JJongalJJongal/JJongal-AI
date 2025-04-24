@@ -1,6 +1,7 @@
 from chatbot.models.chat_bot import ChildChatBot
 import argparse
 
+# 단위 테스트용 test_chatbot.py
 def test_text_chat():
     """텍스트 모드로 챗봇 테스트"""
     chatbot = ChildChatBot()

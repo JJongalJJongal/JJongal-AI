@@ -1,0 +1,222 @@
+#!/usr/bin/env python3
+"""
+부기와 꼬기 - 아동 상호작용 챗봇 시스템
+CLI 인터페이스
+
+부기(Chat-bot A): 아이와 대화하며 관심사를 파악하고 이야기 주제 추출
+꼬기(Chat-bot B): 추출된 주제를 바탕으로 상세 동화와 삽화, 음성 생성
+"""
+
+import os
+import sys
+import time
+import argparse
+import json
+from pathlib import Path
+
+from models.chat_bot_a import StoryCollectionChatBot
+from models.chat_bot_b import StoryGenerationChatBot
+
+class ChatBotSystem:
+    """부기와 꼬기 챗봇 시스템 통합 클래스"""
+    
+    def __init__(self):
+        self.bugi = StoryCollectionChatBot()  # 부기 (Chat-bot A)
+        self.kkogi = StoryGenerationChatBot()  # 꼬기 (Chat-bot B)
+        self.conversation_history = []
+        self.child_info = {
+            "name": "",
+            "age": 0,
+            "interests": []
+        }
+        self.output_dir = Path("output")
+        self.output_dir.mkdir(exist_ok=True)
+        
+    def clear_screen(self):
+        """터미널 화면 지우기"""
+        os.system('cls' if os.name == 'nt' else 'clear')
+        
+    def print_header(self):
+        """프로그램 헤더 출력"""
+        self.clear_screen()
+        print("=" * 60)
+        print("        부기와 꼬기 - 아동 상호작용 챗봇 시스템        ")
+        print("=" * 60)
+        print("부기: 아이와 대화하는 챗봇")
+        print("꼬기: 이야기와 삽화를 생성하는 챗봇")
+        print("-" * 60)
+        
+    def get_child_info(self):
+        """아이 정보 입력받기"""
+        self.print_header()
+        print("아이의 정보를 입력해주세요.\n")
+        
+        # 이름 입력
+        self.child_info["name"] = input("아이의 이름: ").strip()
+        
+        # 나이 입력
+        while True:
+            try:
+                age_input = input("아이의 나이: ").strip()
+                self.child_info["age"] = int(age_input)
+                if self.child_info["age"] < 3 or self.child_info["age"] > 12:
+                    print("3세에서 12세 사이의 나이를 입력해주세요.")
+                    continue
+                break
+            except ValueError:
+                print("숫자로 입력해주세요.")
+        
+        # 관심사 입력
+        print("\n아이의 관심사를 쉼표로 구분하여 입력해주세요.")
+        print("예: 공룡, 우주, 로봇, 동물")
+        interests_input = input("관심사: ").strip()
+        if interests_input:
+            self.child_info["interests"] = [item.strip() for item in interests_input.split(",")]
+        
+        return self.child_info
+    
+    def chat_with_bugi(self):
+        """부기(Chat-bot A)와 대화하기"""
+        self.print_header()
+        print(f"{self.child_info['name']}님, 부기와 대화를 시작합니다!")
+        print("대화를 종료하려면 '끝'이라고 입력하세요.\n")
+        
+        # 대화 초기화
+        greeting = self.bugi.initialize_chat(
+            child_name=self.child_info["name"],
+            age=self.child_info["age"],
+            interests=self.child_info["interests"],
+            chatbot_name="부기"
+        )
+        
+        print(f"부기: {greeting}")
+        print("-" * 60)
+        
+        # 대화 시작
+        while True:
+            user_input = input(f"{self.child_info['name']}: ").strip()
+            
+            if user_input.lower() == "끝":
+                print("\n부기: 재미있는 이야기를 만들어볼게요! 잠시만 기다려주세요...")
+                break
+                
+            response = self.bugi.get_response(user_input)
+            print(f"부기: {response}")
+            print("-" * 60)
+            
+            # 대화 기록 저장
+            self.conversation_history.append({
+                "user": user_input,
+                "bugi": response
+            })
+    
+    def generate_story(self):
+        """부기의 대화 내용을 바탕으로 꼬기가 이야기 생성"""
+        self.print_header()
+        print("대화를 바탕으로 이야기를 만들고 있어요...\n")
+        
+        # 부기가 이야기 주제 추출
+        try:
+            story_outline = self.bugi.suggest_story_theme()
+            
+            if not story_outline or "summary_text" not in story_outline:
+                print("이야기 주제를 추출하지 못했습니다. 더 많은 대화가 필요합니다.")
+                return False
+                
+            print("=== 부기가 추출한 이야기 주제 ===")
+            print(f"줄거리: {story_outline.get('summary_text', '')}")
+            print(f"태그: {', '.join(story_outline.get('tags', []))}")
+            print("-" * 60)
+            print("이 주제로 이야기를 만들까요? (y/n)")
+            
+            if input().lower() != 'y':
+                print("이야기 생성을 취소합니다.")
+                return False
+                
+            # 꼬기에게 이야기 주제 전달
+            self.kkogi.set_story_outline(story_outline)
+            self.kkogi.set_target_age(self.child_info["age"])
+            
+            print("\n꼬기가 상세 이야기를 만들고 있어요...")
+            print("(실제 API 호출이 이루어지며 약간의 시간이 소요될 수 있습니다)")
+            
+            # 이야기 생성 진행
+            detailed_story = self.kkogi.generate_detailed_story()
+            
+            # 생성된 이야기 정보 출력
+            if detailed_story:
+                print("\n=== 생성된 이야기 정보 ===")
+                print(f"제목: {detailed_story.get('title', '제목 없음')}")
+                print(f"대상 연령: {detailed_story.get('target_age', self.child_info['age'])}세")
+                print(f"등장인물: {len(detailed_story.get('characters', []))}명")
+                print(f"장면 수: {len(detailed_story.get('scenes', []))}개")
+                
+                # 이야기 저장
+                story_file = self.output_dir / f"{self.child_info['name']}의_이야기.json"
+                with open(story_file, 'w', encoding='utf-8') as f:
+                    json.dump(detailed_story, f, ensure_ascii=False, indent=2)
+                    
+                print(f"\n이야기가 저장되었습니다: {story_file}")
+                
+                # 삽화 생성 여부 확인
+                print("\n이야기에 삽화를 추가할까요? (y/n)")
+                if input().lower() == 'y':
+                    print("\n삽화를 생성하고 있어요...")
+                    self.kkogi.generate_illustrations()
+                    print("삽화가 생성되었습니다.")
+                
+                # 음성 생성 여부 확인
+                print("\n이야기에 음성을 추가할까요? (y/n)")
+                if input().lower() == 'y':
+                    print("\n음성을 생성하고 있어요...")
+                    self.kkogi.generate_voice()
+                    print("음성이 생성되었습니다.")
+                
+                return True
+            else:
+                print("이야기 생성에 실패했습니다.")
+                return False
+                
+        except Exception as e:
+            print(f"이야기 생성 중 오류가 발생했습니다: {str(e)}")
+            return False
+    
+    def run(self):
+        """메인 프로그램 실행"""
+        try:
+            # 아이 정보 입력
+            self.get_child_info()
+            
+            # 부기와 대화
+            self.chat_with_bugi()
+            
+            # 이야기 생성
+            self.generate_story()
+            
+            # 종료
+            print("\n프로그램을 종료합니다. 생성된 파일은 output 폴더에서 확인할 수 있습니다.")
+            
+        except KeyboardInterrupt:
+            print("\n\n프로그램이 사용자에 의해 종료되었습니다.")
+        except Exception as e:
+            print(f"\n오류가 발생했습니다: {str(e)}")
+
+def main():
+    """프로그램 진입점"""
+    parser = argparse.ArgumentParser(description="부기와 꼬기 - 아동 상호작용 챗봇 시스템")
+    parser.add_argument('--test', action='store_true', help='테스트 모드 실행')
+    args = parser.parse_args()
+    
+    if args.test:
+        print("테스트 모드를 실행합니다...")
+        import unittest
+        from tests.test_integration import TestChatBotIntegration
+        
+        suite = unittest.TestLoader().loadTestsFromTestCase(TestChatBotIntegration)
+        unittest.TextTestRunner(verbosity=2).run(suite)
+    else:
+        chatbot_system = ChatBotSystem()
+        chatbot_system.run()
+
+if __name__ == "__main__":
+    main() 
