@@ -1,4 +1,4 @@
-from chat_bot import ChildChatBot
+from chatbot.models.chat_bot import ChildChatBot
 import argparse
 
 def test_text_chat():
