@@ -239,58 +239,65 @@ class ChildChatBot:
     
     def suggest_story_theme(self) -> Dict[str, str]:
         """
-        대화 내용을 바탕으로 동화 주제를 제안하는 함수
+        대화 내용을 바탕으로 동화 줄거리 요약 및 태그를 추출하는 함수
         
         Returns:
-            Dict[str, str]: 제안된 동화 주제 정보
-                - theme: 주제
-                - description: 설명
-                - educational_value: 교육적 가치
+            Dict[str, str]: 수집된 정보 (summary_text, tags)
                 
         Note:
-            - 아이의 연령대와 관심사를 고려한 주제 제안
-            - 교육적 가치가 있는 주제 선정
+            - 아이의 연령대와 관심사를 고려한 줄거리 생성
+            - 교육적 가치가 있는 태그 추출
             - JSON 형식으로 구조화된 응답 반환
         """
         try:
-            # 대화 내용을 바탕으로 주제 제안 프롬프트 생성
+            # 대화 내용을 바탕으로 줄거리 및 태그 추출 프롬프트 생성
             prompt = f"""
-            아이의 이름: {self.child_name}
-            아이의 연령: {self.age_group}
-            아이의 관심사: {', '.join(self.interests)}
+            아이 정보:
+            - 이름: {self.child_name}
+            - 나이: {self.age_group}
+            - 관심사: {', '.join(self.interests)}
             
-            {self.child_name}의 대화 내용을 바탕으로 동화 주제를 제안해주세요.
+            대화 내용:
+            {self.conversation_history}
             
-            고려해야 할 것:
-            1. 아이의 관심사: {', '.join(self.interests)}
-            2. 최근 대화 토픽
-            3. 아이의 연령에 맞는 주제
-            4. 교육적 가치
+            위 정보를 바탕으로 다음 두 가지를 추출해주세요:
+            1.  간단한 동화 줄거리 (summary_text)
+            2.  이야기와 관련된 핵심 태그 (tags) - 쉼표로 구분된 문자열 형태 (예: 공룡,모험,친구)
             
-            Return a JSON with:
-            - theme: Main theme of the story
-            - description: Brief description of the suggested story
-            - educational_value: What the child can learn from this story
+            출력 형식 (JSON):
+            {{
+                "summary_text": "[생성된 줄거리]",
+                "tags": "[추출된 태그]"
+            }}
             """
             
             response = client.chat.completions.create(
                 model="gpt-4o-mini",
                 messages=[
-                    {"role": "system", "content": "You are a children's story expert."},
+                    {"role": "system", "content": "당신은 대화 내용을 바탕으로 동화 줄거리 요약과 관련 태그를 추출하는 전문가입니다."},
                     {"role": "user", "content": prompt}
                 ],
                 temperature=0.7,
-                max_tokens=300
+                max_tokens=600,
+                response_format={"type": "json_object"} # JSON 형식으로 응답 요청
             )
             
-            return json.loads(response.choices[0].message.content)
+            # 응답에서 JSON 파싱
+            result = json.loads(response.choices[0].message.content)
+            
+            # 관심사를 태그에 추가 (선택 사항)
+            # existing_tags = set(result.get("tags", "").split(','))
+            # existing_tags.update(self.interests)
+            # result["tags"] = ",".join(filter(None, existing_tags))
+            
+            return result
             
         except Exception as e:
-            print(f"Error suggesting story theme: {str(e)}")
+            print(f"동화 줄거리 및 태그 추출 중 오류 발생: {str(e)}")
+            # 기본값 반환 시 아이의 관심사를 태그로 사용
             return {
-                "theme": "우정과 용기",
-                "description": "친구들과 함께 모험을 하는 이야기",
-                "educational_value": "협동과 용기의 가치를 배울 수 있습니다."
+                "summary_text": "주인공이 친구와 함께 모험을 하며 용기와 우정의 가치를 배우는 이야기입니다.",
+                "tags": ",".join(self.interests) if self.interests else "모험,우정"
             }
     
     def get_conversation_summary(self) -> str:
