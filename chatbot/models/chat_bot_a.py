@@ -31,15 +31,15 @@ class StoryCollectionChatBot:
         self.child_name = None         # 아이의 이름
         self.interests = []            # 아이의 관심사
         
-        self.chatbot_name = "꼬기"
+        self.chatbot_name = "부기"
         
         # 프롬프트 로드
         self.prompts = self._load_prompts()   
         
         # 인사말 템플릿
         self.greeting_templates = [
-            "안녕~! {child_name}야! 나는 {chatbot_name}야! {child_name}{postposition} 놀까?",
-            "안녕! {child_name}야! 나는 {chatbot_name}라고 해! {}{postposition} 친구할래?",
+            "안녕~! {child_name}야! 나는 {chatbot_name}야! {child_name}{postposition} 놀자!",
+            "안녕! {child_name}야! 나는 {chatbot_name}라고 해! {child_name}{postposition}",
             "안녕~! {child_name}야! 나는 {chatbot_name}야! {child_name}{postposition} 이야기할까?",
             "안녕! {child_name}야! 나는 {chatbot_name}라고 해! {child_name}{postposition} 모험을 떠날까?",
             "안녕~! {child_name}야! 나는 {chatbot_name}야! {child_name}{postposition} 여행을 떠날까?",
