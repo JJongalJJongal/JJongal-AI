@@ -37,23 +37,7 @@ class StoryCollectionChatBot:
         self.prompts = self._load_prompts()   
         
         # 인사말 템플릿
-        self.greeting_templates = [
-            "안녕~! {child_name}야! 나는 {chatbot_name}야! {child_name}{postposition} 놀자!",
-            "안녕! {child_name}야! 나는 {chatbot_name}라고 해! {child_name}{postposition}",
-            "안녕~! {child_name}야! 나는 {chatbot_name}야! {child_name}{postposition} 이야기할까?",
-            "안녕! {child_name}야! 나는 {chatbot_name}라고 해! {child_name}{postposition} 모험을 떠날까?",
-            "안녕~! {child_name}야! 나는 {chatbot_name}야! {child_name}{postposition} 여행을 떠날까?",
-            "안녕! {child_name}야! 나는 {chatbot_name}라고 해! {child_name}{postposition} 이야기를 만들어볼까?",
-            "안녕~! {child_name}야! 나는 {chatbot_name}야! {child_name}{postposition} 모험을 떠날까?",
-            "안녕! {child_name}야! 나는 {chatbot_name}라고 해! {child_name}{postposition} 마법 이야기를 할까?",
-            "안녕~! {child_name}야! 나는 {chatbot_name}야! {child_name}{postposition} 재미있는 일이 있었어?",
-            "안녕! {child_name}야! 나는 {chatbot_name}라고 해! {child_name}{postposition} 오늘 하루는 어땠어?",
-            "안녕~! {child_name}야! 나는 {chatbot_name}야! {child_name}{postposition} 오늘은 뭐하고 놀았어?",
-            "안녕! {child_name}야! 나는 {chatbot_name}라고 해! {child_name}{postposition} 오늘은 어떤 꿈을 꾸고 일어났어?",
-            "안녕~! {child_name}야! 나는 {chatbot_name}야! {child_name}{postposition} 오늘은 어떤 색이 좋아?",
-            "안녕! {child_name}야! 나는 {chatbot_name}라고 해! {child_name}{postposition} 오늘은 어떤 동물이 생각나?",
-            "안녕~! {child_name}야! 나는 {chatbot_name}야! {child_name}{postposition} 오늘은 어떤 음식을 먹었어?"
-        ]
+        self.greeting_template = self.prompts.get('greeting_template', '')
         
         # 이야기 줄거리 초기화
         self.story_outline = None
@@ -70,6 +54,16 @@ class StoryCollectionChatBot:
         except Exception as e:
             print(f"프롬프트 로드 중 오류 발생: {e}")
             return {}
+    
+    # 아이 정보 업데이트하는 Function
+    def update_child_info(self, child_name: str = None, age: int = None, interests: List[str] = None):
+        if child_name:
+            self.child_name = child_name
+        if age:
+            self.age_group = age
+        if interests:
+            self.interests = interests
+    
     
     def _has_final_consonant(self, char: str) -> bool:
         """
@@ -155,6 +149,7 @@ class StoryCollectionChatBot:
             
         return greeting
     
+    # 후속 질문을 통해 이야기를 이어 나가도록 유도하는 Function
     def get_follow_up_question(self, child_name: Optional[str] = None) -> str:
         """
         랜덤한 후속 질문 반환
@@ -175,6 +170,7 @@ class StoryCollectionChatBot:
             
         return question
     
+    # 아이의 답변에 대해 격려하며 대화를 계속하도록 유도하는 Function
     def get_encouragement(self, child_name: Optional[str] = None) -> str:
         """
         랜덤한 격려 문구 반환
@@ -195,6 +191,7 @@ class StoryCollectionChatBot:
             
         return encouragement
     
+    # 아이의 연령대에 맞는 언어를 사용하여 대화하는 Function
     def get_age_appropriate_language(self, age: int) -> Dict:
         """연령대에 맞는 언어 설정 반환"""
         age_ranges = self.prompts.get('age_appropriate_language', {})
@@ -254,7 +251,7 @@ class StoryCollectionChatBot:
         else:
             return "와"  # 받침 없음
     
-    def initialize_chat(self, child_name: str, age: int, interests: List[str] = None, chatbot_name: str = "꼬꼬") -> str:
+    def initialize_chat(self, child_name: str, age: int, interests: List[str] = None, chatbot_name: str = "부기") -> str:
         """
         챗봇과의 대화를 초기화하는 함수
         
@@ -267,17 +264,23 @@ class StoryCollectionChatBot:
         Returns:
             str: 초기 인사 메시지
         """
-        self.child_name = child_name
-        self.age_group = age
-        self.interests = interests or []
-        self.chatbot_name = chatbot_name
+        # 입력 검증 및 기본값 설정
+        if not child_name or not isinstance(child_name, str):
+            raise ValueError("아이의 이름은 필수고, 문자열이어야 합니다.")
+        if not isinstance(age, int) or age < 4 or age > 9:
+            raise ValueError("아이의 나이는 4-9세 사이 정수이어야 합니다.")
+        if interests and not isinstance(interests, list):
+            raise ValueError("관심사는 리스트 형태여야 합니다.")
+        if chatbot_name and not isinstance(chatbot_name, str):
+            raise ValueError("챗봇의 이름은 문자열 형태여야 합니다.")
+        
+        self.update_child_info(child_name, age, interests)
         
         # 이름에 맞는 조사 결정
         postposition = self.get_korean_postposition(child_name)
         
         # 랜덤하게 인사말 선택
-        greeting_template = random.choice(self.greeting_templates)
-        greeting = greeting_template.format(
+        greeting = self.greeting_template.format(
             chatbot_name=chatbot_name, 
             child_name=child_name,
             postposition=postposition
@@ -325,8 +328,9 @@ class StoryCollectionChatBot:
             
         except Exception as e:
             print(f"응답 생성 중 오류 발생: {str(e)}")
-            return "미안해. 지금은 잠시 후 다시 시도해주세요."
+            return f"미안해 {self.child_name}야. 조금만 후에 다시 이야기할까?"
     
+    # 대화 내용을 바탕으로 동화 줄거리 요약 및 Tag 추출 Function
     def collect_story_outline(self) -> Dict:
         """
         대화 내용을 바탕으로 동화 줄거리 요약 및 태그를 추출하는 함수
@@ -337,11 +341,6 @@ class StoryCollectionChatBot:
         try:
             # 대화 내용을 바탕으로 줄거리 및 태그 추출 프롬프트 생성
             prompt = f"""
-            아이 정보:
-            - 이름: {self.child_name}
-            - 나이: {self.age_group}
-            - 관심사: {', '.join(self.interests)}
-            
             대화 내용:
             {self.conversation_history}
             
@@ -359,7 +358,7 @@ class StoryCollectionChatBot:
             response = client.chat.completions.create(
                 model="gpt-4o-mini",
                 messages=[
-                    {"role": "system", "content": "당신은 대화 내용을 바탕으로 동화 줄거리 요약과 관련 태그를 추출하는 전문가입니다."},
+                    {"role": "system", "content": "너는 아이와의 대화 내용을 바탕으로 동화의 대략적인 줄거리와 관련된 주제 태그를 추출하는 유치원 선생님이야."},
                     {"role": "user", "content": prompt}
                 ],
                 temperature=0.7,
@@ -395,9 +394,9 @@ class StoryCollectionChatBot:
         try:
             # 대화 내용 요약 프롬프트 생성
             prompt = f"""
-            {self.child_name}({self.age_group}세)와의 대화를 요약해주세요.
-            다음 사항에 중점을 두고 요약해주세요:
-            1. 주요 토픽
+            {self.child_name}({self.age_group}세)와의 대화를 요약해줘.
+            다음 사항에 중점을 두고 요약해줘:
+            1. 주요 토픽 ()
             2. 아이의 관심사와 선호도
             3. 주요 학습 순간
             4. 잠재적인 동화 주제
@@ -429,12 +428,6 @@ class StoryCollectionChatBot:
         try:
             with open(file_path, 'w', encoding='utf-8') as f:
                 json.dump({
-                    "child_info": {
-                        "name": self.child_name,
-                        "age": self.age_group,
-                        "interests": self.interests
-                    },
-                    "conversation": self.conversation_history,
                     "summary": self.get_conversation_summary(),
                     "story_outline": self.story_outline
                 }, f, ensure_ascii=False, indent=2)

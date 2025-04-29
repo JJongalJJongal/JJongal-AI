@@ -12,7 +12,7 @@ import sys
 import time
 import argparse
 import json
-from pathlib import Path
+from pathlib import Pa
 
 from models.chat_bot_a import StoryCollectionChatBot
 from models.chat_bot_b import StoryGenerationChatBot
