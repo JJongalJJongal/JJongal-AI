@@ -4,8 +4,6 @@ python-dotenv>=1.0.0
 langchain>=0.1.0
 langchain-openai>=0.0.5
 langchain-core>=0.1.0
-pinecone-client>=2.2.4
-
 # 벡터 데이터베이스
 chromadb>=0.4.0
 sentence-transformers>=2.2.2  # 임베딩 생성용
@@ -19,7 +17,6 @@ numpy>=1.24.0
 sounddevice>=0.4.6
 wavio>=0.0.7
 elevenlabs>=0.2.24
-rnnoise-python>=0.3.0  # 노이즈 필터링
 
 # 웹 프레임워크
 fastapi>=0.100.0
@@ -42,4 +39,4 @@ python-multipart>=0.0.6
 tqdm>=4.65.0
 pytest>=7.4.0
 jupyter>=1.0.0
-
+whisper>=1.17.0
