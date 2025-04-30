@@ -11,11 +11,25 @@
 - **역할**: 아이의 음성을 실시간 수집하고, 줄거리를 요약, 그리고 아이의 이야기를 만들기 위해 대화를 통해 이야기 유도
 - **모델**: `gpt-4o-mini`
 - **기술 요소**:
-  - 실시간 음성 스트리밍 수신 (WebSocket 기반)
-  - `RNNoise`로 노이즈 제거
-  - `Whisper`를 이용한 음성 → 텍스트 변환
-  - GPT-4o-mini로 대화 요약 및 줄거리 생성
-  - `ElevenLabs` API를 통해 음성 클로닝 요청
+       - 실시간 음성 스트리밍 수신 (WebSocket 기반)
+       - `RNNoise`로 노이즈 제거
+       - `Whisper`를 이용한 음성 → 텍스트 변환
+       - GPT-4o-mini로 대화 요약 및 줄거리 생성
+       - `ElevenLabs` API를 통해 음성 클로닝 요청
+       - **엔드포인트**: `/ws/audio`
+       - **프로토콜**: WebSocket (ws/wss)
+       - **인증**: Query 파라미터로 토큰 전달 (example: `?token=valid_token`)
+       - **오디오 전송**: chunk 단위 바이너리(16kHz, mono, wav/opus 등)
+       - **chunk 기준**: 2초 또는 128KB마다 서버가 처리
+       - **응답**: 항상 JSON 패킷
+              - `type`: "ai_response"
+              - `text`: AI 텍스트 응답
+              - `audio`: base64 인코딩된 mp3(음성)
+              - `status`: "ok", "partial", "error"
+              - `error_message`, `error_code`: (에러 발생 시)
+       - **에러**: type이 "error"인 패킷으로 안내
+       - **보안**: 운영 환경에서는 HTTPS/WSS, 인증 필수
+       - **모니터링**: 서버 로그(logging) 기반 에러 추적
 
 ### 🐢 Chat-bot B (스토리 완성 챗봇 - “꼬기”)
 - **역할**: 부기가 만든 줄거리와 음성 클론을 바탕으로 전체 동화 구성
