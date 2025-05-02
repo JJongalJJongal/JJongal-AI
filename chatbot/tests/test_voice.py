@@ -9,11 +9,10 @@ from pathlib import Path
 
 # 상위 디렉토리 경로 추가
 current_dir = os.path.dirname(os.path.abspath(__file__))
-parent_dir = os.path.dirname(current_dir)  # chatbot 폴더
+parent_dir = os.path.dirname(current_dir)
 sys.path.append(parent_dir)
 
-# 모듈 임포트 방식 변경
-from models.chat_bot_a import StoryCollectionChatBot
+# 서버 실행 관련 모듈
 from models.voice_ws_server import app
 import uvicorn
 from threading import Thread
@@ -22,55 +21,13 @@ import time
 # 테스트용 오디오 파일 경로
 SAMPLE_AUDIO_PATH = os.path.join(current_dir, "test_audio.wav")
 
-def test_chatbot_basic():
-    """챗봇 기본 기능 테스트"""
-    print("\n=== 챗봇 기본 기능 테스트 ===")
-    
-    # 챗봇 인스턴스 생성
-    chatbot = StoryCollectionChatBot()
-    
-    # 챗봇 초기화
-    greeting = chatbot.initialize_chat(
-        child_name="테스트",
-        age=6,
-        interests=["공룡", "우주", "로봇"],
-        chatbot_name="부기"
-    )
-    
-    print(f"인사말: {greeting}")
-    
-    # 테스트 대화
-    test_inputs = [
-        "안녕! 나는 공룡을 좋아해",
-        "티라노사우루스가 제일 멋있어",
-        "내 이야기에는 용감한 아이가 나올 거야"
-    ]
-    
-    for user_input in test_inputs:
-        print(f"\n사용자: {user_input}")
-        response = chatbot.get_response(user_input)
-        print(f"챗봇: {response}")
-    
-    # 이야기 요약 테스트
-    story = chatbot.suggest_story_theme()
-    print("\n=== 수집된 이야기 테마 ===")
-    print(f"주제: {story.get('theme', '')}")
-    print(f"줄거리: {story.get('plot_summary', '')}")
-    
-    # 토큰 사용량 확인
-    token_info = chatbot.get_token_usage()
-    print("\n=== 토큰 사용량 ===")
-    print(f"사용된 토큰: {token_info['token_usage']['total']}")
-    print(f"남은 토큰: {token_info['remaining_tokens']}")
-
 async def test_websocket_connection():
-    """웹소켓 음성 기능 테스트"""
-    print("\n=== 웹소켓 음성 기능 테스트 ===")
+    """WebSocket 연결 테스트"""
     uri = "ws://localhost:8000/ws/audio?token=valid_token&child_name=민준&age=5&interests=공룡,우주"
     
     try:
         async with websockets.connect(uri) as websocket:
-            print("웹소켓 연결 성공!")
+            print("WebSocket 연결 성공!")
             
             # 인사말 수신 (서버에서 자동으로 보내는 메시지)
             greeting_response = await websocket.recv()
@@ -104,7 +61,7 @@ async def test_websocket_connection():
                 print("테스트 오디오 파일을 생성하거나 경로를 수정해주세요.")
     
     except Exception as e:
-        print(f"웹소켓 연결 중 오류 발생: {e}")
+        print(f"WebSocket 연결 중 오류 발생: {e}")
 
 def run_server():
     """음성 서버 실행"""
@@ -152,57 +109,26 @@ def create_test_audio():
     
     print(f"테스트 오디오 파일 생성 완료: {SAMPLE_AUDIO_PATH}")
 
-def test_combined():
-    """통합 테스트 (텍스트 챗봇 + 음성)"""
-    print("\n=== 통합 테스트 ===")
-    # 먼저 텍스트 기반 챗봇 테스트
-    test_chatbot_basic()
-    
-    # 오디오 파일이 없으면 생성
-    if not os.path.exists(SAMPLE_AUDIO_PATH):
-        create_test_audio()
-    
-    # 서버 실행 및 WebSocket 테스트
-    server_thread = Thread(target=run_server)
-    server_thread.daemon = True
-    server_thread.start()
-    print("\n서버 시작 중... (5초 대기)")
-    time.sleep(5)  # 서버가 시작될 때까지 대기
-    
-    # WebSocket 테스트 실행
-    asyncio.run(test_websocket_connection())
-
 def main():
     """메인 함수"""
-    parser = argparse.ArgumentParser(description="꼬꼬북 챗봇 테스트")
+    parser = argparse.ArgumentParser(description="음성 챗봇 테스트")
     parser.add_argument("--create-audio", action="store_true", help="테스트용 오디오 파일 생성")
     parser.add_argument("--run-server", action="store_true", help="서버 실행")
-    parser.add_argument("--test-basic", action="store_true", help="기본 챗봇 테스트")
-    parser.add_argument("--test-voice", action="store_true", help="음성 기능 테스트")
-    parser.add_argument("--test-all", action="store_true", help="통합 테스트 실행")
     args = parser.parse_args()
     
     if args.create_audio:
         create_test_audio()
     
-    if args.test_basic:
-        test_chatbot_basic()
+    if args.run_server:
+        # 서버를 별도 스레드로 실행
+        server_thread = Thread(target=run_server)
+        server_thread.daemon = True
+        server_thread.start()
+        print("서버 시작 중... (5초 대기)")
+        time.sleep(5)  # 서버가 시작될 때까지 대기
     
-    if args.test_voice:
-        if args.run_server:
-            server_thread = Thread(target=run_server)
-            server_thread.daemon = True
-            server_thread.start()
-            print("서버 시작 중... (5초 대기)")
-            time.sleep(5)  # 서버가 시작될 때까지 대기
-        asyncio.run(test_websocket_connection())
-    
-    if args.test_all:
-        test_combined()
-    
-    # 아무 인자도 지정되지 않은 경우 기본 테스트 실행
-    if not any([args.create_audio, args.run_server, args.test_basic, args.test_voice, args.test_all]):
-        test_chatbot_basic()
+    # WebSocket 테스트 실행
+    asyncio.run(test_websocket_connection())
 
 if __name__ == "__main__":
     main() 

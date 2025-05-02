@@ -2,12 +2,13 @@ import logging
 import time
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Query
 import whisper
-from chatbot.models.chat_bot_a import StoryCollectionChatBot
+from .chat_bot_a import StoryCollectionChatBot
 import tempfile, os
 from dotenv import load_dotenv
 import openai
 import base64
 import json
+from typing import List, Optional
 
 # 환경 변수 Load & API Key 관리
 load_dotenv()
@@ -70,17 +71,66 @@ def synthesize_tts(ai_response):
 
 # WebSocket 엔드포인트 정의
 @app.websocket("/ws/audio")
-async def audio_endpoint(websocket: WebSocket, token: str = Query(None)):
+async def audio_endpoint(
+    websocket: WebSocket, 
+    token: str = Query(None),
+    child_name: str = Query(None),
+    age: int = Query(None),
+    interests: Optional[str] = Query(None)
+):
     # 1. 인증 토큰 검증
     if not validate_token(token):
         await websocket.close()
         logging.warning("인증 실패: 잘못된 토큰")
         return
+    
+    # 2. 필수 파라미터 검사
+    if not child_name:
+        await websocket.close()
+        logging.warning("필수 파라미터 누락: 아이 이름이 필요합니다")
+        return
+    
+    if not age or not (4 <= age <= 9):
+        await websocket.close()
+        logging.warning("잘못된 파라미터: 나이는 4-9세 사이여야 합니다")
+        return
+    
+    # 관심사 파싱 (interests=공룡,우주,동물 형식으로 전달)
+    interests_list = interests.split(',') if interests else []
+    
     await websocket.accept()  # 클라이언트의 WebSocket 연결 수락
     audio_chunks = []        # 오디오 chunk 데이터를 저장할 리스트
     audio_bytes = 0          # 현재까지 누적된 오디오 데이터 크기(바이트)
     chunk_start_time = time.time()  # chunk 수집 시작 시간
+    
+    # 챗봇 인스턴스 생성 및 초기화
     chatbot = StoryCollectionChatBot()  # 사용자별 챗봇 인스턴스 생성
+    greeting = chatbot.initialize_chat(
+        child_name=child_name,
+        age=age,
+        interests=interests_list,
+        chatbot_name="부기"
+    )
+    
+    # 인사말 전송
+    greeting_audio_b64, tts_status, error_message, error_code = synthesize_tts(greeting)
+    
+    # 인사말 응답 패킷 구성
+    greeting_packet = {
+        "type": "ai_response",
+        "text": greeting,
+        "audio": greeting_audio_b64,
+        "status": tts_status
+    }
+    
+    if error_message:
+        greeting_packet["error_message"] = error_message
+    if error_code:
+        greeting_packet["error_code"] = error_code
+    
+    # 인사말 전송
+    await websocket.send_json(greeting_packet)
+    
     try:
         while True:
             data = await websocket.receive_bytes()  # 클라이언트로부터 오디오 chunk 수신
@@ -97,28 +147,47 @@ async def audio_endpoint(websocket: WebSocket, token: str = Query(None)):
                         temp_file_path = temp_file.name
                     # Whisper 변환
                     user_text, error_message, error_code = transcribe_audio(model, temp_file_path)
+                    logging.info(f"사용자 음성 인식: {user_text}")
+                    
                     # 챗봇 응답 생성
                     ai_response, cb_error_message, cb_error_code = get_chatbot_response(chatbot, user_text)
                     if cb_error_message:
                         error_message = cb_error_message
                         error_code = cb_error_code
+                    
+                    logging.info(f"AI 응답: {ai_response}")
+                    
                     # TTS 변환
                     audio_b64, tts_status, tts_error_message, tts_error_code = synthesize_tts(ai_response)
                     if tts_error_message:
                         error_message = tts_error_message
                         error_code = tts_error_code
+                    
                     # 클라이언트로 보낼 JSON 응답 패킷 구성
                     response_packet = {
                         "type": "ai_response",      # 응답 타입
                         "text": ai_response,         # AI 텍스트 응답
                         "audio": audio_b64,          # base64 인코딩된 음성 데이터
-                        "status": tts_status         # TTS 상태
+                        "status": tts_status,        # TTS 상태
+                        "user_text": user_text       # 인식된 사용자 음성 텍스트
                     }
+                    
                     if error_message:
                         response_packet["error_message"] = error_message  # 에러 메시지 포함
                     if error_code:
                         response_packet["error_code"] = error_code        # 에러 코드 포함
+                    
                     await websocket.send_json(response_packet)  # WebSocket으로 응답 전송
+                except Exception as chunk_error:
+                    logging.error(f"Chunk 처리 중 오류: {chunk_error}")
+                    # 특정 chunk만 처리 실패했을 경우 에러 메시지 전송
+                    error_packet = {
+                        "type": "error",
+                        "error_message": str(chunk_error),
+                        "error_code": "chunk_processing_error",
+                        "status": "error"
+                    }
+                    await websocket.send_json(error_packet)
                 finally:
                     # 임시 파일 삭제(리소스 정리)
                     if temp_file_path and os.path.exists(temp_file_path):
@@ -128,7 +197,15 @@ async def audio_endpoint(websocket: WebSocket, token: str = Query(None)):
                     audio_bytes = 0
                     chunk_start_time = time.time()
     except WebSocketDisconnect:
-        logging.info("Client disconnected")  # 클라이언트 연결 종료 로그
+        logging.info(f"클라이언트 연결 종료: {child_name}({age}세)")
+        # 대화 내용 저장
+        try:
+            save_dir = os.path.join("output", "conversations")
+            os.makedirs(save_dir, exist_ok=True)
+            chatbot.save_conversation(os.path.join(save_dir, f"{child_name}_{int(time.time())}.json"))
+            logging.info(f"대화 내용 저장 완료: {child_name}")
+        except Exception as save_error:
+            logging.error(f"대화 내용 저장 중 오류: {save_error}")
     except Exception as e:
         logging.error(f"오디오 처리 중 오류 발생: {str(e)}")  # 서버 에러 로그
         # 치명적 에러 발생 시 클라이언트에 에러 패킷 전송
