@@ -52,10 +52,10 @@ class StoryCollectionChatBot:
         
         # 이야기 요소 수집 상태
         self.story_elements = {
-            "character": {},
-            "setting": {},
-            "problem": {},
-            "resolution": {}
+            "character": {"count": 0, "topics": set()},
+            "setting": {"count": 0, "topics": set()},
+            "problem": {"count": 0, "topics": set()},
+            "resolution": {"count": 0, "topics": set()}
         }
         
         # 토큰 사용량 추적
@@ -70,6 +70,9 @@ class StoryCollectionChatBot:
         
         # 토큰 제한 도달 시 메시지
         self.token_limit_reached_message = "토큰 제한에 걸렸으니 그만 써라 좀..."
+        
+        # 마지막 단계 전환 대화 턴 수
+        self.last_stage_transition = 0
     
     def _load_prompts(self) -> Dict:
         """프롬프트 JSON 파일을 로드하는 메서드"""
@@ -502,6 +505,148 @@ class StoryCollectionChatBot:
         
         return greeting
     
+    def _analyze_user_response(self, user_input: str) -> None:
+        """
+        사용자 응답을 분석하여 현재 이야기 단계의 요소들을 추적
+        
+        Args:
+            user_input (str): 사용자 입력
+        """
+        current_stage = self.story_stage
+        
+        # 최소 길이 확인 (의미 있는 응답인지)
+        if len(user_input) < 10:
+            return
+            
+        # 현재 단계의 카운트 증가
+        self.story_elements[current_stage]["count"] += 1
+        
+        # 주요 키워드 추출 시도
+        try:
+            # 간단한 키워드 추출 (공백으로 구분된 단어들 중 2글자 이상)
+            words = [word for word in user_input.split() if len(word) >= 2]
+            # 중요 키워드 추가 (최대 3개)
+            important_words = words[:3] if words else []
+            self.story_elements[current_stage]["topics"].update(important_words)
+        except Exception:
+            pass
+
+    def _should_transition_to_next_stage(self) -> bool:
+        """
+        현재 단계에서 다음 단계로 전환해야 하는지 결정
+        
+        Returns:
+            bool: 다음 단계로 전환해야 하면 True, 아니면 False
+        """
+        current_stage = self.story_stage
+        current_turn = len(self.conversation_history) // 2  # 대화 턴 수 (질문-답변 쌍)
+        
+        # 마지막 전환 이후 최소 2턴 이상 지났는지 확인
+        if current_turn - self.last_stage_transition < 2:
+            return False
+            
+        # 단계별 전환 기준
+        transition_criteria = {
+            "character": lambda: self.story_elements["character"]["count"] >= 3 or current_turn > 4,
+            "setting": lambda: self.story_elements["setting"]["count"] >= 2 or current_turn > 8,
+            "problem": lambda: self.story_elements["problem"]["count"] >= 2 or current_turn > 12,
+            "resolution": lambda: False  # 마지막 단계는 전환하지 않음
+        }
+        
+        # 현재 단계에 대한 전환 기준 확인
+        should_transition = transition_criteria.get(current_stage, lambda: False)()
+        
+        # 확률적 요소 추가 (단계가 진행될수록 전환 확률 증가)
+        stages = ["character", "setting", "problem", "resolution"]
+        current_index = stages.index(current_stage)
+        
+        # 이미 충분한 대화가 이루어졌다면 전환 확률 증가
+        if current_index < len(stages) - 1:
+            # 단계별 기본 전환 확률
+            base_transition_prob = 0.1 * (current_index + 1)
+            
+            # 대화가 길어질수록 전환 확률 증가
+            turn_factor = min(0.5, 0.05 * (current_turn // 2))
+            
+            # 최종 전환 확률
+            transition_prob = base_transition_prob + turn_factor
+            
+            # 전환 기준을 충족하면 확률 추가 증가
+            if should_transition:
+                transition_prob += 0.3
+                
+            return random.random() < transition_prob
+            
+        return False
+
+    def _transition_to_next_stage(self) -> None:
+        """현재 단계에서 다음 단계로 전환"""
+        stages = ["character", "setting", "problem", "resolution"]
+        current_index = stages.index(self.story_stage)
+        
+        if current_index < len(stages) - 1:
+            self.story_stage = stages[current_index + 1]
+            self.last_stage_transition = len(self.conversation_history) // 2
+
+    def get_stage_transition_message(self) -> str:
+        """
+        단계 전환 시 자연스러운 전환 메시지 생성
+        
+        Returns:
+            str: 단계 전환 메시지
+        """
+        stage_messages = {
+            "setting": [
+                "이제 {name}이/가 얘기해준 친구들이 어디에서 살고 있을지 생각해볼까?",
+                "재미있는 친구들이네! 이 친구들이 어떤 곳에서 모험을 하면 좋을까?",
+                "{name}아/야, 그 친구들이 사는 세계는 어떤 곳인지 상상해볼래?",
+                "멋진 캐릭터들이야! 이제 이 친구들이 어디에서 살고 있는지 이야기해줄래?"
+            ],
+            "problem": [
+                "{name}아/야, 그런 멋진 곳에서 어떤 문제가 생길 수 있을까?",
+                "그런 신기한 세계에서 우리 친구들에게 어떤 어려움이 찾아올까?",
+                "{name}이/가 만든 세계에서 어떤 모험이 시작될 것 같아?",
+                "그 곳에서 주인공이 해결해야 할 어떤 문제가 생길 수 있을까?"
+            ],
+            "resolution": [
+                "{name}아/야, 그런 어려운 문제를 어떻게 해결하면 좋을까?",
+                "우리 친구들이 그 문제를 해결하려면 어떻게 해야 할까?",
+                "{name}이/가 생각하기에 주인공은 어떻게 그 위기를 극복할 수 있을까?",
+                "그런 어려움을 어떻게 이겨낼 수 있을지 {name}의 생각이 궁금해!"
+            ]
+        }
+        
+        messages = stage_messages.get(self.story_stage, ["다음 이야기도 들려줘!"])
+        message = random.choice(messages)
+        
+        # 이름과 조사 처리
+        if self.child_name:
+            has_final = self._has_final_consonant(self.child_name)
+            # 아/야 처리
+            child_name_with_ya = f"{self.child_name}아" if has_final else f"{self.child_name}야"
+            message = message.replace("{name}아/야", child_name_with_ya)
+            
+            # 이/가 처리
+            child_name_with_ga = f"{self.child_name}이" if has_final else f"{self.child_name}가"
+            message = message.replace("{name}이/가", child_name_with_ga)
+            
+            # 은/는 처리
+            child_name_with_eun = f"{self.child_name}은" if has_final else f"{self.child_name}는"
+            message = message.replace("{name}은/는", child_name_with_eun)
+            
+            # 을/를 처리
+            child_name_with_eul = f"{self.child_name}을" if has_final else f"{self.child_name}를"
+            message = message.replace("{name}을/를", child_name_with_eul)
+            
+            # 과/와 처리
+            child_name_with_gwa = f"{self.child_name}과" if has_final else f"{self.child_name}와"
+            message = message.replace("{name}과/와", child_name_with_gwa)
+            
+            # 기본 이름 대체
+            message = message.replace("{name}", self.child_name)
+            
+        return message
+
     def suggest_story_element(self, user_input: str) -> str:
         """
         사용자 입력을 분석하여 이야기 요소 제안
@@ -512,6 +657,14 @@ class StoryCollectionChatBot:
         Returns:
             str: 다음 대화 제안
         """
+        # 사용자 입력 분석
+        self._analyze_user_response(user_input)
+        
+        # 단계 전환 여부 확인
+        if self._should_transition_to_next_stage():
+            self._transition_to_next_stage()
+            return self.get_stage_transition_message()
+            
         # 현재 수집 단계에 따라 다른 질문 반환
         if random.random() < 0.7:  # 70% 확률로 단계별 질문
             return self.get_story_prompting_question()

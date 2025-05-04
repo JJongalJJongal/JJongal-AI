@@ -36,32 +36,45 @@ async def test_websocket_connection():
             
             # 샘플 오디오 존재 확인
             if os.path.exists(SAMPLE_AUDIO_PATH):
+                print(f"오디오 파일 크기: {os.path.getsize(SAMPLE_AUDIO_PATH)} 바이트")
+                
                 # 샘플 오디오 파일 전송
                 with open(SAMPLE_AUDIO_PATH, "rb") as audio_file:
                     audio_data = audio_file.read()
+                
+                print(f"전송할 오디오 데이터 크기: {len(audio_data)} 바이트")
                 
                 # 오디오 데이터 전송
                 await websocket.send(audio_data)
                 print("샘플 오디오 전송 완료")
                 
-                # 응답 대기
-                response = await websocket.recv()
-                response_data = json.loads(response)
+                # 응답 대기 (타임아웃 설정)
+                try:
+                    response = await asyncio.wait_for(websocket.recv(), timeout=10.0)
+                    response_data = json.loads(response)
+                    
+                    # 응답 분석
+                    print("\n서버 응답:")
+                    print(f"응답 유형: {response_data.get('type', '')}")
+                    print(f"AI 응답 텍스트: {response_data.get('text', '')}")
+                    print(f"사용자 음성 인식: {response_data.get('user_text', '')}")
+                    print(f"상태: {response_data.get('status', '')}")
+                    
+                    if "error_message" in response_data:
+                        print(f"오류: {response_data.get('error_message')}")
+                    if "error_code" in response_data:
+                        print(f"오류 코드: {response_data.get('error_code')}")
                 
-                # 응답 분석
-                print("\n서버 응답:")
-                print(f"AI 응답 텍스트: {response_data.get('text', '')}")
-                print(f"사용자 음성 인식: {response_data.get('user_text', '')}")
-                print(f"상태: {response_data.get('status', '')}")
-                
-                if "error_message" in response_data:
-                    print(f"오류: {response_data.get('error_message')}")
+                except asyncio.TimeoutError:
+                    print("서버 응답 타임아웃: 10초 동안 응답이 없습니다.")
             else:
                 print(f"샘플 오디오 파일이 없습니다: {SAMPLE_AUDIO_PATH}")
                 print("테스트 오디오 파일을 생성하거나 경로를 수정해주세요.")
     
     except Exception as e:
         print(f"WebSocket 연결 중 오류 발생: {e}")
+        import traceback
+        traceback.print_exc()
 
 def run_server():
     """음성 서버 실행"""
