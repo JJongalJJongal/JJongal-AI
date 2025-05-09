@@ -17,29 +17,29 @@
   - 격려와 자연스러운 후속 질문으로 상상력 확장
   - 교육적 가치를 담은 내용으로 유도
 - **기술 요소**:
-       - 실시간 음성 스트리밍 수신 (WebSocket 기반)
-       - `RNNoise`로 노이즈 제거
-       - `Whisper`를 이용한 음성 → 텍스트 변환
-       - GPT-4o-mini로 대화 요약 및 줄거리 생성
-       - `ElevenLabs` API를 통해 음성 클로닝 요청
-       - **LangChain 기반 RAG 시스템** 통합
-       - **엔드포인트**: `/ws/audio`
-       - **프로토콜**: WebSocket (ws/wss)
-       - **인증**: Query 파라미터로 토큰 전달 (example: `?token=valid_token`)
-       - **사용자 정보**: Query 파라미터로 전달 (example: `?child_name=민준&age=5&interests=공룡,우주,동물`)
-       - **오디오 전송**: chunk 단위 바이너리(16kHz, mono, wav/opus 등)
-       - **chunk 기준**: 2초 또는 128KB마다 서버가 처리
-       - **응답**: 항상 JSON 패킷
-              - `type`: "ai_response"
-              - `text`: AI 텍스트 응답
-              - `audio`: base64 인코딩된 mp3(음성)
-              - `status`: "ok", "partial", "error"
-              - `user_text`: 인식된 사용자 텍스트 (STT 결과)
-              - `error_message`, `error_code`: (에러 발생 시)
-       - **에러**: type이 "error"인 패킷으로 안내
-       - **보안**: 운영 환경에서는 HTTPS/WSS, 인증 필수
-       - **모니터링**: 서버 로그(logging) 기반 에러 추적
-       - **대화 저장**: 연결 종료 시 자동 저장 (output/conversations 폴더)
+  - 실시간 음성 스트리밍 수신 (WebSocket 기반)
+  - `RNNoise`로 노이즈 제거
+  - `Whisper`를 이용한 음성 → 텍스트 변환
+  - GPT-4o-mini로 대화 요약 및 줄거리 생성
+  - `ElevenLabs` API를 통해 음성 클로닝 요청
+  - **LangChain 기반 RAG 시스템** 통합
+  - **엔드포인트**: `/ws/audio`
+  - **프로토콜**: WebSocket (ws/wss)
+  - **인증**: Query 파라미터로 토큰 전달 (example: `?token=valid_token`)
+  - **사용자 정보**: Query 파라미터로 전달 (example: `?child_name=민준&age=5&interests=공룡,우주,동물`)
+  - **오디오 전송**: chunk 단위 바이너리(16kHz, mono, wav/opus 등)
+  - **chunk 기준**: 2초 또는 128KB마다 서버가 처리
+  - **응답**: 항상 JSON 패킷
+    - `type`: "ai_response"
+    - `text`: AI 텍스트 응답
+    - `audio`: base64 인코딩된 mp3(음성)
+    - `status`: "ok", "partial", "error"
+    - `user_text`: 인식된 사용자 텍스트 (STT 결과)
+    - `error_message`, `error_code`: (에러 발생 시)
+  - **에러**: type이 "error"인 패킷으로 안내
+  - **보안**: 운영 환경에서는 HTTPS/WSS, 인증 필수
+  - **모니터링**: 서버 로그(logging) 기반 에러 추적
+  - **대화 저장**: 연결 종료 시 자동 저장 (output/conversations 폴더)
 
 ### 🔍 LangChain과 Chroma DB 기반 RAG (Retrieval-Augmented Generation) 시스템
 - **역할**: 동화 창작 과정에서 기존 동화 지식을 활용하여 창의적이고 일관된 스토리를 생성하도록 지원
@@ -72,7 +72,7 @@
 
 ## 🔍 AI 내부 구조 흐름
 
-```plaintext
+```
 [아이 음성 입력]
        ↓
 [부기: 음성 인식 + 단계별 이야기 수집 + 음성 클로닝 요청]
@@ -195,4 +195,4 @@ navigator.mediaDevices.getUserMedia({ audio: true })
   "error_code": "whisper_error",
   "status": "error"
 }
-```
+``` 
