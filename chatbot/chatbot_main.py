@@ -22,7 +22,14 @@ def main():
     args = parser.parse_args()
     
     # 환경 변수 로드
-    load_dotenv()
+    current_dir = os.path.dirname(os.path.abspath(__file__))
+    project_root = os.path.abspath(os.path.join(current_dir, '..'))
+    dotenv_path = os.path.join(project_root, '.env')
+    load_dotenv(dotenv_path=dotenv_path)
+    
+    # 환경 변수 확인
+    if not os.getenv('OPENAI_API_KEY'):
+        print(f"Warning: OPENAI_API_KEY environment variable not found. Looking for .env file at: {dotenv_path}")
     
     # 출력 디렉토리 설정
     output_dir = args.output_dir

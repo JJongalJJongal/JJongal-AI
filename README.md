@@ -22,6 +22,7 @@
        - `Whisper`를 이용한 음성 → 텍스트 변환
        - GPT-4o-mini로 대화 요약 및 줄거리 생성
        - `ElevenLabs` API를 통해 음성 클로닝 요청
+       - **LangChain 기반 RAG 시스템** 통합
        - **엔드포인트**: `/ws/audio`
        - **프로토콜**: WebSocket (ws/wss)
        - **인증**: Query 파라미터로 토큰 전달 (example: `?token=valid_token`)
@@ -40,13 +41,32 @@
        - **모니터링**: 서버 로그(logging) 기반 에러 추적
        - **대화 저장**: 연결 종료 시 자동 저장 (output/conversations 폴더)
 
+### 🔍 LangChain과 Chroma DB 기반 RAG (Retrieval-Augmented Generation) 시스템
+- **역할**: 동화 창작 과정에서 기존 동화 지식을 활용하여 창의적이고 일관된 스토리를 생성하도록 지원
+- **기술 요소**:
+  - `LangChain`을 활용한 벡터 저장소 관리 및 검색
+  - `Chroma DB`를 통한 효율적인 벡터 저장 및 유사도 검색
+  - `OpenAI Embeddings`로 문서 벡터화
+  - 요약 및 상세 컨텐츠 각각에 대한 독립적인 벡터 저장소 지원
+  - 텍스트 분할(Chunking)을 통한 효율적인 컨텐츠 관리
+- **데이터 처리**:
+  - 텍스트 데이터: 동화 내용, 요약, 교훈, 태그 분석
+  - 연령별 컨텐츠 필터링 지원
+  - 자동 메타데이터 관리 (제목, 태그, 스토리ID 등)
+- **통합 기능**:
+  - 이야기 주제 풍부화
+  - 연령대별 맞춤형 이야기 참고 자료 제공
+  - 대화 키워드 기반 유사 이야기 검색
+  - 퍼시스턴스 지원으로 재시작 시에도 데이터 유지
+
 ### 🐢 Chat-bot B (스토리 완성 챗봇 - "꼬기")
 - **역할**: 부기가 만든 줄거리와 음성 클론을 바탕으로 전체 동화 구성
 - **모델**: `GPT-4o, DALL·E 3, ElevenLabs API`
 - **기술 요소**:
   - `GPT-4o`로 상세 스토리 및 대사 생성
   - `DALL·E 3`로 삽화 생성 (프롬프트 엔지니어링 기반)
-  - `ElevenLabs`로 감정/톤 반영된 음성 합성
+  - `ElevenLabs`로 감정/톤 반영된 음성 합성 (주인공 역할 등장인물만 부기가 요청을 보낸 음성 클로닝을 받아 아이의 음성 클로닝)
+  - `GPT-4o`로 나머지 조연 등장인물들의 대화, 그리고 내레이션의 대화를 TTS 실행
 
 ---
 
@@ -57,9 +77,67 @@
        ↓
 [부기: 음성 인식 + 단계별 이야기 수집 + 음성 클로닝 요청]
        ↓
+[LangChain 기반 RAG 시스템: 동화 지식 기반 이야기 강화]
+       ↓
 [꼬기: 줄거리 기반 상세 스토리/삽화/음성 생성]
        ↓
 [앱으로 동화책 전달 및 사용자 피드백 수집]
+```
+
+---
+
+## 📚 LangChain 기반 RAG 시스템 사용법
+
+RAG 시스템은 LangChain과 Chroma DB를 활용하여 동화 창작 과정에서 다양한 지식을 활용하도록 지원합니다.
+
+### 초기화 방법
+```bash
+# 1. 필요 패키지 설치
+pip install -r requirements.txt
+
+# 2. RAG 시스템 초기화 및 샘플 데이터 추가
+python -c "from chatbot.models.rag_system import RAGSystem; rag = RAGSystem(); rag.import_sample_stories()"
+```
+
+### 디렉토리 구조
+```
+data/
+ └── vector_db/
+     ├── summary/    # 요약 텍스트 벡터 저장소
+     └── detailed/   # 상세 내용 벡터 저장소
+```
+
+### 주요 기능
+- **이야기 저장 및 검색**: 스토리 ID, 제목, 태그 등의 메타데이터와 함께 요약 및 상세 내용 저장
+- **유사 이야기 검색**: 요약 또는 상세 내용 기반으로 유사한 이야기 검색 지원
+- **이야기 주제 강화**: 아이의 관심사와 대화 내용을 바탕으로 이야기 주제를 풍부하게 만듦
+- **연령별 필터링**: 태그 기반으로 아이의 연령에 맞는 이야기를 자동으로 필터링
+- **청크 기반 처리**: 긴 텍스트를 자동으로 나누어 관리하고 검색 시 관련 청크 반환
+- **퍼시스턴스**: 디스크에 벡터 데이터 저장으로 서버 재시작 시에도 데이터 유지
+
+### 코드 사용 예시
+```python
+# RAG 시스템 초기화
+from chatbot.models.rag_system import RAGSystem
+rag = RAGSystem()
+
+# 새 스토리 추가
+story_id = rag.add_story(
+    title="용감한 토끼의 모험",
+    tags="용기,평화,대화,화해,4-6세",
+    summary="토끼가 무서운 여우와 대화를 통해 숲속 평화를 이루는 이야기",
+    content="옛날 옛적, 작은 숲 속에 토미라는 작은 토끼가 살고 있었어요..."
+)
+
+# 스토리 검색
+results = rag.query("용기와 화해에 대한 이야기", use_summary=True)
+print(results["answer"])
+
+# 연령대별 유사 이야기 검색
+similar_stories = rag.get_similar_stories("우정", age_group=5, n_results=3)
+
+# 이야기 주제 풍부화
+enhanced_theme = rag.enrich_story_theme("우주 모험", age_group=7)
 ```
 
 ---
@@ -107,7 +185,7 @@ navigator.mediaDevices.getUserMedia({ audio: true })
   "status": "ok",
   "user_text": "안녕 반가워"
 }
-``
+```
 
 ### 에러 응답 형식
 ```json

@@ -50,7 +50,7 @@ async def test_websocket_connection():
                 
                 # 응답 대기 (타임아웃 설정)
                 try:
-                    response = await asyncio.wait_for(websocket.recv(), timeout=10.0)
+                    response = await asyncio.wait_for(websocket.recv(), timeout=30.0)
                     response_data = json.loads(response)
                     
                     # 응답 분석
@@ -62,11 +62,26 @@ async def test_websocket_connection():
                     
                     if "error_message" in response_data:
                         print(f"오류: {response_data.get('error_message')}")
-                    if "error_code" in response_data:
-                        print(f"오류 코드: {response_data.get('error_code')}")
+                        if "error_code" in response_data:
+                            print(f"오류 코드: {response_data.get('error_code')}")
+                    
+                    # 오디오 응답 저장
+                    if "audio" in response_data and response_data["audio"]:
+                        try:
+                            # base64 디코딩
+                            audio_data = base64.b64decode(response_data["audio"])
+                            
+                            # 응답 오디오 저장
+                            response_audio_path = os.path.join(current_dir, "ai_response.mp3")
+                            with open(response_audio_path, "wb") as audio_file:
+                                audio_file.write(audio_data)
+                            print(f"\n응답 오디오 저장 완료: {response_audio_path}")
+                            print(f"오디오 파일 크기: {len(audio_data)} 바이트")
+                        except Exception as audio_error:
+                            print(f"오디오 저장 중 오류 발생: {audio_error}")
                 
                 except asyncio.TimeoutError:
-                    print("서버 응답 타임아웃: 10초 동안 응답이 없습니다.")
+                    print("서버 응답 타임아웃: 30초 동안 응답이 없습니다.")
             else:
                 print(f"샘플 오디오 파일이 없습니다: {SAMPLE_AUDIO_PATH}")
                 print("테스트 오디오 파일을 생성하거나 경로를 수정해주세요.")
@@ -127,6 +142,7 @@ def main():
     parser = argparse.ArgumentParser(description="음성 챗봇 테스트")
     parser.add_argument("--create-audio", action="store_true", help="테스트용 오디오 파일 생성")
     parser.add_argument("--run-server", action="store_true", help="서버 실행")
+    parser.add_argument("--save-response", action="store_true", help="응답 오디오 저장")
     args = parser.parse_args()
     
     if args.create_audio:

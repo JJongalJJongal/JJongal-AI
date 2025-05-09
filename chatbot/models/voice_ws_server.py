@@ -1,20 +1,28 @@
 import logging
 import time
 import traceback
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Query, HTTPException, status
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Query, HTTPException, status, Response
 import whisper
 from .chat_bot_a import StoryCollectionChatBot
 import tempfile, os
 from dotenv import load_dotenv
-import openai
+from openai import OpenAI
 import base64
 import json
 from typing import List, Optional, Dict, Any
 import asyncio
 
 # 환경 변수 Load & API Key 관리
-load_dotenv()
-openai.api_key = os.getenv("OPENAI_API_KEY")
+current_dir = os.path.dirname(os.path.abspath(__file__))
+project_root = os.path.abspath(os.path.join(current_dir, '..', '..'))
+dotenv_path = os.path.join(project_root, '.env')
+load_dotenv(dotenv_path=dotenv_path)
+api_key = os.getenv("OPENAI_API_KEY")
+if not api_key:
+    logging.warning(f"OPENAI_API_KEY environment variable not found. Looking for .env file at: {dotenv_path}")
+
+# OpenAI 클라이언트 초기화
+client = OpenAI(api_key=api_key)
 
 # FastAPI 애플리케이션 인스턴스 생성
 app = FastAPI()
@@ -157,19 +165,32 @@ async def synthesize_tts(ai_response: str):
         async def tts_operation():
             # 동기 함수를 비동기적으로 실행
             tts_result = await asyncio.to_thread(
-                openai.audio.speech.create,
+                client.audio.speech.create,
                 model="tts-1",
-                voice="alloy",
-                input=ai_response
+                voice="nova",
+                input=ai_response,
+                speed=0.9,
+                response_format="wav"
             )
             return tts_result
             
         # 재시도 메커니즘 적용
-        tts_result = await retry_operation(tts_operation)
+        tts_result_tuple = await retry_operation(tts_operation)
         
-        if tts_result is None:
+        # retry_operation의 반환 값은 (결과, 오류_메시지, 오류_코드) 형태의 튜플이거나,
+        # 성공 시 실제 tts_result 객체일 수 있음.
+        # 여기서는 retry_operation이 실패하여 (None, error_message, error_code)를 반환하는 경우를 먼저 확인합니다.
+        if isinstance(tts_result_tuple, tuple) and tts_result_tuple[0] is None:
+            _, error_msg, error_code_val = tts_result_tuple
+            logging.error(f"TTS 생성 실패 후 재시도 모두 실패: {error_msg}")
+            return "", "error", error_msg or "TTS 생성 실패", error_code_val or "tts_generation_failed"
+
+        # 성공한 경우 (OpenAIObject 인스턴스)
+        tts_result = tts_result_tuple 
+        
+        if tts_result is None: # 이중 확인, 실제로는 위에서 처리됨
             return "", "error", "TTS 생성 실패", "tts_generation_failed"
-            
+        
         tts_audio = tts_result.content
         
         # 오디오 크기 확인
@@ -219,8 +240,8 @@ async def catch_exceptions_middleware(request, call_next):
         return await call_next(request)
     except Exception as e:
         logging.error(f"처리되지 않은 서버 오류: {e}")
-        return JSONResponse(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        return Response(
+            status_code=500,
             content={"detail": "서버 내부 오류가 발생했습니다"}
         )
 
@@ -334,10 +355,10 @@ async def audio_endpoint(
             interests=interests_list,
             chatbot_name="부기"
         )
-        
+    
         # TTS 변환
         greeting_audio_b64, tts_status, error_message, error_code = await synthesize_tts(greeting)
-        
+    
         # 인사말 응답 패킷 구성
         greeting_packet = {
             "type": "ai_response",
@@ -345,12 +366,12 @@ async def audio_endpoint(
             "audio": greeting_audio_b64,
             "status": tts_status
         }
-        
+    
         if error_message:
             greeting_packet["error_message"] = error_message
         if error_code:
             greeting_packet["error_code"] = error_code
-        
+    
         # 인사말 전송
         await websocket.send_json(greeting_packet)
         logging.info(f"인사말 전송 완료: {client_id}")
@@ -430,9 +451,9 @@ async def audio_endpoint(
                             error_message = cb_error_message
                             error_code = cb_error_code
                             ai_response = "미안해, 지금은 대답하기 어려워. 다시 말해줄래?"
-                        
+                    
                         logging.info(f"챗봇 응답 ({client_id}): {ai_response}")
-                        
+                    
                         # TTS 변환
                         audio_b64, tts_status, tts_error_message, tts_error_code = await synthesize_tts(ai_response)
                         
@@ -440,7 +461,7 @@ async def audio_endpoint(
                         if tts_error_code:
                             error_message = tts_error_message
                             error_code = tts_error_code
-                        
+                    
                         # 응답 패킷 구성
                         response_packet = {
                             "type": "ai_response",
@@ -449,7 +470,7 @@ async def audio_endpoint(
                             "status": tts_status,
                             "user_text": user_text
                         }
-                        
+                    
                         # 오류 정보 추가
                         if error_message:
                             response_packet["error_message"] = error_message
@@ -458,7 +479,7 @@ async def audio_endpoint(
                         
                         # 응답 전송
                         await websocket.send_json(response_packet)
-                
+                    
                 except Exception as chunk_error:
                     logging.error(f"Chunk 처리 중 오류: {chunk_error}")
                     # 오류 패킷 전송

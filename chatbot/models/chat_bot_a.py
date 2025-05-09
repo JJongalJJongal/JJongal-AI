@@ -6,9 +6,15 @@ import json
 import random
 from pathlib import Path
 
-# 환경 변수 설정
-load_dotenv()
-client = OpenAI(api_key=os.getenv('OPENAI_API_KEY'))
+
+current_dir = os.path.dirname(os.path.abspath(__file__))
+project_root = os.path.abspath(os.path.join(current_dir, '..', '..'))
+dotenv_path = os.path.join(project_root, '.env')
+load_dotenv(dotenv_path=dotenv_path)
+api_key = os.getenv('OPENAI_API_KEY')
+if not api_key:
+    print(f"Warning: OPENAI_API_KEY environment variable not found. Looking for .env file at: {dotenv_path}")
+client = OpenAI(api_key=api_key)
 
 class StoryCollectionChatBot:
     """
@@ -507,29 +513,39 @@ class StoryCollectionChatBot:
     
     def _analyze_user_response(self, user_input: str) -> None:
         """
-        사용자 응답을 분석하여 현재 이야기 단계의 요소들을 추적
+        사용자 응답을 분석하여 이야기 요소를 추출
         
         Args:
-            user_input (str): 사용자 입력
+            user_input (str): 사용자 입력 텍스트
         """
-        current_stage = self.story_stage
+        # GPT를 통해 사용자 응답 분석
+        system_message = "사용자의 응답에서 주요 키워드와 토픽을 추출하세요."
         
-        # 최소 길이 확인 (의미 있는 응답인지)
-        if len(user_input) < 10:
-            return
-            
-        # 현재 단계의 카운트 증가
-        self.story_elements[current_stage]["count"] += 1
-        
-        # 주요 키워드 추출 시도
         try:
-            # 간단한 키워드 추출 (공백으로 구분된 단어들 중 2글자 이상)
-            words = [word for word in user_input.split() if len(word) >= 2]
-            # 중요 키워드 추가 (최대 3개)
-            important_words = words[:3] if words else []
-            self.story_elements[current_stage]["topics"].update(important_words)
-        except Exception:
-            pass
+            messages = [
+                {"role": "system", "content": system_message},
+                {"role": "user", "content": f"다음 텍스트에서 3-5개의 주요 키워드를 콤마로 구분하여 추출하세요: '{user_input}'"}
+            ]
+            
+            response = client.chat.completions.create(
+                model="gpt-4o-mini",
+                messages=messages,
+                max_tokens=100,
+                temperature=0.3
+            )
+            
+            key_parts = response.choices[0].message.content.split(',')
+            keywords = {k.strip() for k in key_parts if len(k.strip()) > 1}
+            
+            # 현재 단계에 키워드 추가
+            if keywords:
+                self.story_elements[self.story_stage]["topics"].update(keywords)
+                self.story_elements[self.story_stage]["count"] += 1
+        
+        except Exception as e:
+            print(f"사용자 응답 분석 중 오류 발생: {e}")
+            # 오류 시 기본값 설정
+            self.story_elements[self.story_stage]["count"] += 1
 
     def _should_transition_to_next_stage(self) -> bool:
         """
@@ -646,7 +662,7 @@ class StoryCollectionChatBot:
             message = message.replace("{name}", self.child_name)
             
         return message
-
+    
     def suggest_story_element(self, user_input: str) -> str:
         """
         사용자 입력을 분석하여 이야기 요소 제안
@@ -741,143 +757,82 @@ class StoryCollectionChatBot:
     
     def suggest_story_theme(self) -> Dict:
         """
-        대화 내용을 바탕으로 동화 줄거리 주제 제안
+        수집된 대화 내용을 바탕으로 이야기 주제 제안
         
         Returns:
-            Dict: 제안된 주제와 간략한 설명
+            Dict: 이야기 주제 및 줄거리 포맷
         """
-        try:
-            # 토큰 제한 확인
-            if self.token_usage["total"] >= self.token_limit:
+        # 대화 내용이 충분한지 확인
+        if len(self.conversation_history) < 5:
                 return {
-                    "theme": "토큰 제한",
-                    "plot_summary": self.token_limit_reached_message
-                }
-                
-            prompt = self.format_story_collection_prompt()
-            
-            response = client.chat.completions.create(
-                model="gpt-4o-mini",
-                messages=[
-                    {"role": "system", "content": "당신은 아이의 대화에서 동화 주제를 추출하는 전문가입니다."},
-                    {"role": "user", "content": prompt},
-                    {"role": "user", "content": f"대화 내용: {json.dumps(self.conversation_history[-10:], ensure_ascii=False)}"}
-                ],
-                temperature=0.7,
-                max_tokens=600,
-                response_format={"type": "json_object"}
-            )
-            
-            # 토큰 사용량 업데이트
-            if hasattr(response, 'usage'):
-                prompt_tokens = response.usage.prompt_tokens
-                completion_tokens = response.usage.completion_tokens
-                total_tokens = response.usage.total_tokens
-                
-                self.token_usage["total_prompt"] += prompt_tokens
-                self.token_usage["total_completion"] += completion_tokens
-                self.token_usage["total"] += total_tokens
-            
-            # 응답에서 JSON 파싱
-            result = json.loads(response.choices[0].message.content)
-            self.story_outline = result
-            
-            return result
-            
-        except Exception as e:
-            print(f"동화 주제 제안 중 오류 발생: {str(e)}")
-            # 기본값 반환
-            fallback_result = {
-                "theme": "모험과 우정",
-                "characters": ["용감한 주인공", "든든한 친구"],
-                "setting": "신비한 숲",
-                "plot_summary": "주인공이 친구와 함께 신비한 숲에서 모험을 하며 다양한 어려움을 극복하고 우정의 가치를 배우는 이야기",
-                "educational_value": "우정, 협동, 문제 해결",
-                "target_age": f"{self.age_group}세"
+                "theme": "아직 충분한 대화가 수집되지 않았습니다",
+                "characters": ["미정"],
+                "setting": "미정",
+                "plot_summary": "더 많은 대화가 필요합니다",
+                "educational_value": "미정",
+                "target_age": self.age_group
             }
-            
-            self.story_outline = fallback_result
-            return fallback_result
-    
-    def collect_story_outline(self) -> Dict:
-        """
-        대화 내용을 바탕으로 동화 줄거리 요약 및 태그를 추출하는 함수
         
-        Returns:
-            Dict: 수집된 정보 (summary_text, tags)
-        """
-        # 토큰 제한 확인
-        if self.token_usage["total"] >= self.token_limit:
-            return {
-                "summary_text": self.token_limit_reached_message,
-                "tags": "토큰 제한"
-            }
+        # 관심사 문자열 준비
+        interests_str = ", ".join(self.interests) if self.interests else "다양한 주제"
+        prompt = self.format_story_collection_prompt()
             
-        # 이미 수집된 이야기 주제가 있다면 그것을 사용
-        if self.story_outline:
-            return {
-                "summary_text": self.story_outline.get("plot_summary", ""),
-                "tags": ",".join([
-                    self.story_outline.get("theme", ""),
-                    self.story_outline.get("educational_value", "")
-                ])
-            }
+        system_message = "당신은 아이들과의 대화를 바탕으로 동화 줄거리를 구성하는 전문가입니다."
+        
+        # 대화 내용 요약
+        conversation_summary = self.get_conversation_summary()
+        
+        messages = [
+            {"role": "system", "content": system_message},
+            {"role": "user", "content": prompt + "\n\n대화 내용 요약:\n" + conversation_summary}
+        ]
         
         try:
-            # 대화 내용을 바탕으로 줄거리 및 태그 추출 프롬프트 생성
-            prompt = f"""
-            대화 내용:
-            {self.conversation_history[-15:]}
-            
-            위 정보를 바탕으로 다음 두 가지를 추출해주세요:
-            1. 간단한 동화 줄거리 (summary_text)
-            2. 이야기와 관련된 핵심 태그 (tags) - 쉼표로 구분된 문자열 형태 (예: 공룡,모험,친구)
-            
-            출력 형식 (JSON):
-            {{
-                "summary_text": "[생성된 줄거리]",
-                "tags": "[추출된 태그]"
-            }}
-            """
-            
+            # GPT 요청
             response = client.chat.completions.create(
                 model="gpt-4o-mini",
-                messages=[
-                    {"role": "system", "content": "너는 아이와의 대화 내용을 바탕으로 동화의 대략적인 줄거리와 관련된 주제 태그를 추출하는 유치원 선생님이야."},
-                    {"role": "user", "content": prompt}
-                ],
-                temperature=0.7,
-                max_tokens=600,
-                response_format={"type": "json_object"} # JSON 형식으로 응답 요청
+                messages=messages,
+                max_tokens=800,
+                temperature=0.7
             )
             
             # 토큰 사용량 업데이트
-            if hasattr(response, 'usage'):
-                prompt_tokens = response.usage.prompt_tokens
-                completion_tokens = response.usage.completion_tokens
-                total_tokens = response.usage.total_tokens
+            self.token_usage["total_prompt"] += response.usage.prompt_tokens
+            self.token_usage["total_completion"] += response.usage.completion_tokens
+            self.token_usage["total"] = self.token_usage["total_prompt"] + self.token_usage["total_completion"]
+            
+            # 응답 파싱 시도
+            response_text = response.choices[0].message.content
+            
+            try:
+                # JSON 응답 파싱
+                json_start = response_text.find('{')
+                json_end = response_text.rfind('}') + 1
                 
-                self.token_usage["total_prompt"] += prompt_tokens
-                self.token_usage["total_completion"] += completion_tokens
-                self.token_usage["total"] += total_tokens
+                if json_start >= 0 and json_end > json_start:
+                    json_str = response_text[json_start:json_end]
+                    story_data = json.loads(json_str)
+                    
+                    self.story_outline = story_data
+                    return story_data
+                else:
+                    # JSON이 아닌 경우 수동 파싱 시도
+                    return self._manual_parse_story(response_text)
             
-            # 응답에서 JSON 파싱
-            result = json.loads(response.choices[0].message.content)
-            
-            # 관심사를 태그에 추가 (선택 사항)
-            if self.interests:
-                existing_tags = set(result.get("tags", "").split(','))
-                existing_tags.update(self.interests)
-                result["tags"] = ",".join(filter(None, existing_tags))
-            
-            return result
+            except json.JSONDecodeError:
+                # JSON 파싱 실패 시 수동 파싱
+                return self._manual_parse_story(response_text)
             
         except Exception as e:
-            print(f"동화 줄거리 및 태그 추출 중 오류 발생: {str(e)}")
-            # 기본값 반환 시 아이의 관심사를 태그로 사용
+            # 오류 발생 시 기본 응답
+            print(f"이야기 주제 생성 중 오류 발생: {e}")
             return {
-                "summary_text": "주인공이 친구와 함께 모험을 하며 용기와 우정의 가치를 배우는 이야기입니다.",
-                "tags": ",".join(self.interests) if self.interests else "모험,우정"
+                "theme": f"오류 발생: {str(e)}",
+                "characters": ["미정"],
+                "setting": "미정",
+                "plot_summary": "오류로 인해 생성할 수 없습니다",
+                "educational_value": "미정",
+                "target_age": self.age_group
             }
     
     def get_conversation_summary(self) -> str:
@@ -981,4 +936,122 @@ class StoryCollectionChatBot:
             "token_limit": self.token_limit,
             "remaining_tokens": max(0, self.token_limit - self.token_usage["total"]),
             "percentage_used": min(100, (self.token_usage["total"] / self.token_limit) * 100)
+        }
+    
+    def _manual_parse_story(self, response_text: str) -> Dict:
+        """
+        GPT 응답 텍스트에서 이야기 요소를 수동으로 파싱
+        
+        Args:
+            response_text (str): GPT 응답 텍스트
+            
+        Returns:
+            Dict: 이야기 주제 및 줄거리 포맷
+        """
+        try:
+            # 기본 이야기 구조 생성
+            story_data = {
+                "theme": "",
+                "characters": [],
+                "setting": "",
+                "plot_summary": "",
+                "educational_value": "",
+                "target_age": self.age_group
+            }
+            
+            # 텍스트에서 주제 추출 시도
+            theme_match = None
+            for pattern in ["주제:", "테마:", "이야기 주제:", "theme:"]:
+                index = response_text.lower().find(pattern.lower())
+                if index >= 0:
+                    line_end = response_text.find("\n", index)
+                    if line_end < 0:
+                        line_end = len(response_text)
+                    theme_match = response_text[index + len(pattern):line_end].strip()
+                    if theme_match:
+                        break
+            
+            if theme_match:
+                story_data["theme"] = theme_match
+            else:
+                # 첫 줄을 주제로 가정
+                first_line_end = response_text.find("\n")
+                if first_line_end > 0:
+                    story_data["theme"] = response_text[:first_line_end].strip()
+                else:
+                    story_data["theme"] = "추출된 주제 없음"
+            
+            # 텍스트에서 캐릭터 추출 시도
+            characters_match = None
+            for pattern in ["캐릭터:", "등장인물:", "characters:"]:
+                index = response_text.lower().find(pattern.lower())
+                if index >= 0:
+                    line_end = response_text.find("\n", index)
+                    if line_end < 0:
+                        line_end = len(response_text)
+                    characters_match = response_text[index + len(pattern):line_end].strip()
+                    if characters_match:
+                        # 쉼표로 분리된 캐릭터 목록 생성
+                        story_data["characters"] = [c.strip() for c in characters_match.split(",")]
+                        break
+            
+            # 텍스트에서 배경 추출 시도
+            setting_match = None
+            for pattern in ["배경:", "장소:", "setting:"]:
+                index = response_text.lower().find(pattern.lower())
+                if index >= 0:
+                    line_end = response_text.find("\n", index)
+                    if line_end < 0:
+                        line_end = len(response_text)
+                    setting_match = response_text[index + len(pattern):line_end].strip()
+                    if setting_match:
+                        story_data["setting"] = setting_match
+                        break
+            
+            # 텍스트에서 줄거리 추출 시도
+            plot_match = None
+            for pattern in ["줄거리:", "스토리:", "plot:", "plot summary:"]:
+                index = response_text.lower().find(pattern.lower())
+                if index >= 0:
+                    next_heading = float('inf')
+                    for p in ["교육적 가치:", "educational value:", "포인트:"]:
+                        next_idx = response_text.lower().find(p.lower(), index)
+                        if next_idx > 0 and next_idx < next_heading:
+                            next_heading = next_idx
+                    
+                    if next_heading < float('inf'):
+                        plot_match = response_text[index + len(pattern):next_heading].strip()
+                    else:
+                        plot_match = response_text[index + len(pattern):].strip()
+                    
+                    if plot_match:
+                        story_data["plot_summary"] = plot_match
+                        break
+            
+            # 텍스트에서 교육적 가치 추출 시도
+            value_match = None
+            for pattern in ["교육적 가치:", "교훈:", "educational value:"]:
+                index = response_text.lower().find(pattern.lower())
+                if index >= 0:
+                    value_match = response_text[index + len(pattern):].strip()
+                    story_data["educational_value"] = value_match
+                    break
+            
+            # 줄거리가 여전히 비어있으면 전체 텍스트를 줄거리로 설정
+            if not story_data["plot_summary"]:
+                story_data["plot_summary"] = response_text
+            
+            self.story_outline = story_data
+            return story_data
+            
+        except Exception as e:
+            print(f"이야기 수동 파싱 중 오류 발생: {str(e)}")
+            # 오류 시 기본 응답
+            return {
+                "theme": "파싱 오류",
+                "characters": ["미정"],
+                "setting": "미정",
+                "plot_summary": response_text[:200] + "...",  # 일부만 반환
+                "educational_value": "미정",
+                "target_age": self.age_group
         } 

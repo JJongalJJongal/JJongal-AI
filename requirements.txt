@@ -39,3 +39,11 @@ typing_extensions==4.13.2
 urllib3==2.4.0
 uvicorn==0.34.2
 websockets==15.0.1
+# 데이터베이스 기반 RAG 시스템 패키지
+langchain==0.2.2
+langchain-openai==0.2.0
+langchain-text-splitters==0.2.2
+sqlalchemy==2.0.26
+pillow==10.2.0
+python-multipart==0.0.7
+faiss-cpu==1.8.0
