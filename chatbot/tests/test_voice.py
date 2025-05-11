@@ -51,17 +51,17 @@ async def test_websocket_connection():
                 # 응답 대기 (타임아웃 설정)
                 try:
                     response = await asyncio.wait_for(websocket.recv(), timeout=30.0)
-                    response_data = json.loads(response)
-                    
-                    # 응답 분석
-                    print("\n서버 응답:")
+                response_data = json.loads(response)
+                
+                # 응답 분석
+                print("\n서버 응답:")
                     print(f"응답 유형: {response_data.get('type', '')}")
-                    print(f"AI 응답 텍스트: {response_data.get('text', '')}")
-                    print(f"사용자 음성 인식: {response_data.get('user_text', '')}")
-                    print(f"상태: {response_data.get('status', '')}")
-                    
-                    if "error_message" in response_data:
-                        print(f"오류: {response_data.get('error_message')}")
+                print(f"AI 응답 텍스트: {response_data.get('text', '')}")
+                print(f"사용자 음성 인식: {response_data.get('user_text', '')}")
+                print(f"상태: {response_data.get('status', '')}")
+                
+                if "error_message" in response_data:
+                    print(f"오류: {response_data.get('error_message')}")
                         if "error_code" in response_data:
                             print(f"오류 코드: {response_data.get('error_code')}")
                     
