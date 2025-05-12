@@ -775,7 +775,7 @@ class StoryCollectionChatBot:
         
         # 관심사 문자열 준비
         interests_str = ", ".join(self.interests) if self.interests else "다양한 주제"
-            prompt = self.format_story_collection_prompt()
+        prompt = self.format_story_collection_prompt()
             
         system_message = "당신은 아이들과의 대화를 바탕으로 동화 줄거리를 구성하는 전문가입니다."
         

@@ -11,6 +11,7 @@ import base64
 import json
 from typing import List, Optional, Dict, Any
 import asyncio
+from .chat_bot_b import StoryGenerationChatBot
 
 # 환경 변수 Load & API Key 관리
 current_dir = os.path.dirname(os.path.abspath(__file__))
@@ -47,6 +48,12 @@ logging.basicConfig(
 
 # 활성 연결 관리
 active_connections = {}
+
+# 꼬기(chat_bot_b) 인스턴스 가져오기
+from .chat_bot_b import StoryGenerationChatBot
+
+# Chatbot B 인스턴스 저장
+chatbot_b_instances = {}
 
 # 실패한 요청에 대한 재시도 매커니즘
 async def retry_operation(operation, max_retries=3, retry_delay=1):
@@ -527,4 +534,277 @@ async def audio_endpoint(
         finally:
             await handle_disconnect(client_id)
         
+# 꼬기(chat_bot_b) WebSocket 엔드포인트
+@app.websocket("/ws/story_generation")
+async def story_generation_endpoint(
+    websocket: WebSocket, 
+    token: str = Query(None),
+    child_name: str = Query(None),
+    age: int = Query(None),
+    interests: Optional[str] = Query(None)
+):
+    """
+    동화 생성을 위한 WebSocket 엔드포인트
+    
+    Args:
+        websocket: WebSocket 연결
+        token: 인증 토큰
+        child_name: 아이 이름
+        age: 아이 나이
+        interests: 관심사 (쉼표로 구분)
+    """
+    # 클라이언트 ID 생성
+    client_id = f"story_{child_name}_{int(time.time())}"
+    
+    # 토큰 검증
+    if not validate_token(token):
+        await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
+        logging.warning(f"인증 실패: {client_id}")
+        return
+    
+    # 파라미터 검증
+    if not child_name or not age:
+        await websocket.close(code=status.WS_1003_UNSUPPORTED_DATA)
+        logging.warning(f"필수 파라미터 누락: {client_id}")
+        return
+    
+    # 관심사 처리
+    interest_list = []
+    if interests:
+        interest_list = interests.split(',')
+    
+    # WebSocket 연결 수락
+    await websocket.accept()
+    logging.info(f"꼬기(chatbot_b) 연결 수락: {client_id}")
+    
+    # 꼬기(chatbot_b) 인스턴스 생성
+    output_dir = os.path.join("output", client_id)
+    os.makedirs(output_dir, exist_ok=True)
+    chatbot_b = StoryGenerationChatBot(output_dir=output_dir)
+    chatbot_b.set_target_age(age)
+    
+    # 클라이언트 정보 저장
+    chatbot_b_instances[client_id] = {
+        "chatbot": chatbot_b,
+        "child_name": child_name,
+        "age": age,
+        "interests": interest_list,
+        "last_activity": time.time()
+    }
+    
+    try:
+        # 인사 메시지 전송
+        greeting_message = {
+            "type": "greeting",
+            "text": f"안녕! 나는 꼬기야. {child_name}님을 위한 멋진 동화를 만들어줄게. 부기가 알려준 동화 줄거리로 더 재미있는 이야기를 만들어볼까?",
+        }
+        await websocket.send_text(json.dumps(greeting_message))
+        
+        # 클라이언트와의 통신 처리
+        while True:
+            # 메시지 수신
+            data = await websocket.receive()
+            
+            # 바이너리 데이터 처리 (오디오)
+            if "bytes" in data:
+                # 아직 오디오 처리 구현 안 함
+                continue
+            
+            # 텍스트 데이터 처리 (JSON 형식)
+            if "text" in data:
+                try:
+                    message = json.loads(data["text"])
+                    message_type = message.get("type", "unknown")
+                    
+                    # 메시지 유형에 따른 처리
+                    if message_type == "story_outline":
+                        # 동화 줄거리 수신
+                        story_outline = message.get("story_outline", {})
+                        
+                        # 줄거리 설정
+                        chatbot_b.set_story_outline(story_outline)
+                        
+                        # 상세 스토리 생성 응답
+                        await websocket.send_text(json.dumps({
+                            "type": "processing",
+                            "text": "동화 줄거리를 받았어! 이제 멋진 이야기를 만들어볼게. 잠시만 기다려줘~"
+                        }))
+                        
+                        try:
+                            # 상세 스토리 생성
+                            detailed_story = await asyncio.to_thread(chatbot_b.generate_detailed_story)
+                            
+                            # 응답 전송
+                            await websocket.send_text(json.dumps({
+                                "type": "detailed_story",
+                                "text": f"'{detailed_story['title']}'이라는 멋진 이야기를 만들었어!",
+                                "detailed_story": detailed_story
+                            }))
+                        except Exception as e:
+                            logging.error(f"상세 스토리 생성 오류: {str(e)}")
+                            await websocket.send_text(json.dumps({
+                                "type": "error",
+                                "text": "스토리 생성 중에 문제가 발생했어. 다시 시도해볼까?",
+                                "error_message": str(e)
+                            }))
+                    
+                    elif message_type == "generate_illustrations":
+                        # 일러스트 생성 요청
+                        await websocket.send_text(json.dumps({
+                            "type": "processing",
+                            "text": "멋진 그림을 그려볼게. 잠시만 기다려줘~"
+                        }))
+                        
+                        try:
+                            # 일러스트 생성
+                            images = await asyncio.to_thread(chatbot_b.generate_illustrations)
+                            
+                            # 이미지 경로 목록 전송
+                            await websocket.send_text(json.dumps({
+                                "type": "illustrations",
+                                "text": f"{len(images)}개의 멋진 그림을 그렸어!",
+                                "images": images
+                            }))
+                        except Exception as e:
+                            logging.error(f"일러스트 생성 오류: {str(e)}")
+                            await websocket.send_text(json.dumps({
+                                "type": "error",
+                                "text": "그림을 그리다가 문제가 발생했어. 다시 시도해볼까?",
+                                "error_message": str(e)
+                            }))
+                    
+                    elif message_type == "generate_voice":
+                        # 내레이션 생성 요청
+                        await websocket.send_text(json.dumps({
+                            "type": "processing",
+                            "text": "이야기를 읽어줄 목소리를 만들고 있어. 조금만 기다려줘~"
+                        }))
+                        
+                        try:
+                            # 내레이션 생성
+                            voice_result = await asyncio.to_thread(chatbot_b.generate_voice)
+                            
+                            # 내레이션 결과 전송
+                            await websocket.send_text(json.dumps({
+                                "type": "voice",
+                                "text": "이야기를 읽어줄 목소리를 만들었어!",
+                                "voice_data": voice_result
+                            }))
+                        except Exception as e:
+                            logging.error(f"내레이션 생성 오류: {str(e)}")
+                            await websocket.send_text(json.dumps({
+                                "type": "error",
+                                "text": "목소리를 만드는 중에 문제가 발생했어. 다시 시도해볼까?",
+                                "error_message": str(e)
+                            }))
+                    
+                    elif message_type == "get_preview":
+                        # 동화 미리보기 요청
+                        try:
+                            # 미리보기 생성
+                            preview = await asyncio.to_thread(chatbot_b.get_story_preview)
+                            
+                            # 미리보기 전송
+                            await websocket.send_text(json.dumps({
+                                "type": "preview",
+                                "text": f"'{preview['title']}' 동화 미리보기야!",
+                                "preview": preview
+                            }))
+                        except Exception as e:
+                            logging.error(f"미리보기 생성 오류: {str(e)}")
+                            await websocket.send_text(json.dumps({
+                                "type": "error",
+                                "text": "미리보기를 만드는 중에 문제가 발생했어.",
+                                "error_message": str(e)
+                            }))
+                    
+                    elif message_type == "save_story":
+                        # 동화 저장 요청
+                        story_name = message.get("story_name", f"story_{int(time.time())}")
+                        try:
+                            # 동화 저장
+                            story_data_path = os.path.join(output_dir, f"{story_name}.json")
+                            await asyncio.to_thread(chatbot_b.save_story_data, story_data_path)
+                            
+                            # 저장 완료 응답
+                            await websocket.send_text(json.dumps({
+                                "type": "save_complete",
+                                "text": "동화가 저장되었어!",
+                                "story_path": story_data_path
+                            }))
+                        except Exception as e:
+                            logging.error(f"동화 저장 오류: {str(e)}")
+                            await websocket.send_text(json.dumps({
+                                "type": "error",
+                                "text": "동화를 저장하는 중에 문제가 발생했어.",
+                                "error_message": str(e)
+                            }))
+                    
+                    elif message_type == "ping":
+                        # 연결 유지 핑
+                        await websocket.send_text(json.dumps({
+                            "type": "pong"
+                        }))
+                    
+                    else:
+                        # 알 수 없는 메시지 유형
+                        logging.warning(f"알 수 없는 메시지 유형: {message_type}")
+                        await websocket.send_text(json.dumps({
+                            "type": "error",
+                            "text": "이해할 수 없는 메시지야.",
+                            "error_message": f"알 수 없는 메시지 유형: {message_type}"
+                        }))
+                
+                except json.JSONDecodeError:
+                    logging.error(f"JSON 디코딩 오류: {data['text']}")
+                    await websocket.send_text(json.dumps({
+                        "type": "error",
+                        "text": "메시지 형식이 올바르지 않아.",
+                        "error_message": "JSON 디코딩 오류"
+                    }))
+                
+                # 마지막 활동 시간 업데이트
+                chatbot_b_instances[client_id]["last_activity"] = time.time()
+    
+    except WebSocketDisconnect:
+        logging.info(f"꼬기(chatbot_b) 연결 종료: {client_id}")
+    
+    except Exception as e:
+        logging.error(f"꼬기(chatbot_b) 처리 중 예외 발생: {client_id}, {str(e)}")
+        traceback.print_exc()
+    
+    finally:
+        # 클라이언트 연결 종료 처리
+        await handle_disconnect(client_id)
+
+# 주기적으로 비활성 클라이언트 정리
+@app.on_event("startup")
+async def start_cleanup_task():
+    """비활성 클라이언트 정리 태스크 시작"""
+    asyncio.create_task(cleanup_inactive_clients())
+
+async def cleanup_inactive_clients():
+    """비활성 클라이언트 정리 함수"""
+    while True:
+        try:
+            await asyncio.sleep(300)  # 5분마다 실행
+            current_time = time.time()
+            
+            # 30분 이상 비활성인 클라이언트 정리
+            inactive_timeout = 1800  # 30분
+            inactive_clients = []
+            
+            # 비활성 클라이언트 식별
+            for client_id, client_data in chatbot_b_instances.items():
+                if current_time - client_data["last_activity"] > inactive_timeout:
+                    inactive_clients.append(client_id)
+            
+            # 비활성 클라이언트 정리
+            for client_id in inactive_clients:
+                del chatbot_b_instances[client_id]
+                logging.info(f"비활성 클라이언트 정리: {client_id}")
+        
+        except Exception as e:
+            logging.error(f"비활성 클라이언트 정리 중 오류 발생: {str(e)}")
+
             
