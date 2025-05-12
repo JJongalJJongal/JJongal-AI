@@ -2,6 +2,15 @@
 .env
 .env.*
 
+# 데이터 파일
+data/raw
+data/processed/story_data
+data/processed/analysis
+
+# 노트북 체크포인트
+.ipynb_checkpoints/
+*/.ipynb_checkpoints/*
+
 # Python 관련
 __pycache__/
 *.py[cod]
@@ -25,11 +34,12 @@ var/
 *.egg
 
 # 가상 환경
-fairy_tail
+fairy_tail/
 venv/
 ENV/
 env/
 *.pyc
+
 # IDE 관련
 .idea/
 .vscode/
@@ -52,7 +62,20 @@ output/
 data/vector_db/
 data/faiss_index/
 
+# 대용량 이미지 및 미디어 파일
+*.jpg
+*.jpeg
+*.png
+*.gif
+*.mp3
+*.wav
+*.mp4
+*.mov
+
 # API 키 및 인증 정보
 *_key.json
 *_credentials.json
 *_token.json
+
+# Project file
+*.cursor/
