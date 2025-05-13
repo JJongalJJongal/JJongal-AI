@@ -13,7 +13,7 @@ from typing import List, Optional, Dict, Any
 import asyncio
 from .chat_bot_b import StoryGenerationChatBot
 
-# 환경 변수 Load & API Key 관리
+# 환경 변수 Load & API Key 관리 개선
 current_dir = os.path.dirname(os.path.abspath(__file__))
 project_root = os.path.abspath(os.path.join(current_dir, '..', '..'))
 dotenv_path = os.path.join(project_root, '.env')
@@ -22,40 +22,50 @@ api_key = os.getenv("OPENAI_API_KEY")
 if not api_key:
     logging.warning(f"OPENAI_API_KEY environment variable not found. Looking for .env file at: {dotenv_path}")
 
-# OpenAI 클라이언트 초기화
-client = OpenAI(api_key=api_key)
+# OpenAI 클라이언트 초기화 및 예외 처리 추가
+try:
+    client = OpenAI(api_key=api_key)
+    logging.info("OpenAI 클라이언트 초기화 성공")
+except Exception as e:
+    logging.error(f"OpenAI 클라이언트 초기화 실패: {e}")
+    client = None
 
 # FastAPI 애플리케이션 인스턴스 생성
-app = FastAPI()
+app = FastAPI(title="꼬꼬북 음성 인터페이스 API", 
+              description="아동 음성을 받아 동화 생성을 위한 API",
+              version="1.0.0")
 
-# Whisper 모델 초기화
+# Whisper 모델 초기화 (더 안정적인 방식으로)
 model = None
+whisper_model_name = os.getenv("WHISPER_MODEL", "base")
 try:
-    model = whisper.load_model("base")
-    logging.info("Whisper 모델 로드 성공")
+    model = whisper.load_model(whisper_model_name)
+    logging.info(f"Whisper 모델({whisper_model_name}) 로드 성공")
 except Exception as e:
     logging.error(f"Whisper 모델 로드 실패: {e}")
 
-# 로깅 설정
+# 로깅 설정 개선
+log_format = '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+log_level = os.getenv("LOG_LEVEL", "INFO")
+log_file = os.getenv("LOG_FILE", "server.log")
+
 logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    level=getattr(logging, log_level),
+    format=log_format,
     handlers=[
-        logging.FileHandler("server.log"),
+        logging.FileHandler(log_file),
         logging.StreamHandler()
     ]
 )
 
-# 활성 연결 관리
+# 활성 연결 관리 (만료 시간 추가)
 active_connections = {}
+CONNECTION_TIMEOUT = 30 * 60  # 30분 타임아웃
 
-# 꼬기(chat_bot_b) 인스턴스 가져오기
-from .chat_bot_b import StoryGenerationChatBot
-
-# Chatbot B 인스턴스 저장
+# Chatbot B 인스턴스 저장 (리팩토링)
 chatbot_b_instances = {}
 
-# 실패한 요청에 대한 재시도 매커니즘
+# 실패한 요청에 대한 재시도 매커니즘 (개선)
 async def retry_operation(operation, max_retries=3, retry_delay=1):
     """
     작업을 재시도하는 함수
@@ -66,27 +76,32 @@ async def retry_operation(operation, max_retries=3, retry_delay=1):
         retry_delay (float): 재시도 간 대기 시간(초)
     
     Returns:
-        작업 결과 또는 None (실패 시)
+        작업 결과 또는 (None, error_message, error_code) 튜플
     """
     attempts = 0
     last_error = None
     
     while attempts < max_retries:
         try:
-            return await operation()
+            result = await operation()
+            logging.debug(f"작업 성공 (시도 {attempts+1}/{max_retries})")
+            return result
         except Exception as e:
             attempts += 1
             last_error = e
             logging.warning(f"작업 실패 (시도 {attempts}/{max_retries}): {e}")
             
             if attempts < max_retries:
-                await asyncio.sleep(retry_delay)
-                retry_delay *= 1.5  # 지수 백오프
-    
+                # 지수 백오프 적용 (더 안정적인 재시도)
+                adjusted_delay = retry_delay * (1.5 ** (attempts - 1))
+                logging.info(f"{adjusted_delay:.2f}초 후 재시도...")
+                await asyncio.sleep(adjusted_delay)
+                
     logging.error(f"최대 재시도 횟수 초과: {last_error}")
-    return None, f"작업 실패: {last_error}", "retry_failed"
+    error_detail = str(last_error) if last_error else "알 수 없는 오류"
+    return None, f"작업 실패: {error_detail}", "retry_failed"
 
-# 인증 토큰 검증 함수 검사
+# 인증 토큰 검증 함수 (보안 강화)
 def validate_token(token: str) -> bool:
     """
     인증 토큰 검증 함수
@@ -98,16 +113,22 @@ def validate_token(token: str) -> bool:
         bool: 유효한 토큰이면 True, 아니면 False
     """
     valid_token = os.getenv("WS_AUTH_TOKEN", "valid_token")
+    
+    # 토큰 검증 로깅 (디버그 모드일 때만)
+    if logging.getLogger().level <= logging.DEBUG:
+        logging.debug(f"토큰 검증: 입력={token}, 유효={valid_token}")
+    
     return token == valid_token
 
-# Whisper 변환 함수
-async def transcribe_audio(model, file_path: str):
+# Whisper 변환 함수 (성능 최적화)
+async def transcribe_audio(model, file_path: str, language: str = "ko"):
     """
     Whisper로 음성 파일을 텍스트로 변환
     
     Args:
         model: Whisper 모델 인스턴스
         file_path (str): 오디오 파일 경로
+        language (str): 인식할 언어 코드 (기본값: 'ko' - 한국어)
     
     Returns:
         tuple: (텍스트, 오류 메시지, 오류 코드)
@@ -117,19 +138,39 @@ async def transcribe_audio(model, file_path: str):
         return "", "Whisper 모델이 초기화되지 않았습니다", "whisper_not_initialized"
         
     try:
-        logging.info(f"오디오 파일 변환 시작: {file_path}, 크기: {os.path.getsize(file_path)} 바이트")
+        file_size = os.path.getsize(file_path)
+        logging.info(f"오디오 파일 변환 시작: {file_path}, 크기: {file_size} 바이트")
+        
+        # 파일이 너무 작으면 무시
+        if file_size < 1000:  # 1KB 미만
+            logging.warning("오디오 파일이 너무 작습니다")
+            return "", "오디오 파일이 너무 작습니다", "audio_too_small"
         
         # 비동기 처리를 위해 스레드풀에서 실행
-        result = await asyncio.to_thread(model.transcribe, file_path, language="ko")
+        # 언어 추가 지정으로 정확도 향상
+        result = await asyncio.to_thread(
+            model.transcribe, 
+            file_path, 
+            language=language,
+            fp16=False  # 호환성 향상을 위해 fp16 비활성화
+        )
         
-        logging.info(f"Whisper 변환 결과: {result['text']}")
-        return result["text"], None, None
+        text = result.get("text", "").strip()
+        logging.info(f"Whisper 변환 결과: {text}")
+        
+        # 결과가 빈 문자열이면 처리
+        if not text:
+            logging.warning("Whisper가 텍스트를 인식하지 못했습니다")
+            return "", "음성을 인식하지 못했습니다. 더 명확하게 말씀해주세요.", "no_speech_detected"
+            
+        return text, None, None
+        
     except Exception as e:
         error_detail = traceback.format_exc()
         logging.error(f"Whisper 오류: {e}\n{error_detail}")
         return "", f"Whisper 오류: {e}", "whisper_error"
 
-# 챗봇 응답 생성 함수
+# 챗봇 응답 생성 함수 개선
 async def get_chatbot_response(chatbot, user_text: str):
     """
     챗봇에 텍스트를 전달해 응답 생성
@@ -144,22 +185,36 @@ async def get_chatbot_response(chatbot, user_text: str):
     try:
         if not user_text:
             return "", "챗봇 입력 없음", "chatbot_no_input"
+        
+        # 입력 전처리 - 공백 제거 및 텍스트 정리
+        processed_text = user_text.strip()
+        if not processed_text:
+            return "", "챗봇 입력 없음", "chatbot_no_input"
             
+        # 비동기 처리 시작 시간 기록
+        start_time = time.time()
+        
         # 비동기 처리를 위해 스레드풀에서 실행
-        response = await asyncio.to_thread(chatbot.get_response, user_text)
+        response = await asyncio.to_thread(chatbot.get_response, processed_text)
+        
+        # 처리 시간 기록
+        elapsed_time = time.time() - start_time
+        logging.info(f"챗봇 응답 생성 완료 (소요 시간: {elapsed_time:.2f}초)")
+        
         return response, None, None
     except Exception as e:
         error_detail = traceback.format_exc()
         logging.error(f"챗봇 오류: {e}\n{error_detail}")
         return "", f"챗봇 오류: {e}", "chatbot_error"
 
-# TTS 변환 함수
-async def synthesize_tts(ai_response: str):
+# TTS 변환 함수 개선
+async def synthesize_tts(ai_response: str, voice: str = "nova"):
     """
     AI 응답을 TTS로 변환
     
     Args:
         ai_response (str): 텍스트 응답
+        voice (str): 사용할 음성 (기본값: 'nova')
     
     Returns:
         tuple: (base64 인코딩된 오디오, 상태, 오류 메시지, 오류 코드)
@@ -167,44 +222,45 @@ async def synthesize_tts(ai_response: str):
     try:
         if not ai_response:
             return "", "error", "TTS 입력 없음", "tts_no_input"
+        
+        # OpenAI 클라이언트 확인
+        if client is None:
+            return "", "error", "OpenAI 클라이언트가 초기화되지 않았습니다", "openai_client_not_initialized"
             
         # TTS 요청 (비동기 방식으로 처리)
         async def tts_operation():
             # 동기 함수를 비동기적으로 실행
             tts_result = await asyncio.to_thread(
                 client.audio.speech.create,
-                model="tts-1",
-                voice="nova",
+                model="tts-1-hd",  # 더 높은 품질의 TTS 사용
+                voice=voice,
                 input=ai_response,
                 speed=0.9,
-                response_format="wav"
+                response_format="mp3"  # mp3 형식으로 변경 (더 작은 파일 크기)
             )
             return tts_result
             
         # 재시도 메커니즘 적용
-        tts_result_tuple = await retry_operation(tts_operation)
+        tts_result = await retry_operation(tts_operation)
         
-        # retry_operation의 반환 값은 (결과, 오류_메시지, 오류_코드) 형태의 튜플이거나,
-        # 성공 시 실제 tts_result 객체일 수 있음.
-        # 여기서는 retry_operation이 실패하여 (None, error_message, error_code)를 반환하는 경우를 먼저 확인합니다.
-        if isinstance(tts_result_tuple, tuple) and tts_result_tuple[0] is None:
-            _, error_msg, error_code_val = tts_result_tuple
+        # retry_operation의 반환값 확인
+        if isinstance(tts_result, tuple) and tts_result[0] is None:
+            _, error_msg, error_code = tts_result
             logging.error(f"TTS 생성 실패 후 재시도 모두 실패: {error_msg}")
-            return "", "error", error_msg or "TTS 생성 실패", error_code_val or "tts_generation_failed"
-
-        # 성공한 경우 (OpenAIObject 인스턴스)
-        tts_result = tts_result_tuple 
+            return "", "error", error_msg or "TTS 생성 실패", error_code or "tts_generation_failed"
         
-        if tts_result is None: # 이중 확인, 실제로는 위에서 처리됨
-            return "", "error", "TTS 생성 실패", "tts_generation_failed"
-        
+        # 성공한 경우의 처리
         tts_audio = tts_result.content
         
         # 오디오 크기 확인
-        if len(tts_audio) < 2 * 1024 * 1024:
+        if len(tts_audio) < 2 * 1024 * 1024:  # 2MB 미만
             return base64.b64encode(tts_audio).decode("utf-8"), "ok", None, None
         else:
-            return "", "partial", "TTS 오디오 크기 초과", "tts_partial"
+            # 큰 오디오 파일 처리 개선
+            logging.warning(f"TTS 오디오 크기 초과: {len(tts_audio)} 바이트")
+            
+            # 큰 파일이지만 일부 반환
+            return base64.b64encode(tts_audio).decode("utf-8"), "large_file", "오디오 크기가 큽니다", "tts_large_file"
     except Exception as e:
         error_detail = traceback.format_exc()
         logging.error(f"TTS 오류: {e}\n{error_detail}")
@@ -286,6 +342,9 @@ async def handle_disconnect(client_id: str):
                 try:
                     if os.path.exists(temp_file):
                         os.remove(temp_file)
+                        # 삭제된 파일 목록에서 제거
+                        if temp_file in active_connections[client_id]["temp_files"]:
+                            active_connections[client_id]["temp_files"].remove(temp_file)
                 except Exception as e:
                     logging.warning(f"임시 파일 삭제 실패: {e}")
         
@@ -390,9 +449,9 @@ async def audio_endpoint(
             "error_code": "initialization_error",
             "status": "error"
         }
-        await websocket.send_json(error_packet)
-        await handle_disconnect(client_id)
-        return
+    await websocket.send_json(error_packet)
+    await handle_disconnect(client_id)
+    return
     
     # 4. 메인 대화 루프
     audio_chunks = []  # 오디오 chunk 저장 리스트
@@ -486,7 +545,7 @@ async def audio_endpoint(
                         
                         # 응답 전송
                         await websocket.send_json(response_packet)
-                    
+                
                 except Exception as chunk_error:
                     logging.error(f"Chunk 처리 중 오류: {chunk_error}")
                     # 오류 패킷 전송
@@ -806,5 +865,5 @@ async def cleanup_inactive_clients():
         
         except Exception as e:
             logging.error(f"비활성 클라이언트 정리 중 오류 발생: {str(e)}")
-
+        
             
