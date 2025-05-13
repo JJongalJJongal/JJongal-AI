@@ -3,9 +3,9 @@
 .env.*
 
 # 데이터 파일
-data/raw
-data/processed/story_data
-data/processed/analysis
+**processed/
+**validation/
+**raw/
 
 # 노트북 체크포인트
 .ipynb_checkpoints/
@@ -77,5 +77,5 @@ data/faiss_index/
 *_credentials.json
 *_token.json
 
-# Project file
+# mcp server & cursor file
 *.cursor/
