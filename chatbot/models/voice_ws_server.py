@@ -65,6 +65,9 @@ CONNECTION_TIMEOUT = 30 * 60  # 30분 타임아웃
 # Chatbot B 인스턴스 저장 (리팩토링)
 chatbot_b_instances = {}
 
+# 전역 변수로 종료 이벤트 추가
+shutdown_event = asyncio.Event()
+
 # 실패한 요청에 대한 재시도 매커니즘 (개선)
 async def retry_operation(operation, max_retries=3, retry_delay=1):
     """
@@ -276,6 +279,9 @@ async def startup_event():
 async def shutdown_event():
     """서버 종료 시 실행되는 함수"""
     logging.info("음성 WebSocket 서버 종료됨")
+    # 종료 이벤트 설정
+    shutdown_event.set()
+    
     # 활성 연결 정리
     for client_id, connection_info in active_connections.items():
         try:
@@ -449,9 +455,9 @@ async def audio_endpoint(
             "error_code": "initialization_error",
             "status": "error"
         }
-    await websocket.send_json(error_packet)
-    await handle_disconnect(client_id)
-    return
+        await websocket.send_json(error_packet)
+        await handle_disconnect(client_id)
+        return
     
     # 4. 메인 대화 루프
     audio_chunks = []  # 오디오 chunk 저장 리스트
@@ -844,9 +850,19 @@ async def start_cleanup_task():
 
 async def cleanup_inactive_clients():
     """비활성 클라이언트 정리 함수"""
-    while True:
+    while not shutdown_event.is_set():
         try:
-            await asyncio.sleep(300)  # 5분마다 실행
+            # 5분마다 실행하되, 1초마다 종료 이벤트 확인
+            for _ in range(300):
+                await asyncio.sleep(1)
+                if shutdown_event.is_set():
+                    break
+                    
+            # 종료 이벤트가 설정되었다면 루프 종료
+            if shutdown_event.is_set():
+                logging.info("비활성 클라이언트 정리 태스크 종료")
+                break
+                
             current_time = time.time()
             
             # 30분 이상 비활성인 클라이언트 정리
@@ -865,5 +881,7 @@ async def cleanup_inactive_clients():
         
         except Exception as e:
             logging.error(f"비활성 클라이언트 정리 중 오류 발생: {str(e)}")
+    
+    logging.info("비활성 클라이언트 정리 태스크 완전 종료")
         
             

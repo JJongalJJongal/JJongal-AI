@@ -10,8 +10,8 @@ import io
 import requests
 import numpy as np
 from pathlib import Path
-import elevenlabs
-from elevenlabs import generate, save, set_api_key, voices
+from elevenlabs.client import ElevenLabs
+from elevenlabs import play, stream, save
 from .rag_system import RAGSystem
 
 # 환경 변수 설정
@@ -24,9 +24,11 @@ elevenlabs_api_key = os.getenv('ELEVENLABS_API_KEY')
 if not os.getenv('OPENAI_API_KEY'):
     print(f"Warning: OPENAI_API_KEY environment variable not found. Looking for .env file at: {dotenv_path}")
 if elevenlabs_api_key:
-    elevenlabs.set_api_key(elevenlabs_api_key)
+    # 최신 ElevenLabs API 사용 방식으로 변경
+    elevenlabs_client = ElevenLabs(api_key=elevenlabs_api_key)
 else:
     print(f"Warning: ELEVENLABS_API_KEY environment variable not found. Looking for .env file at: {dotenv_path}")
+    elevenlabs_client = None
 
 class StoryGenerationChatBot:
     """
@@ -76,7 +78,8 @@ class StoryGenerationChatBot:
     def load_prompts(self):
         """JSON 파일에서 프롬프트를 로드하는 함수"""
         try:
-            prompts_path = os.path.join('data', 'prompts', 'chatbot_b_prompts.json')
+            # 경로 수정: 상대 경로 대신 current_dir 기준의 경로 사용
+            prompts_path = os.path.join(os.path.dirname(current_dir), 'data', 'prompts', 'chatbot_b_prompts.json')
             with open(prompts_path, 'r', encoding='utf-8') as f:
                 self.prompts = json.load(f)
         except Exception as e:
@@ -218,7 +221,7 @@ class StoryGenerationChatBot:
             # 내레이션 텍스트를 오디오로 변환
             audio_response = client.audio.speech.create(
                 model="tts-1",
-                voice="alloy",
+                voice="nova",
                 input=narration_text
             )
             
@@ -516,7 +519,7 @@ class StoryGenerationChatBot:
         
         try:
             # ElevenLabs 사용 가능 여부 확인
-            use_elevenlabs = elevenlabs_api_key is not None
+            use_elevenlabs = elevenlabs_client is not None
             
             # 각 장면에 대한 내레이션 생성
             for i, scene in enumerate(self.detailed_story["scenes"]):
@@ -528,11 +531,17 @@ class StoryGenerationChatBot:
                 # 내레이션 오디오 생성
                 if use_elevenlabs:
                     # ElevenLabs로 음성 생성
-                    narration_audio = elevenlabs.generate(
+                    audio_stream = elevenlabs_client.text_to_speech.convert(
                         text=narration_text,
-                        voice="Bella",  # 아이들을 위한 친근한 여성 목소리
-                        model="eleven_multilingual_v2"  # 다국어 모델 (한국어 지원)
+                        voice_id=self.default_voice_id,  # 기본 음성 사용
+                        model_id="eleven_multilingual_v2"
                     )
+                    
+                    # generator에서 바이트 데이터 수집
+                    narration_audio = b""
+                    for chunk in audio_stream:
+                        if isinstance(chunk, bytes):
+                            narration_audio += chunk
                 else:
                     # OpenAI TTS 사용
                     narration_response = client.audio.speech.create(
@@ -566,12 +575,21 @@ class StoryGenerationChatBot:
                     
                     # 대사 오디오 생성
                     if use_elevenlabs:
+                        # 음성 ID 선택
+                        selected_voice_id = voice if voice else self.default_voice_id
+                        
                         # ElevenLabs로 음성 생성
-                        dialogue_audio = elevenlabs.generate(
+                        audio_stream = elevenlabs_client.text_to_speech.convert(
                             text=dialogue_text,
-                            voice=voice,
-                            model="eleven_multilingual_v2"
+                            voice_id=selected_voice_id,
+                            model_id="eleven_multilingual_v2"
                         )
+                        
+                        # generator에서 바이트 데이터 수집
+                        dialogue_audio = b""
+                        for chunk in audio_stream:
+                            if isinstance(chunk, bytes):
+                                dialogue_audio += chunk
                     else:
                         # OpenAI TTS 사용
                         dialogue_response = client.audio.speech.create(

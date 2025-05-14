@@ -1,22 +1,72 @@
+# 꼬꼬북 프로젝트 GitIgnore 파일
+
+#----------------------
+# 환경 및 설정 파일
+#----------------------
 # 환경 변수 파일
 .env
 .env.*
+*.env
 
+# 인증 및 API 키
+*_key.json
+*_credentials.json
+*_token.json
+*_secret*
+
+# 커서 및 MCP 관련
+.cursor/
+*.cursor/
+
+#----------------------
 # 데이터 파일
+#----------------------
+# 원본 및 처리된 데이터
 **processed/
 **validation/
 **raw/
 
-# 노트북 체크포인트
-.ipynb_checkpoints/
-*/.ipynb_checkpoints/*
+# 벡터 데이터베이스
+data/vector_db/
+chatbot/data/vector_db/**/*.sqlite3
+chatbot/data/vector_db/**/chroma.sqlite3
+chatbot/data/vector_db/**/index/
+*-????-????-????-????????????/  # UUID 패턴 디렉토리
+*????????-????-????-????-????????????/
 
+# 특정 벡터 DB 디렉토리
+chatbot/data/vector_db/main/*
+chatbot/data/vector_db/detailed/*
+chatbot/data/vector_db/summary/*
+
+# 임베딩 및 벡터 파일
+*.npy
+*.npz
+*.pkl
+*.pt
+*.bin
+*.faiss
+data/faiss_index/
+*.embedding
+
+# 모델 캐시
+.cache/
+**/.cache/
+**/__pycache__/
+*.cache/
+*cache*/
+
+#----------------------
 # Python 관련
+#----------------------
+# 바이트 코드 및 캐시
 __pycache__/
 *.py[cod]
 *$py.class
 *.so
 .Python
+
+# 패키지 관련
 env/
 build/
 develop-eggs/
@@ -38,44 +88,112 @@ fairy_tail/
 venv/
 ENV/
 env/
+.venv/
+.env/
+.virtualenv/
 *.pyc
 
-# IDE 관련
-.idea/
+# 노트북 체크포인트
+.ipynb_checkpoints/
+*/.ipynb_checkpoints/*
+
+#----------------------
+# IDE 및 편집기 관련
+#----------------------
+# VS Code
 .vscode/
+*.code-workspace
+
+# PyCharm / IntelliJ
+.idea/
+*.iml
+*.iws
+*.ipr
+.idea_modules/
+
+# 임시 편집기 파일
 *.swp
 *.swo
+*~
+\#*\#
+.\#*
 
+#----------------------
+# 로그 및 임시 파일
+#----------------------
 # 로그 파일
 *.log
+logs/
+*/logs/*
+**/logs/**
+*.log.*
 
 # 데이터베이스
 *.db
+*.sqlite
 *.sqlite3
 
 # 임시 파일
 .DS_Store
 Thumbs.db
+.directory
+desktop.ini
+*.tmp
+*.temp
+*.bak
 
-# 출력 파일
+#----------------------
+# 출력 및 미디어 파일
+#----------------------
+# 출력 디렉토리
 output/
-data/vector_db/
-data/faiss_index/
+*/output/*
+**/output/**
 
-# 대용량 이미지 및 미디어 파일
+# 이미지 및 미디어
 *.jpg
 *.jpeg
 *.png
 *.gif
+*.svg
+*.ico
 *.mp3
 *.wav
 *.mp4
 *.mov
+*.avi
+*.mkv
+*.flac
+*.ogg
 
-# API 키 및 인증 정보
-*_key.json
-*_credentials.json
-*_token.json
+#----------------------
+# 테스트 관련
+#----------------------
+# 테스트 스크립트 및 임시 테스트 파일
+test_*.py
+*_test.py
+tests/temp/
+**/tests/temp/**
+test_temp*
 
-# mcp server & cursor file
-*.cursor/
+# 디버깅 및 프로파일링
+*.prof
+*.profraw
+*.coverage
+.coverage
+htmlcov/
+.pytest_cache/
+
+#----------------------
+# 시스템 및 백업 파일
+#----------------------
+# 백업 파일
+*.bak
+*.backup
+*~
+*.orig
+
+# 시스템 파일
+._*
+.Trashes
+ehthumbs.db

@@ -5,7 +5,8 @@ import os
 import json
 import random
 from pathlib import Path
-
+from elevenlabs.client import ElevenLabs
+from elevenlabs import play, stream, save
 
 current_dir = os.path.dirname(os.path.abspath(__file__))
 project_root = os.path.abspath(os.path.join(current_dir, '..', '..'))
@@ -84,7 +85,7 @@ class StoryCollectionChatBot:
         """프롬프트 JSON 파일을 로드하는 메서드"""
         try:
             current_dir = os.path.dirname(os.path.abspath(__file__))
-            prompts_path = os.path.join(current_dir, '..', 'data', 'prompts', 'chatbot_prompts.json')
+            prompts_path = os.path.join(current_dir, '..', 'data', 'prompts', 'chatbot_a_prompts.json')
             
             with open(prompts_path, 'r', encoding='utf-8') as f:
                 prompts = json.load(f)
