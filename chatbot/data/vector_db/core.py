@@ -1,17 +1,7 @@
 """
-꼬꼬북 프로젝트 벡터 데이터베이스 모듈
+벡터 데이터베이스 핵심 기능을 제공하는 모듈
 
-이 모듈은 세 가지 벡터 데이터베이스를 관리합니다:
-1. main DB: 일반적인 검색 목적으로 사용, 전체 스토리와 메타데이터 포함
-2. detailed DB: 스토리 전개, 캐릭터 설명, 배경 설정 등 세부 내용 검색에 최적화
-3. summary DB: 동화의 주제, 교훈, 키워드, 짧은 요약 등 핵심 정보 검색에 최적화
-
-각 DB는 고유한 임베딩 특성을 가지며, 목적에 맞게 선택하여 사용하세요.
-
-RAG 시스템 연계 방안:
-- 초기 검색: summary DB 사용 (주제와 키워드 파악)
-- 세부 정보 검색: detailed DB 사용 (구체적 스토리 구성 요소)
-- 균형 잡힌 참조: main DB 사용 (일반적인 스토리 구조)
+ChromaDB를 사용한 벡터 데이터베이스 관리 클래스와 기능을 포함합니다.
 """
 
 import os
@@ -50,7 +40,7 @@ class VectorDB:
     - detailed: 세부 정보 검색용
     - summary: 요약 및 주제 검색용
     """
-    
+
     def __init__(self, persist_directory: str = None, embedding_model: str = "all-MiniLM-L6-v2"):
         """
         VectorDB 클래스 초기화
@@ -70,7 +60,7 @@ class VectorDB:
         self._setup_embedding_function()
         
         logger.info(f"VectorDB 초기화 완료: {persist_directory}")
-    
+        
     def _setup_client(self):
         """ChromaDB 클라이언트 설정"""
         try:

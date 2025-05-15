@@ -6,14 +6,15 @@ from dotenv import load_dotenv
 
 # 프로젝트 루트 디렉토리를 파이썬 경로에 추가
 current_dir = os.path.dirname(os.path.abspath(__file__))
-sys.path.append(current_dir)
+project_root = os.path.abspath(os.path.join(current_dir, '..', '..', '..'))
+sys.path.append(project_root)
 
 # 환경 변수 로드
-dotenv_path = os.path.join(current_dir, '.env')
+dotenv_path = os.path.join(project_root, '.env')
 load_dotenv(dotenv_path=dotenv_path)
 
 # RAG 시스템 불러오기
-from chatbot.models.rag_system import RAGSystem
+from CCB_AI.chatbot.models.rag_system import RAGSystem  
 
 def main():
     """
@@ -40,13 +41,14 @@ def main():
         filter_criteria['theme'] = args.filter_theme
     
     # 디렉토리 경로 설정
-    stories_dir = os.path.join(current_dir, 'chatbot', 'data', 'processed', 'story_data')
+    stories_dir = os.path.join(project_root, 'CCB_AI', 'chatbot', 'data', 'processed', 'story_data')
     
     print(f"스토리 데이터 디렉토리: {stories_dir}")
     print(f"필터링 기준: {filter_criteria if filter_criteria else '없음'}")
     
     # RAG 시스템 초기화
-    rag_system = RAGSystem(persist_directory=os.path.join(current_dir, 'data', 'vector_db'))
+    vector_db_dir = os.path.join(project_root, 'CCB_AI', 'chatbot', 'data', 'vector_db')
+    rag_system = RAGSystem(persist_directory=vector_db_dir)
     
     # 스토리 데이터 준비
     stories_data = []

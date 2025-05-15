@@ -1,0 +1,28 @@
+"""
+꼬꼬북 프로젝트 벡터 데이터베이스 패키지
+
+이 패키지는 이야기 데이터를 벡터화하고 효율적으로 검색하기 위한 기능을 제공합니다.
+세 가지 유형의 벡터 데이터베이스를 지원합니다:
+- main: 일반 검색용 (기본)
+- detailed: 세부 정보 검색용
+- summary: 요약 및 주제 검색용
+"""
+
+from .core import VectorDB
+from .importers import import_stories, process_story_data
+from .query import query_vector_db, format_query_results, get_similar_stories
+from .utils import ensure_directory, get_db_type_path, load_json_file, save_json_file, check_collection_info
+
+__all__ = [
+    'VectorDB',
+    'import_stories',
+    'process_story_data',
+    'query_vector_db',
+    'format_query_results',
+    'get_similar_stories',
+    'ensure_directory',
+    'get_db_type_path',
+    'load_json_file',
+    'save_json_file',
+    'check_collection_info'
+] 
