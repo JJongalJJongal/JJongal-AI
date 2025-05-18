@@ -21,7 +21,7 @@ from langchain_openai import ChatOpenAI
 from langchain_core.runnables import RunnablePassthrough, RunnableLambda
 
 # 벡터 DB 관련 모듈 임포트
-from ..data.vector_db import VectorDB, query_vector_db, format_query_results, get_similar_stories
+from chatbot.data.vector_db import VectorDB, query_vector_db, format_query_results, get_similar_stories
 
 # 공통 유틸리티 모듈 임포트
 from shared.utils.logging_utils import get_module_logger

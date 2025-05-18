@@ -34,7 +34,7 @@ MYSQL_PASSWORD = ""
 # Vector Database
 CHROMA_PERSIST_DIR = "data/vector_db"
 PINECONE_INDEX = "ccb-ai"
-FAISS_INDEX_PATH = "data/faiss_index"
+
 
 # Cloud Storage
 S3_BUCKET = "ccb-ai-storage"

@@ -2,6 +2,8 @@
 파일 처리 관련 유틸리티 모듈
 """
 import os
+import shutil
+import base64
 import json
 import logging
 from pathlib import Path
@@ -24,6 +26,53 @@ def ensure_directory(path: Union[str, Path]) -> Path:
     dir_path.mkdir(parents=True, exist_ok=True)
     return dir_path
 
+def save_image_from_base64(base64_str, file_path):
+    """Base64 인코딩된 Image 를 파일로 저장"""
+    try:
+        # Base64 header 제거
+        if ',' in base64_str:
+            base64_str = base64_str.split(',')[1]
+            
+        # directory 생성
+        os.makedirs(os.path.dirname(file_path), exist_ok=True)
+        
+        # Base64 decoding * file save
+        with open(file_path, "wb") as f:
+            f.write(base64.b64decode(base64_str))
+            
+        return file_path
+    
+    except Exception as e:
+        print(f"이미지 저장 중 오류 발생 : {e}")
+        return None
+
+
+def save_audio(audio_data, file_path, mode="wb"):
+    """
+    오디오 데이터를 파일로 저장
+
+    Args:
+        audio_data (bytes): 저장할 오디오 데이터 (binary)
+        file_path (str): 저장할 파일 경로
+        mode (str): 파일 열기 모드 (wb)
+    
+    Returns:
+        str: 저장된 파일 경로
+    """
+    
+    try:
+        # directory 생성
+        os.makedirs(os.path.dirname(file_path), exist_ok=True)
+        
+        # 오디오 데이터 저장
+        with open(file_path, mode) as f:
+            f.write(audio_data)
+            
+        return file_path
+    
+    except Exception as e:
+        print(f"오디오 저장 중 오류 발생 : {e}")
+        return None
 
 def save_json(data: Dict[str, Any], file_path: Union[str, Path], indent: int = 4) -> bool:
     """
@@ -98,6 +147,45 @@ def list_files(directory: Union[str, Path], pattern: str = "*") -> List[Path]:
         logger.error(f"디렉토리 내 파일 목록 조회 실패: {e}")
         return []
 
+def ensure_directory(directory_path: Union[str, Path]) -> str:
+    """
+    디렉토리가 존재하는지 확인하고, 없으면 생성
+
+    Args:
+        directory_path (Union[str, Path]): 확인할 디렉토리 경로
+
+    Returns:
+        str: 생성된 디렉토리 경로
+    """
+    if not isinstance(directory_path, Path):
+        directory_path = Path(directory_path)
+        
+    directory_path.mkdir(parents=True, exist_ok=True)
+    return str(directory_path)
+    
+def copy_file(source_path: Union[str, Path], target_path: Union[str, Path]) -> Optional[str]:
+    """
+    파일 복사
+
+    Args:
+        source_path: 원본 파일 경로
+        target_path: 대상 파일 경로
+
+    Returns:
+        복사된 파일 경로 또는 오류 시 None
+    """
+    try:
+        # 대상 디렉토리 생성
+        ensure_directory(os.path.dirname(target_path))
+        
+        # 파일 복사
+        shutil.copy2(source_path, target_path)
+        
+        return str(target_path)
+    
+    except Exception as e:
+        logger.error(f"파일 복사 중 오류 발생: {e}")
+        return None
 
 def get_project_root() -> Path:
     """
@@ -109,3 +197,30 @@ def get_project_root() -> Path:
     # 현재 파일 기준 상위 디렉토리 탐색
     current_dir = Path(__file__).resolve().parent  # /shared/utils
     return current_dir.parent.parent  # /CCB_AI 
+
+def file_exists(file_path: Union[str, Path]) -> bool:
+    """
+    파일 존재 여부 확인
+    
+    Args:
+        file_path (Union[str, Path]): 확인할 파일 경로
+        
+    Returns:
+        bool: 파일 존재 여부
+    """
+    
+    return os.path.isfile(file_path)
+
+def get_file_size(file_path: Union[str, Path]) -> int:
+    """
+    파일 크기를 바이트 단위로 반환함.
+    
+    Args:
+        file_path (Union[str, Path]): 파일 경로
+        
+    Returns:
+        int: 파일 크기 (바이트)
+    """
+    if not file_exists(file_path):
+        return 0
+    return os.path.getsize(file_path)

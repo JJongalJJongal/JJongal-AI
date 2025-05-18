@@ -41,13 +41,13 @@ class VectorDB:
     - summary: 요약 및 주제 검색용
     """
 
-    def __init__(self, persist_directory: str = None, embedding_model: str = "all-MiniLM-L6-v2"):
+    def __init__(self, persist_directory: str = None, embedding_model: str = "text-embedding-ada-002"):
         """
         VectorDB 클래스 초기화
         
         Args:
             persist_directory: ChromaDB 저장 디렉토리 경로
-            embedding_model: 임베딩 모델 이름 (기본값: "all-MiniLM-L6-v2")
+            embedding_model: 임베딩 모델 이름 (기본값: "text-embedding-ada-002")
         """
         self.persist_directory = persist_directory
         self.embedding_model = embedding_model
@@ -79,13 +79,29 @@ class VectorDB:
     def _setup_embedding_function(self):
         """임베딩 함수 설정"""
         try:
-            self.embedding_function = embedding_functions.SentenceTransformerEmbeddingFunction(
+            # OpenAI API 키 가져오기
+            api_key = os.getenv("OPENAI_API_KEY")
+            if not api_key:
+                logger.warning("OPENAI_API_KEY 환경 변수가 설정되지 않았습니다. 기본 임베딩 함수를 사용합니다.")
+                self.embedding_function = embedding_functions.DefaultEmbeddingFunction()
+                return
+                
+            # OpenAI 임베딩 함수 설정
+            self.embedding_function = embedding_functions.OpenAIEmbeddingFunction(
+                api_key=api_key,
                 model_name=self.embedding_model
             )
-            logger.info(f"임베딩 함수 설정 완료: {self.embedding_model}")
+            logger.info(f"OpenAI 임베딩 함수 설정 완료: {self.embedding_model}")
         except Exception as e:
             logger.error(f"임베딩 함수 설정 실패: {str(e)}")
-            raise
+            # 폴백: 기본 임베딩 함수 사용 시도
+            try:
+                logger.warning("기본 임베딩 함수로 폴백합니다.")
+                self.embedding_function = embedding_functions.DefaultEmbeddingFunction()
+                logger.info("기본 임베딩 함수로 폴백 성공")
+            except Exception as fallback_error:
+                logger.error(f"기본 임베딩 함수 설정 실패: {str(fallback_error)}")
+                raise
     
     def create_collection(self, name: str = "fairy_tales", metadata: Dict[str, str] = None):
         """

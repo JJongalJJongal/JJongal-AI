@@ -53,7 +53,9 @@ class MessageFormatter:
                     # 각 항목에 포맷팅 시도
                     formatted_item = item.format(
                         child_name=self.child_name or "아이",
+                        name=self.child_name or "아이",   # 'name' 변수 추가
                         age_group=self.age_group or "5",
+                        age=self.age_group or "5",       # 'age' 변수 추가
                         interests=interests_str,
                         chatbot_name=self.chatbot_name
                     )
@@ -70,7 +72,9 @@ class MessageFormatter:
             try:
                 return system_template.format(
                     child_name=self.child_name or "아이",
+                    name=self.child_name or "아이",   # 'name' 변수 추가
                     age_group=self.age_group or "5",
+                    age=self.age_group or "5",       # 'age' 변수 추가 
                     interests=interests_str,
                     chatbot_name=self.chatbot_name
                 )
@@ -107,6 +111,8 @@ class MessageFormatter:
             # 그 외 포맷팅 처리
             greeting = greeting.format(
                 child_name=self.child_name or "친구",
+                name=self.child_name or "친구",  # 'name' 변수 추가
+                age=self.age_group or 5,         # 'age' 변수 추가
                 chatbot_name=self.chatbot_name
             )
         except Exception as e:

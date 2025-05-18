@@ -3,7 +3,9 @@
 """
 from typing import List, Dict, Any, Optional, Union
 from pathlib import Path
+import sys
 
+sys.path.append("/Users/b._.chan/Documents/University/캡스톤디자인/AI/CCB_AI")
 from shared.utils.logging_utils import get_module_logger
 from shared.utils.file_utils import save_json, load_json
 

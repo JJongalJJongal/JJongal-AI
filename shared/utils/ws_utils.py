@@ -5,14 +5,67 @@ import logging
 import os
 import time
 import json
-from typing import Dict, Any, Optional, Set, Callable, Awaitable
+from typing import Dict, Any, Optional, Set, Callable, Awaitable, Tuple
 from fastapi import WebSocket, WebSocketDisconnect
 import asyncio
-
+import jwt
+from datetime import datetime, timedelta
 from ..configs.app_config import get_env_vars
 
 logger = logging.getLogger(__name__)
 
+def generate_jwt_token(payload: Dict[str, Any], expiry_hours: int = 24) -> str:
+    """
+    JWT 토큰 생성 함수
+
+    Args:
+        payload (Dict[str, Any]): 토큰에 포함될 데이터
+        expiry_hours (int): 토큰 만료 시간
+
+    Returns:
+        str: 생성된 JWT 토큰
+    """
+
+    env_vars = get_env_vars()
+    secret_key = env_vars.get("jwt_secret_key", "꼬꼬북_기본_시크릿키")
+    
+    # 만료 시간 추가
+    expiry = datetime.utcnow() + timedelta(hours=expiry_hours)
+    token_data = {
+        "exp": expiry,
+        "iat": datetime.utcnow(),
+        **payload
+    }
+
+    token = jwt.encode(token_data, secret_key, algorithm="HS256")
+    return token
+
+def decode_jwt_token(token: str) -> Tuple[bool, Optional[Dict[str, Any]], Optional[str]]:
+    """
+    JWT 토큰 디코딩 함수
+    
+    Args:
+        token (str): 디코딩할 JWT 토큰
+        
+    Returns:
+        Tuple[bool, Optional[Dict], Optional[str]]:
+            - 성공 여부
+            - payload (실패 시 None)
+            - 오류 메시지 (성공 시 None)
+    """
+    
+    env_vars = get_env_vars()
+    secret_key = env_vars.get("jwt_secret_key", "꼬꼬북_기본_시크릿키")
+    
+    try:
+        payload = jwt.decode(token, secret_key, algorithms=["HS256"])
+        return True, payload, None
+    except jwt.ExpiredSignatureError:
+        return False, None, "토큰이 만료되었습니다"
+    except jwt.InvalidTokenError:
+        return False, None, "유효하지 않은 토큰입니다"
+    except Exception as e:
+        return False, None, f"토큰 디코딩 중 오류 발생: {e}"
 
 def validate_token(token: str) -> bool:
     """
@@ -25,15 +78,47 @@ def validate_token(token: str) -> bool:
         bool: 유효한 토큰이면 True, 아니면 False
     """
     env_vars = get_env_vars()
-    valid_token = env_vars.get("ws_auth_token", "valid_token")
     
-    # 토큰 검증 로깅 (디버그 모드일 때만)
-    if logger.isEnabledFor(logging.DEBUG):
-        logger.debug(f"토큰 검증: 입력={token[:3]}***, 유효={valid_token[:3]}***")
+    # 개발 모드
+    if env_vars.get("enviroment") == "development":
+        valid_token = env_vars.get("ws_auth_token", "valid_token")
+        if token == valid_token:
+            logger.debug("개발 모드 : 기본 토큰 인증 성공")
+            return True
     
-    return token == valid_token
+    # JWT 토큰 검증
+    success, payload, error = decode_jwt_token(token)
+    
+    if success:
+        # 추가 검증 로직 구현중
 
+        logger.debug(f"JWT 토큰 검증 성공 : sub={payload.get('sub', 'unknown')}")
+        return True
+    else:
+        logger.warning(f"JWT 토큰 검증 실패 : {error}")
+        return False
+    
+# 테스트 토큰 생성 함수
+def create_test_token(user_id: str = "test_user", role: str = "user") -> str:
+    """
+    테스트용 JWT 토큰 생성
 
+    Args:
+        user_id (str): 사용자 ID.
+        role (str): 사용자 역할.
+
+    Returns:
+        str: 생성된 JWT 토큰
+    """
+
+    payload = {
+        "sub": user_id, # 토큰 주체
+        "role": role, # 사용자 역할
+        "test": True # 테스트 토큰 여부
+    }
+    
+    return generate_jwt_token(payload)
+    
 class ConnectionManager:
     """
     웹소켓 연결 관리자 클래스
