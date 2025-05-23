@@ -25,7 +25,7 @@ def query_vector_db(
     vector_db: VectorDB, 
     query_text: str, 
     collection_name: str = "fairy_tales",
-    n_results: int = 5,
+    n_results: int = 8,
     age_group: Optional[int] = None,
     theme: Optional[str] = None,
     doc_type: Optional[str] = None
@@ -54,13 +54,19 @@ def query_vector_db(
             return {"error": f"컬렉션 '{collection_name}' 가져오기 실패: {str(e)}"}
         
         # 필터 설정
-        where_filter = {}
+        filter_conditions = []
         if age_group is not None:
-            where_filter["age_group"] = age_group
+            filter_conditions.append({"age_group": {"$eq": age_group}})
         if theme:
-            where_filter["theme"] = {"$contains": theme}
+            filter_conditions.append({"theme": {"$contains": theme}})
         if doc_type:
-            where_filter["type"] = doc_type
+            filter_conditions.append({"type": {"$eq": doc_type}})
+
+        where_filter = None
+        if len(filter_conditions) == 1:
+            where_filter = filter_conditions[0]
+        elif len(filter_conditions) > 1:
+            where_filter = {"$and": filter_conditions}
             
         # 쿼리 실행
         results = vector_db.query(

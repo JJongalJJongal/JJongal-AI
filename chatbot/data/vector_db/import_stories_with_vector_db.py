@@ -163,14 +163,14 @@ def main():
     
     # 미리보기 출력
     print("\n=== 추가될 스토리 미리보기 ===")
-    for idx, story in enumerate(stories_to_import[:5], 1):  # 최대 5개만 표시
+    for idx, story in enumerate(stories_to_import[:10], 1):  # 최대 10개만 표시
         print(f"{idx}. {story.get('title', '제목 없음')} (ID: {story.get('story_id', 'ID 없음')})")
         print(f"   태그: {story.get('tags', '태그 없음')}")
         print(f"   요약: {story.get('summary', '요약 없음')[:100]}...")
         print()
     
-    if len(stories_to_import) > 5:
-        print(f"...외 {len(stories_to_import) - 5}개 스토리\n")
+    if len(stories_to_import) > 10:
+        print(f"...외 {len(stories_to_import) - 10}개 스토리\n")
     
     # 사용자 확인
     confirm = input("ChromaDB에 스토리를 추가하시겠습니까? (y/n): ")

@@ -45,13 +45,21 @@ class RAGSystem:
         summary_db (Chroma): 요약 정보 벡터 데이터베이스
     """
 
-    def __init__(self, persist_directory: Optional[str] = None, use_openai_embeddings: bool = True):
+    def __init__(self, 
+                 persist_directory: Optional[str] = None, 
+                 use_openai_embeddings: bool = False,  # 한국어 모델 우선 사용
+                 use_hybrid_mode: bool = True,
+                 memory_cache_size: int = 1000,
+                 enable_lfu_cache: bool = True):
         """
         RAG 시스템 초기화
 
         Args:
             persist_directory (Optional[str]): ChromaDB 저장 디렉토리 경로
-            use_openai_embeddings (bool): OpenAI 임베딩 사용 여부 (False면 HuggingFace 임베딩 사용)
+            use_openai_embeddings (bool): OpenAI 임베딩 사용 여부 (기본값: False, 한국어 모델 우선)
+            use_hybrid_mode (bool): 하이브리드 모드(메모리+디스크) 사용 여부
+            memory_cache_size (int): 메모리 캐시 크기
+            enable_lfu_cache (bool): LFU 캐시 정책 사용 여부
         """
         # 기본 디렉토리 설정
         if persist_directory is None:
@@ -63,22 +71,27 @@ class RAGSystem:
             self.persist_directory = Path(persist_directory)
         
         self.db_types = ["main", "detailed", "summary"]
+        self.use_hybrid_mode = use_hybrid_mode
+        self.memory_cache_size = memory_cache_size
+        self.enable_lfu_cache = enable_lfu_cache
         
-        # 임베딩 설정
+        # 임베딩 모델 설정 (한국어 모델 우선)
         if use_openai_embeddings:
             # OpenAI API 키 확인
             try:
                 # OpenAI 클라이언트 초기화 테스트
                 initialize_client()
-                self.embeddings_model = "text-embedding-ada-002"
+                self.embeddings_model = "text-embedding-3-small"
                 logger.info("OpenAI 임베딩 모델 초기화")
             except Exception as e:
-                logger.warning(f"OpenAI 임베딩 초기화 실패: {e}, HuggingFace 임베딩으로 대체")
-                self.embeddings_model = "all-MiniLM-L6-v2"
+                logger.warning(f"OpenAI 임베딩 초기화 실패: {e}")
+                # 한국어 모델로 폴백
+                self.embeddings_model = "nlpai-lab/KURE-v1"
+                logger.info("한국어 임베딩 모델로 폴백")
         else:
-            # 로컬 임베딩 모델 사용
-            self.embeddings_model = "all-MiniLM-L6-v2"
-            logger.info("HuggingFace 임베딩 모델 초기화 (all-MiniLM-L6-v2)")
+            # 한국어 모델 우선 사용
+            self.embeddings_model = "nlpai-lab/KURE-v1"
+            logger.info("한국어 임베딩 모델 사용")
         
         # 벡터 데이터베이스 초기화
         self._initialize_vector_dbs()
@@ -90,38 +103,65 @@ class RAGSystem:
             logger.error(f"OpenAI 클라이언트 초기화 실패: {e}")
             self.openai_client = None
         
-        logger.info("RAG 시스템 초기화 완료")
+        logger.info("RAG 시스템 초기화 완료:")
+        logger.info(f"  - 하이브리드 모드: {use_hybrid_mode}")
+        logger.info(f"  - 임베딩 모델: {self.embeddings_model}")
+        logger.info(f"  - 메모리 캐시 크기: {memory_cache_size}")
+        logger.info(f"  - LFU 캐시: {enable_lfu_cache}")
     
     def _initialize_vector_dbs(self) -> None:
-        """벡터 데이터베이스 초기화"""
+        """벡터 데이터베이스 초기화 (하이브리드 모드 지원)"""
         try:
             # 각 DB 유형별 디렉토리 확인 및 생성
             for db_type in self.db_types:
                 db_dir = self.persist_directory / db_type
                 ensure_directory(db_dir)
             
-            # 모듈화된 VectorDB 객체 생성
+            # 모듈화된 VectorDB 객체 생성 (하이브리드 모드 적용)
             self.main_vectordb = VectorDB(
                 persist_directory=str(self.persist_directory / "main"),
-                embedding_model=self.embeddings_model
+                embedding_model=self.embeddings_model,
+                use_hybrid_mode=self.use_hybrid_mode,
+                memory_cache_size=self.memory_cache_size,
+                enable_lfu_cache=self.enable_lfu_cache
             )
             
             self.detailed_vectordb = VectorDB(
                 persist_directory=str(self.persist_directory / "detailed"),
-                embedding_model=self.embeddings_model
+                embedding_model=self.embeddings_model,
+                use_hybrid_mode=self.use_hybrid_mode,
+                memory_cache_size=self.memory_cache_size,
+                enable_lfu_cache=self.enable_lfu_cache
             )
             
             self.summary_vectordb = VectorDB(
                 persist_directory=str(self.persist_directory / "summary"),
-                embedding_model=self.embeddings_model
+                embedding_model=self.embeddings_model,
+                use_hybrid_mode=self.use_hybrid_mode,
+                memory_cache_size=self.memory_cache_size,
+                enable_lfu_cache=self.enable_lfu_cache
             )
             
-            # 컬렉션 설정
-            self.main_collection = self.main_vectordb.get_collection("fairy_tales")
-            self.detailed_collection = self.detailed_vectordb.get_collection("fairy_tales")
-            self.summary_collection = self.summary_vectordb.get_collection("fairy_tales")
+            # 컬렉션 설정 (기존 컬렉션이 있으면 가져오고, 없으면 생성)
+            try:
+                self.main_collection = self.main_vectordb.get_collection("fairy_tales")
+            except:
+                logger.info("main 컬렉션이 없습니다. 새로 생성합니다.")
+                self.main_collection = self.main_vectordb.create_collection("fairy_tales")
             
-            logger.info("벡터 데이터베이스 초기화 완료")
+            try:
+                self.detailed_collection = self.detailed_vectordb.get_collection("fairy_tales")
+            except:
+                logger.info("detailed 컬렉션이 없습니다. 새로 생성합니다.")
+                self.detailed_collection = self.detailed_vectordb.create_collection("fairy_tales")
+            
+            try:
+                self.summary_collection = self.summary_vectordb.get_collection("fairy_tales")
+            except:
+                logger.info("summary 컬렉션이 없습니다. 새로 생성합니다.")
+                self.summary_collection = self.summary_vectordb.create_collection("fairy_tales")
+            
+            logger.info("벡터 데이터베이스 초기화 완료 (하이브리드 모드)")
         except Exception as e:
             logger.error(f"벡터 데이터베이스 초기화 실패: {e}")
             self.main_vectordb = None
@@ -292,12 +332,19 @@ Few-shot 예시:
         """
         try:
             # 요약 DB에서 주제와 관련된 내용 검색
-            documents = self.summary_vectordb.similarity_search(
-                query=f"{theme} for {age_group} year old children",
-                k=3
+            query_results = self.summary_vectordb.query(
+                query_texts=[f"{theme} for {age_group} year old children"],
+                n_results=3,
             )
             
             # 관련 내용 추출
+            docs_list = query_results.get("documents", [[]])[0]
+            metadatas_list = query_results.get("metadatas", [[]])[0]
+            documents = []
+            if docs_list and metadatas_list and len(docs_list) == len(metadatas_list):
+                for i in range(len(docs_list)):
+                    documents.append(Document(page_content=docs_list[i], metadata=metadatas_list[i]))
+            
             related_content = "\n\n".join([doc.page_content for doc in documents])
             
             # 주제 풍부화 프롬프트
@@ -453,9 +500,21 @@ Few-shot 예시:
             db = self.summary_vectordb if use_summary else self.main_vectordb
             
             # 검색 수행
-            documents = db.similarity_search(query_text, k=3)
+            query_results = db.query(
+                query_texts=[query_text],
+                n_results=3
+            )
             
-            # 문서 내용 추출
+            # 문서 내용 추출 (Document 객체로 변환)
+            docs_list = query_results.get("documents", [[]])[0]
+            metadatas_list = query_results.get("metadatas", [[]])[0]
+            documents = []
+            if docs_list and metadatas_list and len(docs_list) == len(metadatas_list):
+                for i in range(len(docs_list)):
+                    documents.append(Document(page_content=docs_list[i], metadata=metadatas_list[i]))
+            
+            # docs_content = "\n\n".join([f"문서 {i+1}:\n{doc.page_content}" for i, doc in enumerate(documents)]) # 기존 코드
+            # Document 객체로 변환되었으므로 page_content 직접 사용
             docs_content = "\n\n".join([f"문서 {i+1}:\n{doc.page_content}" for i, doc in enumerate(documents)])
             
             # 공통 유틸리티 모듈 활용
@@ -577,3 +636,34 @@ Few-shot 예시:
     def close(self) -> None:
         """리소스 정리"""
         logger.info("RAG 시스템 종료")
+
+    def get_system_info(self) -> Dict[str, Any]:
+        """
+        시스템 정보 반환
+        
+        Returns:
+            Dict: 시스템 상태 정보
+        """
+        try:
+            system_info = {
+                "hybrid_mode": self.use_hybrid_mode,
+                "embedding_model": self.embeddings_model,
+                "memory_cache_size": self.memory_cache_size,
+                "lfu_cache_enabled": self.enable_lfu_cache,
+                "persist_directory": str(self.persist_directory),
+                "db_types": self.db_types
+            }
+            
+            # 각 벡터 DB의 캐시 정보 추가
+            if self.main_vectordb:
+                system_info["main_db_cache"] = self.main_vectordb.get_cache_info()
+            if self.detailed_vectordb:
+                system_info["detailed_db_cache"] = self.detailed_vectordb.get_cache_info()
+            if self.summary_vectordb:
+                system_info["summary_db_cache"] = self.summary_vectordb.get_cache_info()
+            
+            return system_info
+            
+        except Exception as e:
+            logger.error(f"시스템 정보 조회 실패: {e}")
+            return {"error": str(e)}

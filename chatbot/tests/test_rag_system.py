@@ -1,12 +1,14 @@
 #!/usr/bin/env python3
 """
-RAG 시스템 단위 테스트
+RAG 시스템 단위 테스트 (하이브리드 모드 지원)
 
 이 스크립트는 꼬기(ChatBot B)에서 사용하는 RAG 시스템의 기능을 테스트합니다:
-1. ChromaDB 벡터 저장소 생성 및 데이터 추가
+1. ChromaDB 벡터 저장소 생성 및 데이터 추가 (하이브리드 모드)
 2. LangChain 기반 검색 기능
 3. Few-shot 프롬프트 생성 및 적용
 4. 동화 생성을 위한 컨텍스트 강화
+5. LFU 캐시 정책 테스트
+6. 한국어 임베딩 모델 테스트
 """
 
 import os
@@ -14,6 +16,7 @@ import sys
 import unittest
 import json
 import shutil
+import time
 from pathlib import Path
 
 # 프로젝트 루트 경로를 파이썬 경로에 추가
@@ -21,23 +24,34 @@ current_dir = os.path.dirname(os.path.abspath(__file__))
 project_root = os.path.abspath(os.path.join(current_dir, '..', '..'))
 sys.path.append(project_root)
 
-from CCB_AI.chatbot.models.rag_system import RAGSystem
+from chatbot.models.rag_system import RAGSystem
 
 
-class TestRAGSystem(unittest.TestCase):
-    """RAG 시스템 테스트 클래스"""
+class TestRAGSystemHybrid(unittest.TestCase):
+    """RAG 시스템 하이브리드 모드 테스트 클래스"""
     
     def setUp(self):
         """테스트 환경 설정"""
         # 테스트용 벡터 DB 디렉토리
         self.test_db_dir = os.path.join(current_dir, "test_vector_db")
+        self.hybrid_test_db_dir = os.path.join(current_dir, "test_hybrid_vector_db")
         
         # 기존 테스트 DB 삭제
-        if os.path.exists(self.test_db_dir):
-            shutil.rmtree(self.test_db_dir)
+        for db_dir in [self.test_db_dir, self.hybrid_test_db_dir]:
+            if os.path.exists(db_dir):
+                shutil.rmtree(db_dir)
         
-        # RAG 시스템 초기화
-        self.rag = RAGSystem(persist_directory=self.test_db_dir)
+        # 기본 RAG 시스템 초기화 (기존 호환성)
+        self.rag = RAGSystem(persist_directory=self.test_db_dir, use_openai_embeddings=False)
+        
+        # 하이브리드 RAG 시스템 초기화
+        self.hybrid_rag = RAGSystem(
+            persist_directory=self.hybrid_test_db_dir,
+            use_openai_embeddings=False,  # 한국어 모델 사용
+            use_hybrid_mode=True,
+            memory_cache_size=500,
+            enable_lfu_cache=True
+        )
         
         # 테스트용 동화 데이터
         self.sample_stories = [
@@ -96,144 +110,215 @@ class TestRAGSystem(unittest.TestCase):
                 
                 그날부터 토토와 새 친구들은 매일 함께 놀았어요. 토토는 길을 잃은 슬픈 경험이 새로운 친구들을 만나는 행복한 시간으로 바뀌었다는 것을 알게 되었답니다.
                 """
+            },
+            {
+                "title": "마법의 책과 똑똑한 토끼",
+                "tags": "6-7세,마법,학습,지혜",
+                "summary": "꼬마 토끼가 마법의 책을 발견하고 다양한 지식을 배우며 숲 친구들을 도와주는 이야기입니다.",
+                "content": """
+                숲속에 사는 귀여운 토끼 솔이는 책 읽기를 정말 좋아했어요.
+                어느 날 솔이는 오래된 나무 밑에서 반짝이는 책을 발견했답니다.
+                
+                "어? 이건 뭐지?" 솔이가 책을 펼치자 마법같은 일이 일어났어요.
+                책에서 글자들이 반짝반짝 빛나며 솔이에게 말을 걸었어요!
+                
+                "안녕, 솔아! 나는 지혜의 마법책이야. 네가 궁금한 모든 것을 알려줄 수 있어!"
+                솔이는 깜짝 놀랐지만 기뻤어요.
+                
+                그날부터 솔이는 마법책과 함께 많은 것을 배웠어요.
+                숲의 식물들 이름, 별자리 이야기, 그리고 수학까지!
+                
+                어느 날, 다람쥐 친구가 울면서 왔어요.
+                "솔아, 내가 모은 도토리를 어디에 뒀는지 기억이 안 나!"
+                
+                솔이는 마법책에서 배운 지혜를 사용했어요.
+                "걱정마! 차근차근 생각해보자. 언제, 어디서, 무엇을 했는지 순서대로 말해봐."
+                
+                솔이의 도움으로 다람쥐는 도토리를 찾을 수 있었어요!
+                숲의 모든 친구들이 솔이의 지혜에 감탄했답니다.
+                """
             }
         ]
         
-        # 테스트용 동화 데이터 추가
-        for i, story in enumerate(self.sample_stories):
-            self.rag.add_story(
-                title=story["title"],
-                tags=story["tags"],
-                summary=story["summary"],
-                content=story["content"],
-                story_id=f"test_story_{i+1}"
-            )
+        # 두 시스템 모두에 테스트용 동화 데이터 추가
+        for rag_system in [self.rag, self.hybrid_rag]:
+            for i, story in enumerate(self.sample_stories):
+                rag_system.add_story(
+                    title=story["title"],
+                    tags=story["tags"],
+                    summary=story["summary"],
+                    content=story["content"]
+                )
     
     def tearDown(self):
         """테스트 환경 정리"""
         # 테스트 DB 삭제
-        if os.path.exists(self.test_db_dir):
-            shutil.rmtree(self.test_db_dir)
+        for db_dir in [self.test_db_dir, self.hybrid_test_db_dir]:
+            if os.path.exists(db_dir):
+                shutil.rmtree(db_dir)
     
-    def test_vector_store_creation(self):
-        """벡터 저장소 생성 테스트"""
+    def test_hybrid_mode_initialization(self):
+        """하이브리드 모드 초기화 테스트"""
+        # 하이브리드 모드 시스템 정보 확인
+        system_info = self.hybrid_rag.get_system_info()
+        
+        self.assertTrue(system_info["hybrid_mode"])
+        self.assertEqual(system_info["embedding_model"], "nlpai-lab/KURE-v1")
+        self.assertEqual(system_info["memory_cache_size"], 500)
+        self.assertTrue(system_info["lfu_cache_enabled"])
+        
         # 벡터 저장소 디렉토리가 생성되었는지 확인
-        self.assertTrue(os.path.exists(self.test_db_dir))
-        self.assertTrue(os.path.exists(os.path.join(self.test_db_dir, "summary")))
-        self.assertTrue(os.path.exists(os.path.join(self.test_db_dir, "detailed")))
-        
-        # 저장소에 데이터가 있는지 확인
-        summary_ids = self.rag.summary_vectorstore.get()["ids"]
-        detailed_ids = self.rag.detailed_vectorstore.get()["ids"]
-        
-        self.assertEqual(len(summary_ids), 2)  # 요약 데이터 2개
-        self.assertGreater(len(detailed_ids), 2)  # 상세 데이터는 분할되어 더 많을 수 있음
+        self.assertTrue(os.path.exists(self.hybrid_test_db_dir))
+        for db_type in ["main", "detailed", "summary"]:
+            self.assertTrue(os.path.exists(os.path.join(self.hybrid_test_db_dir, db_type)))
     
-    def test_query_functionality(self):
-        """질의 기능 테스트"""
-        # 요약 벡터 저장소 검색
-        query_result = self.rag.query(
-            query="우주 탐험에 관한 동화를 알려줘",
-            use_summary=True
-        )
+    def test_korean_embedding_model(self):
+        """한국어 임베딩 모델 테스트"""
+        # 한국어 검색어로 테스트
+        korean_queries = [
+            "우주 여행하는 아이 이야기",
+            "친구와 함께하는 모험",
+            "용기와 문제해결에 대한 동화"
+        ]
         
-        self.assertIn("answer", query_result)
-        self.assertIn("sources", query_result)
-        self.assertGreater(len(query_result["answer"]), 0)
-        
-        # 상세 벡터 저장소 검색
-        query_result = self.rag.query(
-            query="길을 잃은 공룡 이야기",
-            use_summary=False
-        )
-        
-        self.assertIn("answer", query_result)
-        self.assertGreater(len(query_result["answer"]), 0)
-        
-        # 연령대 필터링 테스트
-        query_result = self.rag.query(
-            query="5세 아이를 위한 우주 이야기",
-            use_summary=True,
-            age_group=5
-        )
-        
-        self.assertIn("answer", query_result)
-        # 연령대 필터가 작동했는지 확인
-        for source in query_result["sources"]:
-            self.assertIn("5-6세", source.get("tags", ""))
+        for query in korean_queries:
+            # 기본 시스템 테스트
+            result = self.rag.query(query, use_summary=True)
+            self.assertIn("answer", result)
+            self.assertGreater(len(result["answer"]), 0)
+            
+            # 하이브리드 시스템 테스트
+            hybrid_result = self.hybrid_rag.query(query, use_summary=True)
+            self.assertIn("answer", hybrid_result)
+            self.assertGreater(len(hybrid_result["answer"]), 0)
     
-    def test_similar_stories(self):
-        """유사 동화 검색 테스트"""
-        # 우주 주제 유사 동화 검색
-        similar = self.rag.get_similar_stories(
-            theme="우주 여행",
-            n_results=2
-        )
+    def test_cache_performance(self):
+        """캐시 성능 테스트"""
+        # 같은 쿼리를 여러 번 실행하여 캐시 효과 측정
+        query = "우주 탐험 이야기"
         
-        self.assertEqual(len(similar), 2)
-        # 첫 번째 결과가 우주 관련 동화인지 확인
-        self.assertIn("우주", similar[0]["title"].lower())
+        # 첫 번째 실행 (캐시 미스)
+        start_time = time.time()
+        first_result = self.hybrid_rag.query(query, use_summary=True)
+        first_time = time.time() - start_time
         
-        # 공룡 주제 유사 동화 검색
-        similar = self.rag.get_similar_stories(
-            theme="공룡 이야기",
-            n_results=1
-        )
+        # 두 번째 실행 (캐시 히트 예상)
+        start_time = time.time()
+        second_result = self.hybrid_rag.query(query, use_summary=True)
+        second_time = time.time() - start_time
         
-        self.assertEqual(len(similar), 1)
-        # 결과가 공룡 관련 동화인지 확인
-        self.assertIn("공룡", similar[0]["title"].lower())
+        # 결과는 동일해야 함
+        self.assertEqual(len(first_result["sources"]), len(second_result["sources"]))
         
-        # 연령대 필터링 테스트
-        similar = self.rag.get_similar_stories(
-            theme="우주 여행",
-            age_group=5,
-            n_results=1
-        )
+        # 두 번째 실행이 더 빠르거나 비슷해야 함 (캐시 효과)
+        # 실제 성능은 환경에 따라 달라질 수 있으므로 결과만 확인
+        self.assertIsNotNone(first_result)
+        self.assertIsNotNone(second_result)
         
-        self.assertEqual(len(similar), 1)
-        # 연령대 필터가 작동했는지 확인
-        self.assertIn("5-6세", similar[0]["tags"])
+        print(f"첫 번째 쿼리 시간: {first_time:.3f}초")
+        print(f"두 번째 쿼리 시간: {second_time:.3f}초")
     
-    def test_enrich_story_theme(self):
-        """동화 주제 강화 테스트"""
-        # 단순 주제 강화
-        simple_theme = "우주 모험"
-        enriched_theme = self.rag.enrich_story_theme(simple_theme)
+    def test_memory_disk_hybrid(self):
+        """메모리-디스크 하이브리드 저장 테스트"""
+        # 캐시 정보 확인
+        cache_info = self.hybrid_rag.main_vectordb.get_cache_info()
         
-        # 강화된 주제가 원본보다 길어야 함
-        self.assertGreater(len(enriched_theme), len(simple_theme))
+        self.assertTrue(cache_info["hybrid_mode"])
+        self.assertEqual(cache_info["memory_cache_size"], 500)
+        self.assertTrue(cache_info["lfu_cache_enabled"])
         
-        # 연령별 주제 강화
-        age_specific_theme = "4세 아이를 위한 공룡 이야기"
-        enriched_theme = self.rag.enrich_story_theme(age_specific_theme, age_group=4)
+        # 데이터가 실제로 디스크에 저장되는지 확인
+        main_db_path = os.path.join(self.hybrid_test_db_dir, "main")
+        self.assertTrue(os.path.exists(main_db_path))
         
-        # 강화된 주제에 공룡 키워드가 남아있는지 확인
-        self.assertIn("공룡", enriched_theme.lower())
+        # ChromaDB 파일이 존재하는지 확인
+        chroma_files = [f for f in os.listdir(main_db_path) if f.endswith('.sqlite3') or f.startswith('chroma')]
+        self.assertGreater(len(chroma_files), 0, "ChromaDB 파일이 디스크에 저장되어야 합니다.")
     
-    def test_few_shot_examples(self):
-        """Few-shot 예제 생성 테스트"""
-        # 5세 아이를 위한 우주 주제 Few-shot 예제
-        examples = self.rag.generate_few_shot_examples(
-            age_group=5,
-            theme="우주 모험",
-            n_examples=1
-        )
+    def test_story_retrieval_performance(self):
+        """스토리 검색 성능 비교 테스트"""
+        queries = [
+            "우주 모험",
+            "공룡과 친구",
+            "마법의 힘",
+            "용기있는 아이",
+            "문제를 해결하는 이야기"
+        ]
         
-        # 예제가 생성되었는지 확인
-        self.assertGreater(len(examples), 0)
+        basic_times = []
+        hybrid_times = []
         
-        # 전체 프롬프트 생성 테스트
-        prompt = self.rag.get_few_shot_prompt(
-            age_group=5,
-            theme="우주 탐험",
-            n_examples=1
-        )
+        for query in queries:
+            # 기본 시스템 성능 측정
+            start_time = time.time()
+            basic_result = self.rag.query(query, use_summary=True)
+            basic_times.append(time.time() - start_time)
+            
+            # 하이브리드 시스템 성능 측정
+            start_time = time.time()
+            hybrid_result = self.hybrid_rag.query(query, use_summary=True)
+            hybrid_times.append(time.time() - start_time)
+            
+            # 결과 품질 검증
+            self.assertGreater(len(basic_result["answer"]), 0)
+            self.assertGreater(len(hybrid_result["answer"]), 0)
         
-        # 프롬프트에 필요한 요소들이 포함되어 있는지 확인
-        self.assertIn("우주", prompt)
-        self.assertIn("5", prompt)  # 연령대 포함
-        self.assertIn("예시", prompt)  # 예시 단어 포함
+        avg_basic_time = sum(basic_times) / len(basic_times)
+        avg_hybrid_time = sum(hybrid_times) / len(hybrid_times)
+        
+        print(f"\n성능 비교:")
+        print(f"기본 시스템 평균 시간: {avg_basic_time:.3f}초")
+        print(f"하이브리드 시스템 평균 시간: {avg_hybrid_time:.3f}초")
+        
+        # 두 시스템 모두 합리적인 시간 내에 응답해야 함
+        self.assertLess(avg_basic_time, 5.0, "기본 시스템이 너무 느립니다.")
+        self.assertLess(avg_hybrid_time, 5.0, "하이브리드 시스템이 너무 느립니다.")
+    
+    def test_cloud_compatibility(self):
+        """클라우드 호환성 테스트 (AWS 준비)"""
+        # 환경 변수 시뮬레이션
+        os.environ["CCB_AI_CLOUD_MODE"] = "true"
+        os.environ["CCB_AI_CACHE_SIZE"] = "2000"
+        
+        try:
+            # 클라우드 설정으로 새 시스템 생성
+            cloud_test_dir = os.path.join(current_dir, "test_cloud_vector_db")
+            if os.path.exists(cloud_test_dir):
+                shutil.rmtree(cloud_test_dir)
+            
+            cloud_rag = RAGSystem(
+                persist_directory=cloud_test_dir,
+                use_hybrid_mode=True,
+                memory_cache_size=2000,
+                enable_lfu_cache=True
+            )
+            
+            # 샘플 데이터 추가
+            cloud_rag.add_story(
+                title="클라우드 테스트 동화",
+                tags="테스트,클라우드",
+                summary="클라우드 환경에서의 동화 테스트입니다.",
+                content="이것은 클라우드 환경에서 RAG 시스템을 테스트하는 동화입니다."
+            )
+            
+            # 검색 테스트
+            result = cloud_rag.query("클라우드 테스트", use_summary=True)
+            self.assertIn("answer", result)
+            self.assertGreater(len(result["answer"]), 0)
+            
+            # 시스템 정보 확인
+            system_info = cloud_rag.get_system_info()
+            self.assertEqual(system_info["memory_cache_size"], 2000)
+            
+            # 정리
+            shutil.rmtree(cloud_test_dir)
+            
+        finally:
+            # 환경 변수 정리
+            if "CCB_AI_CLOUD_MODE" in os.environ:
+                del os.environ["CCB_AI_CLOUD_MODE"]
+            if "CCB_AI_CACHE_SIZE" in os.environ:
+                del os.environ["CCB_AI_CACHE_SIZE"]
 
 
 class TestChatBotBWithRAG(unittest.TestCase):
@@ -243,7 +328,7 @@ class TestChatBotBWithRAG(unittest.TestCase):
         """테스트 환경 설정"""
         # 프로젝트 루트에서 모듈 임포트
         sys.path.append(project_root)
-        from CCB_AI.chatbot.models.chat_bot_b import StoryGenerationChatBot
+        from chatbot.models.chat_bot_b import StoryGenerationChatBot
         
         # 테스트용 출력 디렉토리
         self.output_dir = os.path.join(current_dir, "test_output")

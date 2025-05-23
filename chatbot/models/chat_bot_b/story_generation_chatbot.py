@@ -90,12 +90,43 @@ class StoryGenerationChatBot:
             self.openai_client, 
             self.elevenlabs_client,
             self.output_dir / "images",
-            self.output_dir / "audio"
+            self.output_dir / "audio",
+            child_voice_id=self.child_voice_id,
+            main_character_name=self.main_character_name
         )
         self.story_parser = StoryParser()
         self.media_manager = MediaManager(self.output_dir)
         self.data_persistence = DataPersistence(self.output_dir)
     
+    def _update_content_generator_voice_info(self):
+        """Helper to update voice info in ContentGenerator."""
+        if hasattr(self.content_generator, 'child_voice_id'):
+            self.content_generator.child_voice_id = self.child_voice_id
+        if hasattr(self.content_generator, 'main_character_name'):
+            self.content_generator.main_character_name = self.main_character_name
+
+    def set_cloned_voice_info(self, child_voice_id: str, main_character_name: Optional[str] = None):
+        """
+        클론된 음성 정보 및 주인공 이름을 설정합니다.
+
+        Args:
+            child_voice_id (str): ElevenLabs에서 클론된 아이의 음성 ID.
+            main_character_name (Optional[str]): 주인공의 이름. None이면 story_outline에서 첫 번째 캐릭터로 추론.
+        """
+        self.child_voice_id = child_voice_id
+        self.has_cloned_voice = bool(child_voice_id)
+        logger.info(f"아이 클론 음성 ID 설정: {self.child_voice_id}")
+
+        if main_character_name:
+            self.main_character_name = main_character_name
+            logger.info(f"주인공 이름 명시적 설정: {self.main_character_name}")
+        elif not self.main_character_name and self.story_outline and self.story_outline.get("characters"):
+            # story_outline이 있고, main_character_name이 아직 설정되지 않았다면 첫번째 캐릭터로 설정
+            self.main_character_name = self.story_outline["characters"][0]
+            logger.info(f"주인공 이름 추론 설정 (story_outline): {self.main_character_name}")
+        
+        self._update_content_generator_voice_info()
+
     def set_story_outline(self, story_outline: Dict[str, str]):
         """
         동화 줄거리 정보를 설정하는 함수
@@ -103,15 +134,21 @@ class StoryGenerationChatBot:
         Args:
             story_outline (Dict[str, str]): 동화 줄거리 정보
                 - theme: 주제
-                - characters: 주요 캐릭터
+                - characters: 주요 캐릭터 (첫 번째 캐릭터가 주인공으로 간주될 수 있음)
                 - setting: 배경 설정
                 - plot_summary: 간략한 줄거리
                 - educational_value: 교육적 가치
                 - target_age: 적합한 연령대
         """
         self.story_outline = story_outline
-        logger.info(f"동화 줄거리 설정 완료: {story_outline.get('theme', '미지정')}")
+        logger.info(f"동화 줄거리 설정 완료: {self.story_outline.get('theme', '미지정')}")
         
+        # 주인공 이름 설정 (만약 명시적으로 설정되지 않았거나, set_cloned_voice_info에서 설정되지 않았다면)
+        if not self.main_character_name and self.story_outline and "characters" in self.story_outline and self.story_outline["characters"]:
+            self.main_character_name = self.story_outline["characters"][0]
+            logger.info(f"주인공 이름 설정 (set_story_outline): {self.main_character_name}")
+            self._update_content_generator_voice_info() # Update content_generator
+            
     def set_target_age(self, age: int):
         """
         대상 연령을 설정하는 함수
@@ -239,7 +276,132 @@ class StoryGenerationChatBot:
             logger.error(f"내레이션 생성 중 오류 발생: {e}")
             return None
     
-    def generate_story(self) -> Tuple[List[str], str]:
+    async def generate_voice(self) -> Dict[str, str]:
+        """
+        상세 스토리를 바탕으로 내레이션 및 캐릭터 대사 오디오를 생성하는 함수
+        
+        Returns:
+            Dict[str, str]: 생성된 오디오 파일 경로 정보
+        """
+        if not self.elevenlabs_client or not self.detailed_story:
+            logger.error("ElevenLabs 클라이언트 또는 상세 스토리가 없습니다.")
+            return {}
+            
+        try:
+            # 결과 저장용 딕셔너리
+            audio_paths = {}
+            
+            # 챕터별로 오디오 생성
+            for chapter in self.detailed_story.get("chapters", []):
+                # ContentGenerator를 사용하여 챕터 오디오 생성
+                chapter_audio = self.content_generator.generate_chapter_audio(chapter)
+                
+                # 결과 딕셔너리에 통합
+                audio_paths.update(chapter_audio)
+            
+            # 미디어 메타데이터 저장
+            self.media_manager.save_metadata()
+            
+            logger.info(f"음성 생성 완료: {len(audio_paths)} 개 파일")
+            return audio_paths
+            
+        except Exception as e:
+            logger.error(f"음성 생성 중 오류 발생: {e}")
+            return {}
+    
+    def save_story_data(self, file_path: str) -> bool:
+        """
+        생성된 스토리 데이터를 JSON 파일로 저장하는 함수
+        
+        Args:
+            file_path (str): 저장할 파일 경로
+            
+        Returns:
+            bool: 성공 여부
+        """
+        try:
+            # DataPersistence를 사용하여 저장
+            data = {
+                "story_outline": self.story_outline,
+                "detailed_story": self.detailed_story,
+                "generated_images": self.generated_images,
+                "narration_audio": self.narration_audio,
+                "target_age": self.target_age
+            }
+            
+            story_id = self.data_persistence.save_story_data(data)
+            
+            if story_id:
+                logger.info(f"스토리 데이터 저장 완료: {file_path} (ID: {story_id})")
+                return True
+            else:
+                logger.error(f"스토리 데이터 저장 실패: {file_path}")
+                return False
+            
+        except Exception as e:
+            logger.error(f"스토리 데이터 저장 중 오류 발생: {e}")
+            return False
+    
+    def load_story_data(self, file_path: str) -> bool:
+        """
+        스토리 데이터를 JSON 파일에서 로드하는 함수
+        
+        Args:
+            file_path (str): 로드할 파일 경로
+            
+        Returns:
+            bool: 성공 여부
+        """
+        try:
+            # DataPersistence를 사용하여 로드
+            data = self.data_persistence.load_story_data(file_path)
+            
+            if not data:
+                logger.error(f"스토리 데이터 로드 실패: 파일이 없거나 빈 파일 - {file_path}")
+                return False
+            
+            # 데이터 복원
+            self.story_outline = data.get("story_outline")
+            self.detailed_story = data.get("detailed_story")
+            self.generated_images = data.get("generated_images", [])
+            self.narration_audio = data.get("narration_audio")
+            self.target_age = data.get("target_age")
+            
+            # 미디어 관리자 설정
+            if "story_id" in data:
+                self.media_manager.set_current_story_id(data["story_id"])
+                self.content_generator.current_story_id = data["story_id"]
+            
+            logger.info(f"스토리 데이터 로드 완료: {file_path}")
+            return True
+            
+        except Exception as e:
+            logger.error(f"스토리 데이터 로드 중 오류 발생: {e}")
+            return False
+    
+    def get_story_preview(self) -> Dict[str, str]:
+        """
+        생성된 스토리의 간략한 미리보기를 반환하는 함수
+        
+        Returns:
+            Dict[str, str]: 스토리 미리보기 정보
+        """
+        if not self.detailed_story:
+            return {
+                "status": "not_generated",
+                "message": "스토리가 아직 생성되지 않았습니다."
+            }
+            
+        return {
+            "status": "generated",
+            "title": self.detailed_story.get("title", "제목 없음"),
+            "scenes_count": len(self.detailed_story.get("chapters", [])),
+            "images_count": len(self.generated_images),
+            "has_audio": bool(self.narration_audio),
+            "moral": self.detailed_story.get("educational_value", "")
+        }
+    
+    async def generate_story(self) -> Tuple[List[str], str]:
         """
         동화 줄거리를 바탕으로 상세 스토리, 일러스트, 내레이션을 생성하는 함수
         
@@ -258,9 +420,9 @@ class StoryGenerationChatBot:
             illustrations = self.generate_illustrations()
             
             # 내레이션 생성
-            narration = self.generate_voice()
+            narration_info = await self.generate_voice()
             
-            return illustrations, narration.get("narrator_audio", "")
+            return illustrations, narration_info.get("narrator_audio", "")
             
         except Exception as e:
             logger.error(f"스토리 생성 중 오류 발생: {e}")
@@ -397,129 +559,4 @@ class StoryGenerationChatBot:
                 illustrations.append(file_path)
                 chapter["image"] = file_path
             
-        return illustrations
-    
-    async def generate_voice(self) -> Dict[str, str]:
-        """
-        상세 스토리를 바탕으로 내레이션 및 캐릭터 대사 오디오를 생성하는 함수
-        
-        Returns:
-            Dict[str, str]: 생성된 오디오 파일 경로 정보
-        """
-        if not self.elevenlabs_client or not self.detailed_story:
-            logger.error("ElevenLabs 클라이언트 또는 상세 스토리가 없습니다.")
-            return {}
-            
-        try:
-            # 결과 저장용 딕셔너리
-            audio_paths = {}
-            
-            # 챕터별로 오디오 생성
-            for chapter in self.detailed_story.get("chapters", []):
-                # ContentGenerator를 사용하여 챕터 오디오 생성
-                chapter_audio = self.content_generator.generate_chapter_audio(chapter)
-                
-                # 결과 딕셔너리에 통합
-                audio_paths.update(chapter_audio)
-            
-            # 미디어 메타데이터 저장
-            self.media_manager.save_metadata()
-            
-            logger.info(f"음성 생성 완료: {len(audio_paths)} 개 파일")
-            return audio_paths
-            
-        except Exception as e:
-            logger.error(f"음성 생성 중 오류 발생: {e}")
-            return {}
-        
-    def save_story_data(self, file_path: str) -> bool:
-        """
-        생성된 스토리 데이터를 JSON 파일로 저장하는 함수
-        
-        Args:
-            file_path (str): 저장할 파일 경로
-            
-        Returns:
-            bool: 성공 여부
-        """
-        try:
-            # DataPersistence를 사용하여 저장
-            data = {
-                "story_outline": self.story_outline,
-                "detailed_story": self.detailed_story,
-                "generated_images": self.generated_images,
-                "narration_audio": self.narration_audio,
-                "target_age": self.target_age
-            }
-            
-            story_id = self.data_persistence.save_story_data(data)
-            
-            if story_id:
-                logger.info(f"스토리 데이터 저장 완료: {file_path} (ID: {story_id})")
-                return True
-            else:
-                logger.error(f"스토리 데이터 저장 실패: {file_path}")
-                return False
-            
-        except Exception as e:
-            logger.error(f"스토리 데이터 저장 중 오류 발생: {e}")
-            return False
-    
-    def load_story_data(self, file_path: str) -> bool:
-        """
-        스토리 데이터를 JSON 파일에서 로드하는 함수
-        
-        Args:
-            file_path (str): 로드할 파일 경로
-            
-        Returns:
-            bool: 성공 여부
-        """
-        try:
-            # DataPersistence를 사용하여 로드
-            data = self.data_persistence.load_story_data(file_path)
-            
-            if not data:
-                logger.error(f"스토리 데이터 로드 실패: 파일이 없거나 빈 파일 - {file_path}")
-                return False
-            
-            # 데이터 복원
-            self.story_outline = data.get("story_outline")
-            self.detailed_story = data.get("detailed_story")
-            self.generated_images = data.get("generated_images", [])
-            self.narration_audio = data.get("narration_audio")
-            self.target_age = data.get("target_age")
-            
-            # 미디어 관리자 설정
-            if "story_id" in data:
-                self.media_manager.set_current_story_id(data["story_id"])
-                self.content_generator.current_story_id = data["story_id"]
-            
-            logger.info(f"스토리 데이터 로드 완료: {file_path}")
-            return True
-            
-        except Exception as e:
-            logger.error(f"스토리 데이터 로드 중 오류 발생: {e}")
-            return False
-    
-    def get_story_preview(self) -> Dict[str, str]:
-        """
-        생성된 스토리의 간략한 미리보기를 반환하는 함수
-        
-        Returns:
-            Dict[str, str]: 스토리 미리보기 정보
-        """
-        if not self.detailed_story:
-            return {
-                "status": "not_generated",
-                "message": "스토리가 아직 생성되지 않았습니다."
-            }
-            
-        return {
-            "status": "generated",
-            "title": self.detailed_story.get("title", "제목 없음"),
-            "scenes_count": len(self.detailed_story.get("chapters", [])),
-            "images_count": len(self.generated_images),
-            "has_audio": bool(self.narration_audio),
-            "moral": self.detailed_story.get("educational_value", "")
-        } 
+        return illustrations 

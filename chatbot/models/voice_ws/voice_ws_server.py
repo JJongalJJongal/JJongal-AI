@@ -16,8 +16,8 @@ dotenv_path = os.path.join(project_root, '.env')
 load_dotenv(dotenv_path=dotenv_path)
 
 # 모듈화된 앱 임포트
-from .voice_ws.app import app
-from .voice_ws.utils import setup_logging
+from .app import app
+from .utils import setup_logging
 
 def run_server(host="0.0.0.0", port=8000, log_level="info", reload=False):
     """

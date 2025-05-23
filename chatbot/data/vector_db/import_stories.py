@@ -5,8 +5,8 @@ import json
 from dotenv import load_dotenv
 
 # 프로젝트 루트 디렉토리를 파이썬 경로에 추가
-current_dir = os.path.dirname(os.path.abspath(__file__))
-project_root = os.path.abspath(os.path.join(current_dir, '..', '..', '..'))
+current_dir = os.path.dirname(os.path.abspath(__file__)) # 현재 디렉토리
+project_root = os.path.abspath(os.path.join(current_dir, '..', '..', '..')) # 프로젝트 루트 디렉토리
 sys.path.append(project_root)
 
 # 환경 변수 로드
@@ -14,7 +14,7 @@ dotenv_path = os.path.join(project_root, '.env')
 load_dotenv(dotenv_path=dotenv_path)
 
 # RAG 시스템 불러오기
-from CCB_AI.chatbot.models.rag_system import RAGSystem  
+from chatbot.models.rag_system import RAGSystem  
 
 def main():
     """
@@ -76,14 +76,14 @@ def main():
         
         # 미리보기 결과 출력
         print("\n=== 필터링된 스토리 미리보기 ===")
-        for idx, story in enumerate(preview_stories[:5], 1):  # 최대 5개만 표시
+        for idx, story in enumerate(preview_stories[:10], 1):  # 최대 5개만 표시
             print(f"{idx}. {story.get('title', '제목 없음')} (ID: {story.get('story_id', 'ID 없음')})")
             print(f"   태그: {story.get('tags', '태그 없음')}")
             print(f"   요약: {story.get('summary', '요약 없음')[:100]}...")
             print()
         
-        if len(preview_stories) > 5:
-            print(f"...외 {len(preview_stories) - 5}개 스토리\n")
+        if len(preview_stories) > 10:
+            print(f"...외 {len(preview_stories) - 10}개 스토리\n")
     
     # 사용자 확인
     confirm = input("ChromaDB에 스토리를 추가하시겠습니까? (y/n): ")

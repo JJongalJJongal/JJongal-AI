@@ -22,7 +22,12 @@ class ContentGenerator:
     
     def __init__(self, openai_client=None, elevenlabs_client=None, 
                  images_dir: Union[str, Path] = None, audio_dir: Union[str, Path] = None,
-                 current_story_id: str = None):
+                 current_story_id: str = None,
+                 child_voice_id: Optional[str] = None,  # 아이의 클론된 음성 ID
+                 main_character_name: Optional[str] = None,  # 주인공 캐릭터 이름
+                 voice_settings: Dict = None,
+                 voice_model: str = "eleven_multilingual_v2"
+                 ):
         """
         컨텐츠 생성기 초기화
         
@@ -32,6 +37,10 @@ class ContentGenerator:
             images_dir: 이미지 저장 디렉토리
             audio_dir: 오디오 저장 디렉토리
             current_story_id: 현재 스토리 ID
+            child_voice_id: 아이의 클론된 음성 ID
+            main_character_name: 주인공 캐릭터 이름
+            voice_settings: ElevenLabs 음성 설정
+            voice_model: ElevenLabs 음성 모델
         """
         # API 클라이언트 설정
         self.openai_client = openai_client
@@ -44,8 +53,12 @@ class ContentGenerator:
         # 현재 스토리 ID
         self.current_story_id = current_story_id
         
+        # 클론된 음성 정보
+        self.child_voice_id = child_voice_id
+        self.main_character_name = main_character_name
+        
         # 음성 설정
-        self.voice_settings = {
+        self.voice_settings = voice_settings if voice_settings else {
             "stability": 0.75,
             "similarity_boost": 0.75
         }
@@ -58,6 +71,9 @@ class ContentGenerator:
             "male_child": "jsCqWAovK2LkecY7zXl4", # 아동 남성
             "female_child": "z9fAnlkpzviPz146aGWa" # 아동 여성
         }
+        
+        # 음성 모델
+        self.voice_model = voice_model
     
     def generate_detailed_story(self, story_outline: Dict, target_age: int = 5) -> Dict:
         """
@@ -220,7 +236,7 @@ class ContentGenerator:
         """
         
         try:
-            # DALL-E 모델을 사용하여 이미지 생성
+            # GPT-4o 모델을 사용하여 이미지 생성
             response = self.openai_client.images.generate(
                 model="dall-e-3",
                 prompt=image_prompt,
@@ -268,7 +284,7 @@ class ContentGenerator:
     def generate_audio_for_text(self, text: str, speaker_type: str = "narrator", 
                                 filename: str = None) -> Optional[str]:
         """
-        텍스트를 음성으로 변환
+        텍스트를 바탕으로 음성 오디오 생성
         
         Args:
             text: 변환할 텍스트
@@ -286,9 +302,45 @@ class ContentGenerator:
             logger.error("오디오 저장 디렉토리 또는 스토리 ID가 설정되지 않았습니다.")
             return None
         
-        # 화자 유형에 맞는 음성 ID 가져오기
-        voice_id = self.character_voices.get(speaker_type, self.character_voices["narrator"])
+        # 음성 ID 결정 로직 수정
+        voice_id_to_use = None
+        speaker_name_lower = speaker_type.lower()
+
+        # 1. 주인공 캐릭터이고 클론된 음성이 있는 경우
+        if self.main_character_name and speaker_name_lower == self.main_character_name.lower() and self.child_voice_id:
+            voice_id_to_use = self.child_voice_id
+            logger.info(f"주인공 ({self.main_character_name}) 음성으로 클론된 ID ({self.child_voice_id}) 사용")
         
+        # 2. 일반 캐릭터 음성 매핑 시도
+        if not voice_id_to_use:
+            voice_id_to_use = self.character_voices.get(speaker_name_lower)
+            if voice_id_to_use:
+                logger.info(f"캐릭터 '{speaker_type}'에 대해 매핑된 음성 ID ({voice_id_to_use}) 사용")
+
+        # 3. 캐릭터 매핑 실패 시, 역할 기반 음성 매핑 (예: 'boy', 'girl', 'man', 'woman', 'narrator')
+        if not voice_id_to_use:
+            # speaker_type을 분석하여 일반적인 역할 추론 (간단한 예시)
+            if "boy" in speaker_name_lower or "male child" in speaker_name_lower:
+                voice_id_to_use = self.character_voices.get("male_child")
+            elif "girl" in speaker_name_lower or "female child" in speaker_name_lower:
+                voice_id_to_use = self.character_voices.get("female_child")
+            elif "man" in speaker_name_lower or "male adult" in speaker_name_lower:
+                voice_id_to_use = self.character_voices.get("male_adult")
+            elif "woman" in speaker_name_lower or "female adult" in speaker_name_lower:
+                voice_id_to_use = self.character_voices.get("female_adult")
+            
+            if voice_id_to_use:
+                logger.info(f"캐릭터 '{speaker_type}'에 대해 역할 기반 음성 ID ({voice_id_to_use}) 사용")
+
+        # 4. 모든 매핑 실패 시 내레이터 음성 또는 기본 음성 사용
+        if not voice_id_to_use:
+            voice_id_to_use = self.character_voices.get("narrator") # 기본 내레이터 음성
+            logger.info(f"캐릭터 '{speaker_type}'에 대한 특정 음성 ID 없음. 기본 내레이터 음성 ({voice_id_to_use}) 사용")
+
+        if not voice_id_to_use: # 내레이터 음성도 없는 극단적인 경우
+            logger.error("사용 가능한 음성 ID가 없습니다. ElevenLabs 설정을 확인하세요.")
+            return None
+
         # 오디오 저장을 위한 디렉토리 생성
         story_audio_dir = self.audio_dir / self.current_story_id
         ensure_directory(story_audio_dir)
@@ -305,22 +357,22 @@ class ContentGenerator:
         
         try:
             # ElevenLabs API를 사용하여 음성 생성
-            audio = self.elevenlabs_client.generate(
+            audio_stream = self.elevenlabs_client.generate(
                 text=text,
-                voice=voice_id,
-                model="eleven_multilingual_v2",
-                voice_settings=self.voice_settings
+                voice=self.voice_settings.get(voice_id_to_use, self.voice_settings["narrator"]),
+                model=self.voice_model
             )
             
-            # 음성 파일 저장
-            success = save_audio(audio, output_path)
-            
-            if success:
-                logger.info(f"음성 생성 및 저장 완료: {output_path}")
-                return str(output_path)
-            else:
-                logger.error(f"음성 파일 저장 실패: {output_path}")
-                return None
+            # 스트리밍 데이터를 바이트로 변환
+            audio_bytes = b"".join([chunk for chunk in audio_stream])
+
+            # 파일 저장
+            ensure_directory(output_path.parent)
+            with open(output_path, "wb") as f:
+                f.write(audio_bytes) # 바이트 데이터 직접 저장
+
+            logger.info(f"음성 파일 저장 완료: {output_path} (Speaker: {speaker_type}, Voice ID: {voice_id_to_use})")
+            return str(output_path)
                 
         except Exception as e:
             logger.error(f"음성 생성 중 오류 발생: {e}")
