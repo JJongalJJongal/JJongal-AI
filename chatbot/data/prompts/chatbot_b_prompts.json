@@ -1,15 +1,15 @@
 {
   "system": {
     "role": [
-      "너는 꼬기라는 이름을 가진 챗봇이야. 너는 부기 (chatbot_a) 와 대화를 하면서 동화를 만들어줄거야.",
+      "너는 꼬기라는 이름을 가진 챗봇이야. 너는 부기 (chatbot_a) 와 대화를 하면서 일본 애니메이션 스타일의 카와이 동화를 만들어줄거야.",
       "너는 부기 (chatbot_a) 가 만들어 준 대략적인 동화 스토리를 통해 상세한 스토리를 만들어줄거야.",
-      "너는 상세한 스토리를 만들고 그 상세한 스토리를 바탕으로 동화 이미지와 내레이션, 동화 인물의 대사를 만들어줄거야.",
-      "너는 동화 이미지를 만들 때 아이들의 연령대, 관심사에 맞게 이미지를 만들어야 해. 예를 들어, 공룡을 좋아하는 5세 아이에게는 귀엽고 친근한 공룡 이미지를 제공해.",
-      "근데, 동화 이미지는 무조건 한국어가 잘 나와야 해. 무조건 한국어로 이미지를 만들어야 해.",
+      "너는 상세한 스토리를 만들고 그 상세한 스토리를 바탕으로 일본 애니메이션 스타일의 카와이 동화 이미지와 내레이션, 동화 인물의 대사를 만들어줄거야.",
+      "너는 동화 이미지를 만들 때 일본 애니메이션/Studio Ghibli 스타일의 카와이 미학으로 만들어야 해. 아이들의 연령대, 관심사에 맞게 이미지를 만들어야 해. 예를 들어, 공룡을 좋아하는 5세 아이에게는 울트라 카와이하고 친근한 일본풍 공룡 이미지를 제공해.",
+      "동화 이미지는 일본 애니메이션/만화 동화책 스타일로 만들어야 해. Studio Ghibli 풍의 부드러운 수채화 스타일, 파스텔 톤 색상으로 구성해야 해.",
       "너는 동화 내래이션을 만들 때 동화의 스토리, 이미지에 맞게 내레이션을 만들어야 해. 내레이션은 아이들이 쉽게 이해할 수 있는 언어로 구성해야 해.",
       "너는 동화 인물의 대사를 만들 때 동화 인물의 성격, 감정에 맞게 대사를 작성해야 해. 대사는 아이들이 공감할 수 있도록 감정이 풍부해야 해.",
-      "너는 DALL-E 3와 ElevenLabs API를 모두 활용하여 고품질의 동화 이미지와 내레이션을 생성해야 해.",
-      "DALL-E 3로 이미지 생성 시 장면별로 일관된 캐릭터 디자인을 유지하고, 아이들에게 안전하고 교육적인 콘텐츠를 제공해야 해.",
+      "너는 DALL-E 3와 ElevenLabs API를 모두 활용하여 고품질의 일본 애니메이션 스타일 동화 이미지와 내레이션을 생성해야 해.",
+      "DALL-E 3로 이미지 생성 시 일본 애니메이션 스타일로 장면별 일관된 카와이 캐릭터 디자인을 유지하고, 아이들에게 안전하고 교육적인 콘텐츠를 제공해야 해.",
       "ElevenLabs로 음성 생성 시 캐릭터의 성격과 상황에 맞는 음성 톤과 감정을 선택하여 생생한 내레이션을 만들어야 해.",
       "ElevenLabs는 아이의 음성을 클로닝하여 주인공에만 전달하여 아이가 주인공인 것처럼 대사를 만들어야 해."
     ],
@@ -26,12 +26,8 @@
   },
   "detailed_story_generation": [
     {
-      "age_group": "4-5",
-      "prompt": "다음 동화 줄거리를 바탕으로 4-5세 아이들을 위한 상세한 이야기를 만들어주세요. 단순한 문장 구조, 반복되는 표현, 밝고 긍정적인 톤을 사용하세요. 각 장면은 명확하게 구분되고, 등장인물의 감정 표현이 풍부해야 합니다. 짧은 문장과 대화를 많이 포함하고, 의성어와 의태어를 적절히 활용하세요. 동화는 5-7개의 짧은 장면으로 구성하고, 각 장면은 하나의 핵심 아이디어에 집중하세요."
-    },
-    {
-      "age_group": "6-7",
-      "prompt": "다음 동화 줄거리를 바탕으로 6-7세 아이들을 위한 상세한 이야기를 만들어주세요. 약간 복잡한 문장 구조를 사용할 수 있으며, 캐릭터의 감정과 생각을 더 깊이 표현하세요. 다양한 어휘를 사용하고, 이야기에 약간의 긴장감과 해결 과정이 포함되도록 하세요. 교훈적인 요소를 자연스럽게 담아내세요. 동화는 7-10개의 장면으로 구성하고, 각 장면에서 이야기가 자연스럽게 발전하도록 연결하세요."
+      "age_group": "4-7",
+      "prompt": "다음 동화 줄거리를 바탕으로 4-7세 아이들을 위한 상세한 이야기를 만들어주세요. 단순하면서도 약간의 복잡성을 가진 문장 구조를 사용하고, 반복되는 표현과 밝고 긍정적인 톤을 유지하세요. 각 장면은 명확하게 구분되고, 등장인물의 감정 표현이 풍부해야 합니다. 짧은 문장과 대화를 많이 포함하고, 의성어와 의태어를 적절히 활용하세요. 캐릭터의 감정과 생각을 표현하되 이해하기 쉽게 구성하세요. 동화는 6-8개의 장면으로 구성하고, 각 장면에서 이야기가 자연스럽게 발전하도록 연결하세요."
     },
     {
       "age_group": "8-9",
@@ -72,16 +68,12 @@
   ],
   "image_generation_templates": [
     {
-      "age_group": "4-5",
-      "prompt": "다음 동화의 {scene_description}을 표현하는 일러스트를 생성해주세요.\n\n주제: {theme}\n캐릭터: {characters}\n배경: {setting}\n\n4-5세 아이들을 위한 그림이므로 다음 특징을 포함해주세요:\n- 매우 밝고 선명한 기본 색상 사용\n- 단순하고 귀여운 캐릭터 디자인 (큰 머리와 눈)\n- 부드러운 곡선과 모서리 없는 형태\n- 세부 사항은 최소화하고 중요 요소만 강조\n- 표정과 감정이 과장되게 표현\n- 전체적으로 안전하고 따뜻한 분위기\n- 캐릭터는 모든 장면에서 일관된 모습과 특징을 유지해야 함\n- 캐릭터들의 상호작용이 분명하게 보이도록 구성"
-    },
-    {
-      "age_group": "6-7",
-      "prompt": "다음 동화의 {scene_description}을 표현하는 일러스트를 생성해주세요.\n\n주제: {theme}\n캐릭터: {characters}\n배경: {setting}\n\n6-7세 아이들을 위한 그림이므로 다음 특징을 포함해주세요:\n- 밝고 다양한 색상 팔레트 사용\n- 더 세부적인 캐릭터 디자인과 표현\n- 배경에 흥미로운 요소들 추가\n- 캐릭터의 감정과 행동이 명확하게 표현\n- 이야기의 중요한 순간을 강조\n- 약간의 판타지 요소나 상상력을 자극하는 디테일 포함\n- 모든 장면에서 캐릭터의 특징과 세계관이 일관되게 유지됨\n- 이야기의 감정과 분위기가 색상과 구도를 통해 전달됨"
+      "age_group": "4-7",
+      "prompt": "Create a heartwarming Japanese anime children's storybook illustration: {scene_description}\n\n주제: {theme}\n캐릭터: {characters}\n배경: {setting}\n\nStyle: Studio Ghibli watercolor style with incredibly detailed pastoral countryside elements\nCharacters: Ultra kawaii characters with huge sparkling diamond eyes, baby-soft features, rosy button cheeks\nComposition: Cozy detailed environment with wooden cottages, scattered flowers, baskets, garden tools\nColors: Warm pastel palette - gentle mint greens, cream whites, soft peach tones, sky blues\nAtmosphere: Golden hour lighting, peaceful countryside morning with soft warm sunbeams\nDetails: Include tiny environmental details like scattered carrots, wooden ladders, wicker baskets, small flowers\nMood: Incredibly warm, safe, nurturing atmosphere that feels like a gentle hug\nArt style: Studio Ghibli masterpiece quality with rich environmental storytelling"
     },
     {
       "age_group": "8-9",
-      "prompt": "다음 동화의 {scene_description}을 표현하는 일러스트를 생성해주세요.\n\n주제: {theme}\n캐릭터: {characters}\n배경: {setting}\n\n8-9세 아이들을 위한 그림이므로 다음 특징을 포함해주세요:\n- 더 복잡하고 풍부한 색상 사용\n- 캐릭터의 개성과 감정이 섬세하게 표현\n- 배경에 더 많은 세부 사항과 맥락 포함\n- 약간의 원근감과 복잡한 구도 도입\n- 이야기의 분위기와 주제를 시각적으로 강화\n- 숨겨진 요소나 디테일로 시각적 재미 추가\n- 스토리의 감정적 순간과 주제가 시각적으로 강조됨\n- 일관된 아트 스타일과 캐릭터 디자인 유지"
+      "prompt": "Create a detailed Japanese anime children's storybook illustration: {scene_description}\n\n주제: {theme}\n캐릭터: {characters}\n배경: {setting}\n\nStyle: Sophisticated Studio Ghibli watercolor with intricate countryside details\nCharacters: Expressive kawaii characters with sparkling eyes, detailed expressions, gentle interactions\nComposition: Rich environmental storytelling with cozy buildings, natural elements, activity details\nColors: Harmonious pastel palette with golden hour warmth and natural countryside tones\nAtmosphere: Emotionally rich, detailed world that invites exploration and wonder\nDetails: Include story-enhancing environmental elements, tools, nature details, cozy home elements\nMood: Deeply comforting yet adventurous, like stepping into a beloved storybook world\nArt style: Studio Ghibli professional quality with masterful attention to environmental details"
     }
   ],
   "narration_generation_templates": [
@@ -149,5 +141,18 @@
       "type": "interactive_elements",
       "prompt": "다음 동화에 아이들이 참여할 수 있는 상호작용 요소를 추가해주세요.\n\n동화: {story}\n타겟 연령: {target_age}\n\n다음과 같은 상호작용 요소를 자연스럽게, 이야기의 흐름을 방해하지 않도록 통합해주세요:\n1. 아이에게 직접 묻는 질문들 (주인공이 어떻게 해야 할지, 어떤 느낌일지 등)\n2. 따라 할 수 있는 동작이나 소리\n3. 이야기 속 퍼즐이나 간단한 문제 해결\n4. 감정이나 생각을 표현하도록 유도하는 순간들\n5. 상상력을 자극하는 열린 결말이나 질문\n\n{target_age}세 아이들의 발달 단계에 적합하고, 이야기의 몰입감을 높이는 요소들을 선택해주세요."
     }
-  ]
+  ],
+  "story_generation_templates": {
+    "detailed_story_system_message": "당신은 아이들을 위한 동화를 작성하는 전문 동화 작가입니다.\n다음 요소를 활용하여 {target_age}세 어린이를 위한 자세한 챕터별 동화를 작성해주세요.\n작품은 5개의 챕터로 구성되어야 합니다.\n\n1. 각 챕터는 다음 요소를 포함해야 합니다:\n   - 챕터 제목\n   - 내레이션(설명 텍스트)\n   - 캐릭터 대사(있을 경우)\n   - 챕터 분위기와 교훈\n\n2. 출력 형식은 다음과 같은 JSON 형식이어야 합니다:\n{{\n  \"title\": \"동화 제목\",\n  \"age_group\": {target_age},\n  \"theme\": \"{theme}\",\n  \"educational_value\": \"{educational_value}\",\n  \"characters\": [{characters_json}],\n  \"setting\": \"{setting}\",\n  \"chapters\": [\n    {{\n      \"chapter_number\": 1,\n      \"title\": \"챕터 제목\",\n      \"narration\": \"내레이션 텍스트...\",\n      \"dialogues\": [\n        {{\"speaker\": \"캐릭터명\", \"text\": \"대사 내용...\"}},\n        {{\"speaker\": \"다른 캐릭터\", \"text\": \"대사 내용...\"}}\n      ],\n      \"mood\": \"밝음/긴장감/신비로움 등\",\n      \"moral_lesson\": \"이 챕터의 교훈\"\n    }},\n    ...나머지 챕터들...\n  ]\n}}",
+    "detailed_story_user_message": "다음 동화 개요를 바탕으로 {target_age}세 어린이를 위한 자세한 챕터별 동화를 작성해 주세요:\n\n주제: {theme}\n등장인물: {characters}\n배경: {setting}\n줄거리 요약: {plot_summary}\n교육적 가치: {educational_value}\n\n대상 연령대에 맞는 적절한 어휘와 문장 길이를 사용해 주세요.\n각 챕터에 내레이션과 대사를 적절히 혼합해 주세요.\n명확한 JSON 형식으로 출력해 주세요.",
+    "image_prompt_system_message": "Create a detailed, colorful illustration for a children's story with the following elements:\n\nTitle: {chapter_title}\nSetting: {setting}\nCharacters: {characters}\nMood: {mood}\n\nScene Description: {chapter_content}...\n\nStyle: Child-friendly, colorful, detailed, suitable for children.\nAvoid scary or disturbing elements. Create a warm, engaging scene that captures the essence of the chapter.",
+    "default_image_prompt": "Create a detailed, colorful illustration for a children's story with the following elements:\n\nTitle: {chapter_title}\nSetting: {setting}\nCharacters: {characters}\nMood: {mood}\n\nScene Description: {narration}...\n\nStyle: Child-friendly, colorful, detailed, suitable for {age_group}-year-old children.\nAvoid scary or disturbing elements. Create a warm, engaging scene that captures the essence of the chapter."
+  },
+  "enhanced_image_templates": {
+    "korean_fairy_tale_enhanced": "Create a traditional Korean fairy tale style watercolor illustration inspired by classic Korean children's storybooks: {scene_description}\n\nReference Style: Traditional Korean fairy tale book illustrations from the 1980s-1990s\nArt Technique: Soft watercolor with gentle brush strokes, exactly like Korean '전래동화' (folk tale) illustrations\nCharacters: Korean-style kawaii characters with warm, gentle expressions and big sparkling eyes\nColor Palette: Traditional Korean fairy tale colors - soft earth tones, gentle pastels, warm creams and soft browns\nComposition: Classic Korean storybook layout with {complexity}\nBackground: Traditional Korean countryside or village elements when appropriate\nAtmosphere: Nostalgic, warm, and comforting like classic Korean children's books\nDetails: Include traditional Korean cultural elements subtly woven into the scene\nLighting: Soft, natural lighting that creates a dreamy, storybook quality\nStyle Reference: {reference_style}\n\nAge-appropriate for {age_range} children\nCreate this as an authentic Korean fairy tale illustration that feels like it came from a beloved traditional Korean children's book, with the charm and warmth of classic Korean folk tale art."
+  },
+  "fine_tuner_templates": {
+    "styled_image_prompt": "{scene_description}\n\n{style_template}\n\nCreate this scene as a children's storybook illustration with the learned artistic style.\nEnsure the image is appropriate for young children and matches the established visual style.",
+    "default_style_template": "Style: Illustrated children's book style, soft and warm illustration\nColor palette: bright, cheerful colors\nCharacter style: friendly, approachable characters\nCommon elements: magical, whimsical elements\nArt technique: Illustrated children's book style, soft and warm illustration\nMood: Friendly, magical, child-appropriate, wholesome\nQuality: High-quality digital illustration, detailed but not overwhelming for children"
+  }
 }

@@ -37,7 +37,7 @@ def run_server(host="0.0.0.0", port=8000, log_level="info", reload=False):
     
     # 서버 실행
     uvicorn.run(
-        "chatbot.models.voice_ws.app:app",
+        "chatbot.voice_ws.app:app",
         host=host,
         port=port,
         log_level=log_level,
