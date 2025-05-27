@@ -3,7 +3,7 @@
 LangChain DALL-E 기반 챕터별 이미지 생성
 """
 
-import logging
+from shared.utils.logging_utils import get_module_logger
 import json
 import uuid
 import base64
@@ -22,7 +22,7 @@ from langchain_community.utilities.dalle_image_generator import DallEAPIWrapper
 # Project imports
 from .base_generator import BaseGenerator
 
-logger = logging.getLogger(__name__)
+logger = get_module_logger(__name__)
 
 class ImageGenerator(BaseGenerator):
     """LangChain DALL-E 기반 이미지 생성기"""

@@ -5,7 +5,7 @@
 모듈화된 코드를 사용하며, JWT 인증을 헤더에서 처리합니다.
 """
 import os
-import logging
+from shared.utils.logging_utils import get_module_logger
 import uvicorn
 from dotenv import load_dotenv
 
@@ -14,6 +14,8 @@ current_dir = os.path.dirname(os.path.abspath(__file__))
 project_root = os.path.abspath(os.path.join(current_dir, '..', '..'))
 dotenv_path = os.path.join(project_root, '.env')
 load_dotenv(dotenv_path=dotenv_path)
+
+logger = get_module_logger(__name__)
 
 # 모듈화된 앱 임포트
 from .app import app
@@ -33,7 +35,7 @@ def run_server(host="0.0.0.0", port=8000, log_level="info", reload=False):
     setup_logging()
     
     # 서버 시작 정보 로깅
-    logging.info(f"음성 WebSocket 서버 시작: {host}:{port}, Log Level: {log_level}")
+    logger.info(f"음성 WebSocket 서버 시작: {host}:{port}, Log Level: {log_level}")
     
     # 서버 실행
     uvicorn.run(

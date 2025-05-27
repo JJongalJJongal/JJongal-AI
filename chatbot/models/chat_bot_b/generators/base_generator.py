@@ -4,7 +4,7 @@
 모든 Generator의 공통 Interface 와 기능 정의
 
 """
-import logging
+from shared.utils.logging_utils import get_module_logger
 import asyncio
 from abc import ABC, abstractmethod
 from typing import Dict, Any, Optional, Callable
@@ -12,7 +12,7 @@ from enum import Enum
 import time
 
 # Logging 설정
-logger = logging.getLogger(__name__)
+logger = get_module_logger(__name__)
 
 class GeneratorStatus(Enum):
     """Generator 상태 정의"""

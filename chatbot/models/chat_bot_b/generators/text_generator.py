@@ -3,7 +3,7 @@
 
 LangChain + ChromaDB RAG System 을 활용한 한국 동화 생성
 """
-import logging
+from shared.utils.logging_utils import get_module_logger
 import uuid
 from typing import Dict, List, Optional, Callable, Any
 from pathlib import Path
@@ -21,7 +21,7 @@ from chatbot.data.vector_db.core import VectorDB
 from chatbot.data.vector_db.query import query_vector_db, format_query_results
 
 # logging 설정
-logger = logging.getLogger(__name__)
+logger = get_module_logger(__name__)
 
 class TextGenerator(BaseGenerator):
     def __init__(self,

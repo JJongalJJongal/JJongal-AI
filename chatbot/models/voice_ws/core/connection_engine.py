@@ -4,7 +4,6 @@ WebSocket 연결 관리 엔진
 기존 connection.py의 기능을 통합하고 개선한 연결 관리 엔진
 """
 import time
-# import logging # logger를 get_module_logger로 대체
 import asyncio
 from typing import Dict, List, Any, Optional
 from fastapi import WebSocket

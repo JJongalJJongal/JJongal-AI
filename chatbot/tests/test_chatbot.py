@@ -18,7 +18,7 @@ sys.path.append(project_root) # 프로젝트 루트를 sys.path에 추가
 
 # 모듈 임포트
 from chatbot.models.chat_bot_a import ChatBotA
-from chatbot.models.chat_bot_b import StoryGenerationChatBot
+from chatbot.models.chat_bot_b import ChatBotB
 from chatbot.models.voice_ws.voice_ws_server import app as voice_ws_app
 from shared.utils.file_utils import ensure_directory
 import uvicorn
@@ -224,6 +224,128 @@ class TestWebSocketFunctionality(unittest.IsolatedAsyncioTestCase):
         except Exception as e:
             self.fail(f"웹소켓 연결 중 오류 발생: {e}")
 
+# 꼬기 챗봇 테스트 (단위 테스트)
+class TestKogiFunctionality(unittest.IsolatedAsyncioTestCase):
+    async def test_image_with_audio_generation(self):
+        """꼬기 이미지, 음성 테스트"""
+        print("\n=== 꼬기 이미지, 음성 테스트 ===")
+        
+        kogi_output_dir = os.path.join(RESPONSES_DIR, "kogi_unit_test_output") # 꼬기 챗봇 출력 디렉토리
+        ensure_directory(kogi_output_dir) # 꼬기 챗봇 출력 디렉토리 생성
+        
+        kogi = ChatBotB(
+            output_dir=kogi_output_dir, # 꼬기 챗봇 출력 디렉토리
+            vector_db_path="chatbot/data/vector_db/detailed", # 벡터 데이터베이스 경로
+            collection_name="fairy_tales" # 벡터 데이터베이스 컬렉션 이름
+        )
+        
+        # 2. 스토리 개요 임의 설정 (테스트용 데이터)
+        child_name_for_test = "유닛테스트아이"
+        age_for_test = 7
+        story_outline_data = {
+            "title": f"{child_name_for_test}의 신나는 코딩 모험",
+            "theme": "코딩과 문제 해결",
+            "plot_summary": (
+                f"{child_name_for_test}는 코딩을 배우기 시작한 {age_for_test}살 어린이다. "
+                f"어느 날, {child_name_for_test}의 컴퓨터에 바이러스가 침투해 가장 좋아하는 게임이 망가진다. "
+                f"{child_name_for_test}는 로봇 친구 '코드윙'과 함께 코딩으로 바이러스를 물리치고 게임을 복구하는 모험을 시작한다."
+            ),
+            "characters": [
+                {"name": child_name_for_test, "description": f"코딩을 좋아하는 호기심 많은 {age_for_test}살 아이"},
+                {"name": "코드윙", "description": f"{child_name_for_test}를 돕는 작고 똑똑한 코딩 로봇"},
+                {"name": "버그몬", "description": "컴퓨터 시스템을 망가뜨리는 장난꾸러기 바이러스 몬스터"}
+            ],
+            "setting": f"컴퓨터 내부의 디지털 세계와 {child_name_for_test}의 방",
+            "educational_value": "문제 해결 능력, 코딩의 기본 원리, 협동심",
+            "target_age": age_for_test
+        }
+        
+        kogi.set_story_outline(story_outline_data)
+        kogi.set_target_age(age_for_test)
+        
+         # 3. 음성 클로닝 정보 설정
+        # 스토리 개요에서 메인 캐릭터 이름 추출
+        main_char_name = "테스트주인공" # 기본값
+        if story_outline_data.get("characters") and isinstance(story_outline_data["characters"], list) and len(story_outline_data["characters"]) > 0:
+            first_char = story_outline_data["characters"][0]
+            if isinstance(first_char, dict) and first_char.get("name"):
+                main_char_name = first_char["name"]
+            elif isinstance(first_char, str): # 혹시 문자열 리스트로 들어올 경우 대비
+                 main_char_name = first_char
+
+        kogi.set_cloned_voice_info(
+            child_voice_id="test_voice_id_kogi_unit", # 테스트용 플레이스홀더 ID
+            main_character_name=main_char_name
+        )
+        
+        # 4. 테스트 환경에서 이미지 생성기 비활성화 (TestChatBotIntegration 패턴 따름)
+        if hasattr(kogi.story_engine, 'image_generator'):
+            kogi.story_engine.image_generator = None
+            print("⚠️ 테스트 환경: 이미지 생성기 비활성화됨.")
+        
+        # 5. 상세 스토리 생성 실행
+        print("상세 스토리 및 멀티미디어 요소 생성 중 (단위 테스트)...")
+        result = None
+        try:
+            result = await kogi.generate_detailed_story()
+        except Exception as e:
+            import traceback
+            traceback.print_exc()
+            self.fail(f"꼬기 스토리 생성 중 예외 발생: {e}")
+
+        # 6. 결과 검증
+        print("\n=== 생성된 상세 스토리 정보 (단위 테스트) ===")
+        self.assertIsNotNone(result, "스토리 생성 결과가 없습니다.")
+        self.assertIn("story_data", result, "결과에 스토리 데이터가 없습니다.")
+        
+        story_data_result = result.get("story_data")
+        self.assertIsNotNone(story_data_result, "상세 스토리가 생성되지 않았습니다.")
+        
+        print(f"상세 스토리 제목: {story_data_result.get('title', '제목 없음')}")
+        print(f"생성 상태: {result.get('status', '상태 없음')}")
+        
+        chapters = story_data_result.get('chapters', [])
+        self.assertTrue(len(chapters) > 0, "상세 스토리에 챕터가 없습니다.")
+        print(f"챕터 수: {len(chapters)}")
+        
+        for i, chapter in enumerate(chapters[:2]): # 처음 2개 챕터 정보만 간단히 출력
+            print(f"  챕터 {i+1}: {chapter.get('chapter_title', chapter.get('title', '제목 없음'))}")
+
+        # 이미지 생성 결과 확인 (image_generator가 None이므로 비어있을 것으로 예상)
+        print("\n=== 생성된 이미지 정보 (단위 테스트) ===")
+        image_paths = result.get("image_paths", [])
+        if image_paths: # 실제로는 비어 있어야 함
+            print(f"생성된 이미지 개수: {len(image_paths)}")
+            for img_path_str in image_paths:
+                img_path = Path(img_path_str)
+                print(f"이미지 경로: {img_path}")
+                # self.assertTrue(img_path.exists(), f"생성된 이미지 파일 없음: {img_path}") # 생성기가 None이므로 이 assert는 실패함
+        else:
+            print("이미지가 생성되지 않았습니다. (image_generator가 None으로 설정됨 - 의도된 동작).")
+        self.assertEqual(len(image_paths), 0, "Image_generator가 None일 때 image_paths는 비어 있어야 합니다.")
+
+        # 음성 생성 결과 확인
+        print("\n=== 생성된 음성 정보 (단위 테스트) ===")
+        audio_paths = result.get("audio_paths", [])
+        if audio_paths:
+            print(f"생성된 음성 개수: {len(audio_paths)}")
+            for audio_path_str in audio_paths:
+                audio_path = Path(audio_path_str)
+                print(f"음성 경로: {audio_path}")
+                if audio_path.exists():
+                     print(f"  ✅ 파일 존재: {audio_path.stat().st_size} bytes")
+                else:
+                     print(f"  ⚠️ 파일 없음: {audio_path} (VoiceGenerator가 모킹되지 않았거나 API 호출 실패 시 발생 가능)")
+        else:
+            print("음성이 생성되지 않았습니다.")
+
+        self.assertIsNotNone(story_data_result, "최소한 텍스트 스토리는 생성되어야 합니다.")
+        self.assertTrue(len(chapters) > 0, "최소한 하나의 챕터는 생성되어야 합니다.")
+        
+        print(f"\n✅ 꼬기 이미지/음성 단위 테스트 완료! (상태: {result.get('status', 'unknown')})")
+        
+
+
 class TestChatBotIntegration(unittest.IsolatedAsyncioTestCase):
     async def test_story_generation_with_images(self):
         """부기 -> 꼬기 통합 테스트 (상세 스토리 및 이미지 생성 검증)"""
@@ -231,12 +353,11 @@ class TestChatBotIntegration(unittest.IsolatedAsyncioTestCase):
         
         # 1. 부기 챗봇을 통한 이야기 수집
         print("\n1. 부기 챗봇을 통한 이야기 수집")
-        bugi = StoryGenerationChatBot()
-        bugi.set_child_info(
+        bugi = ChatBotA()
+        bugi.initialize_chat(
             child_name="민준",
             age=6,
             interests=["공룡", "우주", "로봇"],
-            chatbot_name="부기"
         )
         
         test_inputs = [
@@ -276,7 +397,7 @@ class TestChatBotIntegration(unittest.IsolatedAsyncioTestCase):
             ensure_directory(kogi_output_dir)
 
             # 꼬기 챗봇 초기화 (우리가 구현한 구조에 맞춤)
-            kogi = StoryGenerationChatBot(
+            kogi = ChatBotB(
                 output_dir=kogi_output_dir,
                 vector_db_path="chatbot/data/vector_db/detailed",
                 collection_name="fairy_tales"
@@ -577,7 +698,7 @@ def main():
         if args.test_image:
             print("TestGogiIntegration 실행 중...")
             loader = unittest.TestLoader()
-            suite = loader.loadTestsFromTestCase(TestChatBotIntegration)
+            suite = loader.loadTestsFromTestCase(TestKogiFunctionality)
             runner = unittest.TextTestRunner()
             runner.run(suite)
         

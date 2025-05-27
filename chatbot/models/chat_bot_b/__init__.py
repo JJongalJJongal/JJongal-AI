@@ -22,11 +22,11 @@ from .generators import (
 )
 
 # 메인 인터페이스 클래스
-from .story_generation_chatbot import StoryGenerationChatBot
+from .chat_bot_b import ChatBotB
 
 __all__ = [
     # 메인 인터페이스 클래스
-    "StoryGenerationChatBot",
+    "ChatBotB",
     
     # 핵심 엔진
     "StoryGenerationEngine",

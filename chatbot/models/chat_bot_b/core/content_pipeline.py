@@ -4,7 +4,7 @@
 단계별 실행 : 텍스트 완성 후, 이미지와 음성 병렬 생성    
 """
 
-import logging
+from shared.utils.logging_utils import get_module_logger
 import asyncio
 from typing import Dict, Any, List, Optional, Callable, Union
 from pathlib import Path
@@ -25,7 +25,7 @@ from chatbot.data.vector_db.core import VectorDB
 from chatbot.data.vector_db.query import query_vector_db, format_query_results
 
 # logging 설정
-logger = logging.getLogger(__name__)
+logger = get_module_logger(__name__)
 
 class PipelineStep(Enum):
     """파이프라인 단계 정의"""

@@ -1,135 +1,14 @@
-"""
-꼬기 (ChatBot B) - 동화 생성 챗봇 통합 클래스
-
-부기에서 수집한 이야기 요소를 바탕으로 완전한 멀티미디어 동화를 생성하는 메인 클래스
-"""
-
-import logging
-import os
+from shared.utils.logging_utils import get_module_logger
 from typing import Dict, Any, Optional, Callable
-from pathlib import Path
 
-# 핵심 모듈
-from .core import StoryGenerationEngine, ContentPipeline
-
-# 생성자 모듈
-from .generators import TextGenerator, ImageGenerator, VoiceGenerator
-
-# 공유 유틸리티
-from shared.utils.openai_utils import initialize_client # OpenAI 클라이언트 초기화
-
-logger = logging.getLogger(__name__) # 로깅 설정
+logger = get_module_logger(__name__)
 
 class StoryGenerationChatBot:
-    """
-    꼬기 - 동화 생성 챗봇 메인 클래스
-    
-    부기에서 수집한 이야기 요소를 바탕으로:
-    1. 상세 스토리 텍스트 생성
-    2. 챕터별 이미지 생성 (DALL-E 3)
-    3. 등장인물별 음성 생성 (ElevenLabs)
-    4. 완전한 멀티미디어 동화 제작
-    """
-    
-    def __init__(self, 
-                 output_dir: str = "output", # 출력 디렉토리 경로
-                 vector_db_path: str = None, # ChromaDB 벡터 데이터베이스 경로
-                 collection_name: str = "fairy_tales"): # ChromaDB 컬렉션 이름
-        """
-        꼬기 챗봇 초기화
-        
-        Args:
-            output_dir: 출력 디렉토리 경로
-            vector_db_path: ChromaDB 벡터 데이터베이스 경로
-            collection_name: ChromaDB 컬렉션 이름
-        """
-        self.output_dir = Path(output_dir) # 출력 디렉토리 경로
-        self.output_dir.mkdir(parents=True, exist_ok=True) # 출력 디렉토리 생성
-        
-        # 클라이언트 초기화
-        self.openai_client = None # OpenAI 클라이언트
-        self.elevenlabs_api_key = None # ElevenLabs API 키
-        
-        # 스토리 설정
-        self.target_age = None # 대상 연령
-        self.story_outline = None # 스토리 개요
-        
-        # 핵심 엔진들
-        self.story_engine = None # 스토리 생성 엔진
-        self.content_pipeline = None # 콘텐츠 파이프라인
-        
-        # 생성기들
-        self.text_generator = None # 텍스트 생성기
-        self.image_generator = None # 이미지 생성기
-        self.voice_generator = None # 음성 생성기
-        
-        # 초기화
-        self._initialize_clients() # API 클라이언트 초기화
-        self._initialize_engines(vector_db_path, collection_name) # 엔진 및 생성기 초기화
-        
-    def _initialize_clients(self):
-        """API 클라이언트 초기화"""
-        try:
-            # OpenAI 클라이언트 초기화
-            self.openai_client = initialize_client() # OpenAI 클라이언트 초기화
-            
-            # ElevenLabs API 키 로드
-            self.elevenlabs_api_key = os.getenv("ELEVENLABS_API_KEY") # ElevenLabs API 키 로드
-            
-            logger.info("API 클라이언트 초기화 완료") # 로깅
-            
-        except Exception as e:
-            logger.error(f"API 클라이언트 초기화 실패: {e}") # 로깅
-            
-    def _initialize_engines(self, vector_db_path: str, collection_name: str):
-        """엔진 및 생성기 초기화"""
-        try:
-            # 1. 생성기들 초기화
-            self.text_generator = TextGenerator(
-                openai_client=self.openai_client, # OpenAI 클라이언트
-                vector_db_path=vector_db_path, # ChromaDB 벡터 데이터베이스 경로
-                collection_name=collection_name # ChromaDB 컬렉션 이름
-            )
-            
-            self.image_generator = ImageGenerator( 
-                openai_client=self.openai_client, # OpenAI 클라이언트
-                model_name="dall-e-3", # DALL-E 3 모델
-                temp_storage_path=str(self.output_dir / "temp") # 임시 저장 경로
-            )
-            
-            self.voice_generator = VoiceGenerator(
-                elevenlabs_api_key=self.elevenlabs_api_key, # ElevenLabs API 키
-                temp_storage_path=str(self.output_dir / "temp") # 임시 저장 경로
-            )
-            
-            # 2. 스토리 생성 엔진 초기화
-            self.story_engine = StoryGenerationEngine(
-                openai_client=self.openai_client, # OpenAI 클라이언트
-                elevenlabs_client=None,  # ElevenLabs 클라이언트
-                output_dir=str(self.output_dir) # 출력 디렉토리 경로
-            )
-            
-            # 생성기들을 엔진에 주입
-            self.story_engine.set_generators(
-                text_generator=self.text_generator, # 텍스트 생성기
-                image_generator=self.image_generator, # 이미지 생성기
-                voice_generator=self.voice_generator, # 음성 생성기
-                rag_enhancer=None  # RAG 향상기
-            )
-            
-            # 3. 콘텐츠 파이프라인 초기화
-            self.content_pipeline = ContentPipeline(
-                openai_client=self.openai_client, # OpenAI 클라이언트
-                vector_db_path=vector_db_path, # ChromaDB 벡터 데이터베이스 경로
-                collection_name=collection_name # ChromaDB 컬렉션 이름
-            )
-            
-            logger.info("엔진 및 생성기 초기화 완료") # 로깅
-            
-        except Exception as e:
-            logger.error(f"엔진 초기화 실패: {e}") # 로깅
-            raise # 예외 발생
-    
+    def __init__(self):
+        self.story_engine = None
+        self.target_age = None
+        self.story_outline = None
+
     def set_target_age(self, age: int):
         """대상 연령 설정"""
         self.target_age = age # 대상 연령 설정
@@ -139,7 +18,43 @@ class StoryGenerationChatBot:
         """부기에서 수집한 스토리 개요 설정"""
         self.story_outline = story_outline # 스토리 개요 설정
         logger.info("스토리 개요 설정 완료") # 로깅
-    
+
+    def set_cloned_voice_info(self, child_voice_id: str, main_character_name: str):
+        """
+        아이의 클론된 음성 ID와 메인 캐릭터 이름을 설정합니다.
+        이는 VoiceGenerator의 캐릭터 음성 매핑을 업데이트합니다.
+        """
+        # story_engine과 voice_generator가 초기화되었는지 확인
+        if not hasattr(self, 'story_engine') or not self.story_engine:
+            logger.warning(
+                "StoryEngine이 아직 초기화되지 않았습니다. "
+                "클론된 음성 정보 설정이 적용되지 않을 수 있습니다."
+            )
+            # TODO: 이 경우를 대비하여 정보를 임시 저장했다가 story_engine 초기화 후 적용하는 로직 고려
+            return
+
+        if not hasattr(self.story_engine, 'voice_generator') or not self.story_engine.voice_generator:
+            logger.warning(
+                "StoryEngine 내의 VoiceGenerator가 아직 초기화되지 않았습니다. "
+                "클론된 음성 정보 설정이 적용되지 않을 수 있습니다."
+            )
+            # TODO: 마찬가지로 임시 저장 로직 고려
+            return
+
+        character_mapping = {main_character_name: child_voice_id}
+        
+        try:
+            # VoiceGenerator의 set_character_voice_mapping 호출
+            self.story_engine.voice_generator.set_character_voice_mapping(character_mapping)
+            logger.info(f"클론된 음성 정보 설정 완료: 캐릭터 '{main_character_name}'에 음성 ID '{child_voice_id}'가 매핑되었습니다.")
+        except AttributeError:
+            logger.error(
+                "VoiceGenerator에 'set_character_voice_mapping' 메서드가 없거나, "
+                "story_engine.voice_generator가 올바르게 설정되지 않았습니다."
+            )
+        except Exception as e:
+            logger.error(f"클론된 음성 정보 설정 중 예상치 못한 오류 발생: {e}")
+
     async def generate_detailed_story(self) -> Dict[str, Any]:
         """
         상세 동화 생성 (메인 메서드)
@@ -249,30 +164,20 @@ class StoryGenerationChatBot:
             "voice_generator": False # 음성 생성기 준비 여부
         }
         
-        # 각 생성기 상태 확인
-        if self.text_generator:
-            try:
-                status["text_generator"] = await self.text_generator.health_check() # 텍스트 생성기 상태 확인
-            except:
-                status["text_generator"] = False # 텍스트 생성기 상태 확인 실패
-                
-        if self.image_generator:
-            try:
-                status["image_generator"] = await self.image_generator.health_check() # 이미지 생성기 상태 확인
-            except:
-                status["image_generator"] = False # 이미지 생성기 상태 확인 실패
-                
-        if self.voice_generator:
-            try:
-                status["voice_generator"] = await self.voice_generator.health_check() # 음성 생성기 상태 확인
-            except:
-                status["voice_generator"] = False # 음성 생성기 상태
-        
+        if self.text_generator and hasattr(self.text_generator, 'health_check'):
+            status["text_generator"] = await self.text_generator.health_check()
+            
+        if self.image_generator and hasattr(self.image_generator, 'health_check'):
+            status["image_generator"] = await self.image_generator.health_check()
+            
+        if self.voice_generator and hasattr(self.voice_generator, 'health_check'):
+            status["voice_generator"] = await self.voice_generator.health_check()
+            
         return status
     
     def cleanup(self):
-        """리소스 정리"""
+        """임시 파일 및 리소스 정리"""
         if self.story_engine:
-            self.story_engine.cleanup() # 스토리 생성 엔진 리소스 정리
-        
-        logger.info("꼬기 챗봇 리소스 정리 완료") # 로깅
+            self.story_engine.cleanup()
+        # 추가적인 정리 로직 (예: self.output_dir 내 임시 파일)
+        logger.info("StoryGenerationChatBot 리소스 정리 완료.")

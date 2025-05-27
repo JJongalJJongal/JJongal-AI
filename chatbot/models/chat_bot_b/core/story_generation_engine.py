@@ -4,13 +4,13 @@
     완전한 동화를 생성하는 메인 엔진
 """
 
-import logging
+from shared.utils.logging_utils import get_module_logger
 from typing import Dict, List, Any, Optional, Tuple
 from pathlib import Path
 import asyncio
 
 # Logging 설정
-logger = logging.getLogger(__name__) # 현재 모듈 이름으로 로거 생성
+logger = get_module_logger(__name__) # 현재 모듈 이름으로 로거 생성
 
 class StoryGenerationEngine:
     

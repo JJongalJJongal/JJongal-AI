@@ -4,7 +4,7 @@ ElevenLabs API를 사용한 챕터별 음성 생성
 등장인물별 다른 음성 지원
 """
 
-import logging
+from shared.utils.logging_utils import get_module_logger
 import json
 import uuid
 import asyncio
@@ -15,7 +15,7 @@ import aiohttp
 # Project imports
 from .base_generator import BaseGenerator
 
-logger = logging.getLogger(__name__)
+logger = get_module_logger(__name__)
 
 class VoiceGenerator(BaseGenerator):
     """ElevenLabs API 기반 음성 생성기 (등장인물별 음성 지원)"""

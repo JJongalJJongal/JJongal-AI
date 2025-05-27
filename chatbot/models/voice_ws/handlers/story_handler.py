@@ -11,7 +11,7 @@ from typing import Optional, Dict, Any
 from fastapi import WebSocket, status
 
 from shared.utils.logging_utils import get_module_logger
-from chatbot.models.chat_bot_b import StoryGenerationChatBot # 꼬기 챗봇 import
+from chatbot.models.chat_bot_b import ChatBotB # 꼬기 챗봇 import
 from ..core.connection_engine import ConnectionEngine # 연결 엔진 import
 from ..core.websocket_engine import WebSocketDisconnect # WebSocket 연결 종료 처리
 from ..processors.audio_processor import AudioProcessor # 오디오 처리 프로세서
@@ -44,7 +44,7 @@ async def handle_story_generation_websocket(
         logger.info(f"동화 생성 WebSocket 연결 수락: {client_id} ({child_name}, {age}세)") # 로깅
 
         # ChatBot B 인스턴스 생성 및 관리 (ConnectionEngine 사용)
-        chatbot_b = StoryGenerationChatBot() # 꼬기 챗봇 인스턴스 생성
+        chatbot_b = ChatBotB() # 꼬기 챗봇 인스턴스 생성
         chatbot_b.set_target_age(age) # 대상 연령 설정
         chatbot_b.set_child_info(name=child_name, interests=interests_list) # 아이 정보 설정
         
@@ -109,7 +109,7 @@ async def handle_story_generation_websocket(
         # 일반 연결 해제시 로직은 connection_engine.handle_disconnect에서 처리
         logger.info(f"동화 생성 WebSocket 연결 정리 완료: {client_id}")
 
-async def handle_story_outline(websocket: WebSocket, client_id: str, message: dict, connection_engine: ConnectionEngine, chatbot_b: StoryGenerationChatBot):
+async def handle_story_outline(websocket: WebSocket, client_id: str, message: dict, connection_engine: ConnectionEngine, chatbot_b: ChatBotB):
     """이야기 개요 처리 핸들러"""
     logger.info(f"이야기 개요 수신 ({client_id}): {message.get('outline')}")
     story_outline_data = message.get("outline")
@@ -134,7 +134,7 @@ async def handle_story_outline(websocket: WebSocket, client_id: str, message: di
         logger.error(f"이야기 개요 처리 중 오류 ({client_id}): {e}\n{traceback.format_exc()}")
         await websocket.send_json({"type": "error", "message": f"이야기 개요 처리 오류: {str(e)}", "status": "error"})
 
-async def handle_generate_illustrations(websocket: WebSocket, client_id: str, chatbot_b: StoryGenerationChatBot):
+async def handle_generate_illustrations(websocket: WebSocket, client_id: str, chatbot_b: ChatBotB):
     """삽화 생성 요청 처리 핸들러"""
     logger.info(f"삽화 생성 요청 수신 ({client_id})")
     try:
@@ -150,7 +150,7 @@ async def handle_generate_illustrations(websocket: WebSocket, client_id: str, ch
         logger.error(f"삽화 생성 중 오류 ({client_id}): {e}\n{traceback.format_exc()}")
         await websocket.send_json({"type": "error", "message": f"삽화 생성 오류: {str(e)}", "status": "error"})
 
-async def handle_generate_voice(websocket: WebSocket, client_id: str, chatbot_b: StoryGenerationChatBot):
+async def handle_generate_voice(websocket: WebSocket, client_id: str, chatbot_b: ChatBotB):
     """음성 생성 요청 처리 핸들러"""
     logger.info(f"음성 생성 요청 수신 ({client_id})")
     try:
@@ -166,7 +166,7 @@ async def handle_generate_voice(websocket: WebSocket, client_id: str, chatbot_b:
         logger.error(f"음성 생성 중 오류 ({client_id}): {e}\n{traceback.format_exc()}")
         await websocket.send_json({"type": "error", "message": f"음성 생성 오류: {str(e)}", "status": "error"})
 
-async def handle_get_preview(websocket: WebSocket, client_id: str, chatbot_b: StoryGenerationChatBot):
+async def handle_get_preview(websocket: WebSocket, client_id: str, chatbot_b: ChatBotB):
     """미리보기 요청 처리 핸들러"""
     logger.info(f"미리보기 요청 수신 ({client_id})")
     try:
@@ -179,7 +179,7 @@ async def handle_get_preview(websocket: WebSocket, client_id: str, chatbot_b: St
         logger.error(f"미리보기 생성 중 오류 ({client_id}): {e}\n{traceback.format_exc()}")
         await websocket.send_json({"type": "error", "message": f"미리보기 오류: {str(e)}", "status": "error"})
 
-async def handle_save_story(websocket: WebSocket, client_id: str, message: dict, chatbot_b: StoryGenerationChatBot):
+async def handle_save_story(websocket: WebSocket, client_id: str, message: dict, chatbot_b: ChatBotB):
     """이야기 저장 요청 처리 핸들러"""
     logger.info(f"이야기 저장 요청 수신 ({client_id})")
     # file_format = message.get("format", "json") # 필요시 파일 포맷 지정
