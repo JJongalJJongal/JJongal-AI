@@ -10,6 +10,7 @@ import signal
 from pathlib import Path
 from threading import Thread
 import unittest
+
 # 상위 디렉토리 경로 추가
 current_dir = os.path.dirname(os.path.abspath(__file__)) # chatbot/tests
 parent_dir = os.path.dirname(current_dir)  # chatbot
@@ -240,23 +241,24 @@ class TestKogiFunctionality(unittest.IsolatedAsyncioTestCase):
         )
         
         # 2. 스토리 개요 임의 설정 (테스트용 데이터)
-        child_name_for_test = "유닛테스트아이"
+        child_name_for_test = "병찬"
         age_for_test = 7
         story_outline_data = {
-            "title": f"{child_name_for_test}의 신나는 코딩 모험",
-            "theme": "코딩과 문제 해결",
+            "title": f"{child_name_for_test}의 자유로운 여행",
+            "theme": "여행",
             "plot_summary": (
-                f"{child_name_for_test}는 코딩을 배우기 시작한 {age_for_test}살 어린이다. "
-                f"어느 날, {child_name_for_test}의 컴퓨터에 바이러스가 침투해 가장 좋아하는 게임이 망가진다. "
-                f"{child_name_for_test}는 로봇 친구 '코드윙'과 함께 코딩으로 바이러스를 물리치고 게임을 복구하는 모험을 시작한다."
+                f"{child_name_for_test}는 항상 배가 고픈 {age_for_test}살 어린이다.",
+                f"어느날 {child_name_for_test}는 일에 너무 지쳐서 여행을 떠나고 싶었다.",
+                f"그래서 {child_name_for_test}는 친구들과 함께 여행을 떠났다."
             ),
             "characters": [
-                {"name": child_name_for_test, "description": f"코딩을 좋아하는 호기심 많은 {age_for_test}살 아이"},
-                {"name": "코드윙", "description": f"{child_name_for_test}를 돕는 작고 똑똑한 코딩 로봇"},
-                {"name": "버그몬", "description": "컴퓨터 시스템을 망가뜨리는 장난꾸러기 바이러스 몬스터"}
+                {"name": child_name_for_test, "description": f"{age_for_test}살 아이"},
+                {"name": "친구1", "description": f"{age_for_test}살 아이"},
+                {"name": "친구2", "description": f"{age_for_test}살 아이"},
+                {"name": "친구3", "description": f"{age_for_test}살 아이"}
             ],
-            "setting": f"컴퓨터 내부의 디지털 세계와 {child_name_for_test}의 방",
-            "educational_value": "문제 해결 능력, 코딩의 기본 원리, 협동심",
+            "setting": f"여행지",
+            "educational_value": "문제 해결 능력, 협동심",
             "target_age": age_for_test
         }
         
@@ -265,7 +267,7 @@ class TestKogiFunctionality(unittest.IsolatedAsyncioTestCase):
         
          # 3. 음성 클로닝 정보 설정
         # 스토리 개요에서 메인 캐릭터 이름 추출
-        main_char_name = "테스트주인공" # 기본값
+        main_char_name = child_name_for_test # 기본값
         if story_outline_data.get("characters") and isinstance(story_outline_data["characters"], list) and len(story_outline_data["characters"]) > 0:
             first_char = story_outline_data["characters"][0]
             if isinstance(first_char, dict) and first_char.get("name"):
@@ -273,15 +275,18 @@ class TestKogiFunctionality(unittest.IsolatedAsyncioTestCase):
             elif isinstance(first_char, str): # 혹시 문자열 리스트로 들어올 경우 대비
                  main_char_name = first_char
 
-        kogi.set_cloned_voice_info(
-            child_voice_id="test_voice_id_kogi_unit", # 테스트용 플레이스홀더 ID
-            main_character_name=main_char_name
-        )
+        kogi.character_voice_mapping = {
+            main_char_name: "EXAVITQu4vr4xnSDxMaL",  # 아이 목소리
+            "엄마": "21m00Tcm4TlvDq8ikWAM",     # 여성 목소리
+            "아빠": "VR6AewLTigWG4xSOukaG",     # 남성 목소리
+            "요정": "pNInz6obpgDQGcFmaJgB"      # 판타지 목소리
+        }
         
-        # 4. 테스트 환경에서 이미지 생성기 비활성화 (TestChatBotIntegration 패턴 따름)
-        if hasattr(kogi.story_engine, 'image_generator'):
-            kogi.story_engine.image_generator = None
-            print("⚠️ 테스트 환경: 이미지 생성기 비활성화됨.")
+        # 4. 실제 이미지 생성을 위해 이미지 생성기 비활성화 코드 주석 처리
+        # if hasattr(kogi.story_engine, 'image_generator'):
+        #     kogi.story_engine.image_generator = None 
+        #     print("⚠️ 테스트 환경: 이미지 생성기 비활성화됨.")
+        print("✅ 테스트 환경: 이미지 생성기 활성화됨 (실제 API 호출).") # 확인용 로그 추가
         
         # 5. 상세 스토리 생성 실행
         print("상세 스토리 및 멀티미디어 요소 생성 중 (단위 테스트)...")
@@ -311,18 +316,37 @@ class TestKogiFunctionality(unittest.IsolatedAsyncioTestCase):
         for i, chapter in enumerate(chapters[:2]): # 처음 2개 챕터 정보만 간단히 출력
             print(f"  챕터 {i+1}: {chapter.get('chapter_title', chapter.get('title', '제목 없음'))}")
 
-        # 이미지 생성 결과 확인 (image_generator가 None이므로 비어있을 것으로 예상)
+        # 이미지 생성 결과 확인
         print("\n=== 생성된 이미지 정보 (단위 테스트) ===")
-        image_paths = result.get("image_paths", [])
-        if image_paths: # 실제로는 비어 있어야 함
-            print(f"생성된 이미지 개수: {len(image_paths)}")
-            for img_path_str in image_paths:
-                img_path = Path(img_path_str)
-                print(f"이미지 경로: {img_path}")
-                # self.assertTrue(img_path.exists(), f"생성된 이미지 파일 없음: {img_path}") # 생성기가 None이므로 이 assert는 실패함
+        image_paths_list = result.get("image_paths", []) # image_paths는 문자열 경로의 리스트
+        
+        if image_paths_list:
+            print(f"생성된 이미지 경로의 수: {len(image_paths_list)}")
+            generated_image_files_count = 0
+            for i, image_path_str in enumerate(image_paths_list):
+                print(f"  이미지 경로 {i+1}: {image_path_str}")
+
+                if image_path_str: # 경로 문자열이 비어있지 않은 경우
+                    try:
+                        img_path = Path(image_path_str)
+                        print(f"    절대 경로: {img_path.resolve()}")
+                        if img_path.exists():
+                            print(f"    ✅ 파일 존재: {img_path.stat().st_size} bytes")
+                            generated_image_files_count += 1
+                        else:
+                            print(f"    ❌ 파일 없음: {img_path}")
+                            # self.assertTrue(img_path.exists(), f"생성된 이미지 파일 없음: {img_path}")
+                    except TypeError as e:
+                        print(f"    ❌ 경로 변환 오류: {image_path_str}는 유효한 경로가 아닙니다. 오류: {e}")
+                    except Exception as e:
+                        print(f"    ❌ 기타 오류 (경로: {image_path_str}): {e}")
+                else:
+                    print(f"  이미지 경로 정보 없음 (리스트의 {i+1}번째 요소가 비어있음)")
+            
+            self.assertTrue(generated_image_files_count > 0, "최소 하나 이상의 이미지가 로컬에 성공적으로 생성되어야 합니다.")
+
         else:
-            print("이미지가 생성되지 않았습니다. (image_generator가 None으로 설정됨 - 의도된 동작).")
-        self.assertEqual(len(image_paths), 0, "Image_generator가 None일 때 image_paths는 비어 있어야 합니다.")
+            print("이미지가 생성되지 않았습니다 (image_paths 리스트가 비어 있음).")
 
         # 음성 생성 결과 확인
         print("\n=== 생성된 음성 정보 (단위 테스트) ===")
@@ -684,43 +708,43 @@ def main():
     parser.add_argument("--test-integration", action="store_true", help="통합 플로우 테스트 (부기->꼬기->멀티미디어, TestChatBotIntegration)")
     args = parser.parse_args()
     
-    if args.create_audio:
+    if args.create_audio: # 테스트용 오디오 파일 생성
         create_test_audio()
 
     try:
-        if args.test_basic:
+        if args.test_basic: # 기본 챗봇 테스트 (TestBugiFunctionality)
             print("TestBugiFunctionality 실행 중...")
             loader = unittest.TestLoader()
             suite = loader.loadTestsFromTestCase(TestBugiFunctionality)
             runner = unittest.TextTestRunner()
             runner.run(suite)
         
-        if args.test_image:
+        if args.test_image: # 이미지 생성 테스트(꼬기 챗봇)
             print("TestGogiIntegration 실행 중...")
             loader = unittest.TestLoader()
             suite = loader.loadTestsFromTestCase(TestKogiFunctionality)
             runner = unittest.TextTestRunner()
             runner.run(suite)
         
-        if args.test_voice:
+        if args.test_voice: # 음성 인식/합성 테스트 (TestWebSocketFunctionality)
             print("TestWebSocketFunctionality 실행 중...")
             loader = unittest.TestLoader()
             suite = loader.loadTestsFromTestCase(TestWebSocketFunctionality)
             runner = unittest.TextTestRunner()
             runner.run(suite)
         
-        if args.test_live:
+        if args.test_live: # 라이브 오디오 테스트 (서버 별도 실행 필요)
             # run_live_audio_test는 서버가 외부에서 실행되어야 함을 명시
             asyncio.run(run_live_audio_test())
         
-        if args.test_integration:
+        if args.test_integration: # 통합 플로우 테스트 (부기->꼬기->멀티미디어, TestChatBotIntegration)
             print("TestChatBotIntegration 실행 중...")
             loader = unittest.TestLoader()
             suite = loader.loadTestsFromTestCase(TestChatBotIntegration)
             runner = unittest.TextTestRunner()
             runner.run(suite)
-        
-        if args.test_all:
+         
+        if args.test_all: # 모든 테스트 실행
             test_combined() 
             print("\nTestChatBotIntegration (as part of --test-all) 실행 중...")
             loader = unittest.TestLoader()

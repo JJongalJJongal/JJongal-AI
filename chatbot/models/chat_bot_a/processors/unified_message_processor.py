@@ -40,7 +40,7 @@ class UnifiedMessageProcessor:
     
     def __init__(self, prompts: Dict = None, child_name: Optional[str] = None, 
                  age_group: Optional[int] = None, interests: List[str] = None,
-                 chatbot_name: str = "부기"):
+                 chatbot_name: str = "부기", enhanced_mode: bool = False):
         """
         통합 메시지 프로세서 초기화
         
@@ -50,12 +50,14 @@ class UnifiedMessageProcessor:
             age_group: 아이의 연령대
             interests: 아이의 관심사 목록
             chatbot_name: 챗봇의 이름
+            enhanced_mode: Enhanced 모드 사용 여부
         """
         self.prompts = prompts or {}
         self.child_name = child_name
         self.age_group = age_group
         self.interests = interests or []
         self.chatbot_name = chatbot_name
+        self.enhanced_mode = enhanced_mode
         
         # 메시지 처리 통계
         self.processed_messages = 0
@@ -66,7 +68,7 @@ class UnifiedMessageProcessor:
         self._cached_language_settings = None
         self._cached_system_message = None
         
-        logger.info("통합 메시지 프로세서 초기화 완료")
+        logger.info(f"통합 메시지 프로세서 초기화 완료 - Enhanced: {enhanced_mode}")
     
     # ==========================================
     # 기본 정보 관리
@@ -629,4 +631,141 @@ class UnifiedMessageProcessor:
         self.processed_messages = 0
         self.format_errors = 0
         self.validation_failures = 0
-        logger.info("메시지 프로세서 통계 초기화") 
+        logger.info("메시지 프로세서 통계 초기화")
+    
+    # ==========================================
+    # Enhanced 모드 지원 메서드들
+    # ==========================================
+    
+    def get_enhanced_greeting(self, age: int) -> str:
+        """Enhanced 연령별 특화 인사말"""
+        age_specific_greetings = {
+            4: f"안녕, {self.child_name or '친구'}! 나는 {self.chatbot_name}야! 재미있는 이야기를 같이 만들어볼까?",
+            5: f"안녕하세요, {self.child_name or '친구'}! 저는 {self.chatbot_name}예요. 멋진 동화를 함께 만들어보아요!",
+            6: f"안녕, {self.child_name or '친구'}! {self.chatbot_name}라고 해! 상상력 가득한 이야기를 만들어보자!",
+            7: f"안녕하세요, {self.child_name or '친구'}! 저는 {self.chatbot_name}입니다. 환상적인 모험 이야기를 함께 만들어볼까요?",
+            8: f"안녕, {self.child_name or '친구'}! {self.chatbot_name}야. 너만의 특별한 이야기를 만들어보자!",
+            9: f"안녕하세요, {self.child_name or '친구'}! 저는 {self.chatbot_name}예요. 창의적이고 흥미진진한 이야기를 함께 만들어보아요!"
+        }
+        
+        greeting = age_specific_greetings.get(age, age_specific_greetings[5])
+        
+        # 관심사가 있으면 추가
+        if self.interests:
+            interest_str = ", ".join(self.interests[:2])
+            greeting += f" {interest_str}에 관심이 많다고 들었어요!"
+        
+        return greeting
+    
+    def get_token_limit_message(self) -> str:
+        """토큰 제한 메시지"""
+        return f"안녕, {self.child_name or '친구'}! 우리 대화가 너무 길어져서 여기서 마무리해야겠어요. 오늘 정말 재미있는 이야기를 들려줘서 고마워요!"
+    
+    def validate_response(self, response: str) -> Dict[str, Any]:
+        """응답 검증"""
+        validation_result = {
+            "is_valid": True,
+            "age_appropriate": True,
+            "encouraging": True,
+            "clear": True,
+            "issues": []
+        }
+        
+        if not response or len(response.strip()) < 5:
+            validation_result["is_valid"] = False
+            validation_result["issues"].append("응답이 너무 짧음")
+        
+        # 연령 적절성 검사
+        if self.age_group:
+            inappropriate_words = ["어려운", "복잡한", "무서운", "슬픈"]
+            if any(word in response for word in inappropriate_words):
+                validation_result["age_appropriate"] = False
+                validation_result["issues"].append("연령에 부적절한 표현")
+        
+        # 격려성 검사
+        encouraging_words = ["좋아", "멋져", "훌륭", "재미있", "대단", "와"]
+        if not any(word in response for word in encouraging_words):
+            validation_result["encouraging"] = False
+            validation_result["issues"].append("격려적 표현 부족")
+        
+        # 명확성 검사
+        if len(response) > 200:
+            validation_result["clear"] = False
+            validation_result["issues"].append("응답이 너무 김")
+        
+        self.validation_failures += len(validation_result["issues"])
+        return validation_result
+    
+    def get_error_message(self) -> str:
+        """에러 메시지"""
+        error_messages = [
+            f"앗, 잠깐만! {self.chatbot_name}가 생각을 정리하고 있어요.",
+            "조금 기다려줄래요? 더 재미있는 이야기를 준비하고 있거든요!",
+            "어라? 뭔가 꼬였네요. 다시 말해줄 수 있어요?"
+        ]
+        return random.choice(error_messages)
+    
+    def adjust_for_age_group(self, response: str, age_group: int) -> str:
+        """연령대별 응답 조정"""
+        if age_group <= 5:
+            # 더 단순하고 친근하게
+            response = response.replace("합니다", "해요")
+            response = response.replace("입니다", "예요")
+            response = response.replace("그렇습니다", "그래요")
+        elif age_group >= 8:
+            # 조금 더 정중하게
+            response = response.replace("해", "해요")
+            response = response.replace("야", "예요")
+        
+        return response
+    
+    def make_age_appropriate(self, response: str) -> str:
+        """연령 적절하게 만들기"""
+        # 어려운 단어 대체
+        replacements = {
+            "복잡한": "재미있는",
+            "어려운": "신나는",
+            "무서운": "스릴 넘치는",
+            "슬픈": "조금 아쉬운",
+            "문제": "도전",
+            "실패": "다른 시도"
+        }
+        
+        for old, new in replacements.items():
+            response = response.replace(old, new)
+        
+        return response
+    
+    def add_encouragement(self, response: str) -> str:
+        """격려 표현 추가"""
+        encouragements = ["정말 좋은 아이디어네요!", "와, 멋져요!", "그거 재미있겠다!", "대단해요!"]
+        
+        if not any(enc in response for enc in encouragements):
+            encouragement = random.choice(encouragements)
+            response = f"{encouragement} {response}"
+        
+        return response
+    
+    def clarify_message(self, response: str) -> str:
+        """메시지 명확화"""
+        # 너무 긴 문장 나누기
+        if len(response) > 150:
+            sentences = response.split('.')
+            if len(sentences) > 2:
+                response = '. '.join(sentences[:2]) + '.'
+        
+        # 명확한 표현으로 변경
+        clarifications = {
+            "그것": "그 아이디어",
+            "이것": "이 생각",
+            "저것": "저 이야기"
+        }
+        
+        for old, new in clarifications.items():
+            response = response.replace(old, new)
+        
+        return response
+
+    # ==========================================
+    # 기존 유틸리티 및 상태 관리 메서드들
+    # ========================================== 

@@ -2,13 +2,13 @@
 CCB_AI Story Data Schema
 
 표준화된 이야기 데이터 형식을 정의하여 부기(ChatBot A)와 꼬기(ChatBot B) 간의
-원활한 데이터 교환을 지원합니다.
+원활한 데이터 교환을 지원.
 
 이 스키마는 이야기 수집부터 최종 생성까지 전체 파이프라인에서 사용되는
-데이터 구조를 표준화합니다.
+데이터 구조를 표준화.
 """
 
-from typing import Dict, List, Any, Optional, Union
+from typing import Dict, List, Any, Optional
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum

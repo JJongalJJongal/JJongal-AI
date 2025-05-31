@@ -5,7 +5,6 @@ ElevenLabs API를 사용한 챕터별 음성 생성
 """
 
 from shared.utils.logging_utils import get_module_logger
-import json
 import uuid
 import asyncio
 from typing import Dict, Any, Optional, Callable, List

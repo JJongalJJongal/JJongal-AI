@@ -9,20 +9,25 @@
 """
 
 from .core import VectorDB
-from .importers import import_stories, process_story_data
-from .query import query_vector_db, format_query_results, get_similar_stories
-from .utils import ensure_directory, get_db_type_path, load_json_file, save_json_file, check_collection_info
+from .importers import process_story_data
+from .query import get_similar_stories
+from shared.utils.file_utils import (
+    ensure_directory,
+    load_json,
+    save_json
+)
+from shared.utils.vector_db_utils import (
+    get_db_type_path,
+    check_collection_info
+)
 
 __all__ = [
     'VectorDB',
-    'import_stories',
     'process_story_data',
-    'query_vector_db',
-    'format_query_results',
     'get_similar_stories',
     'ensure_directory',
     'get_db_type_path',
-    'load_json_file',
-    'save_json_file',
+    'load_json',
+    'save_json',
     'check_collection_info'
 ] 

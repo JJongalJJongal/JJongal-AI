@@ -1,18 +1,23 @@
 """
 이미지 생성기
 LangChain DALL-E 기반 챕터별 이미지 생성
+- 연령별 특화 Image Prompt 생성 (4-7세, 8-9세)
+- 구조화된 프롬프트 접근법
+- 성능 최적화 및 추적
 """
 
 from shared.utils.logging_utils import get_module_logger
 import json
 import uuid
 import base64
-from typing import Dict, Any, Optional, Callable, List
+from typing import Dict, Any, Optional, Callable, List, Union
 from pathlib import Path
 import asyncio
+import aiohttp
+import ssl
+import time
 
 # LangChain imports 
-
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.output_parsers import StrOutputParser
 from langchain_openai import ChatOpenAI
@@ -25,7 +30,16 @@ from .base_generator import BaseGenerator
 logger = get_module_logger(__name__)
 
 class ImageGenerator(BaseGenerator):
-    """LangChain DALL-E 기반 이미지 생성기"""
+    """
+    LangChain DALL-E 기반 이미지 생성기
+    
+    Features:
+        - 연령별 특화 Image Prompt (4-7세, 8-9세)
+        - structured prompt engineering
+        - 안전성 검사
+        - 성능 추적 및 최적화
+        - A/B Test
+    """
     
     def __init__(self, 
                  openai_client=None,
@@ -33,7 +47,8 @@ class ImageGenerator(BaseGenerator):
                  model_name: str = "dall-e-3",
                  image_size: str = "1024x1024",
                  temp_storage_path: str = "/tmp/fairy_tales",
-                 max_retries: int = 3):
+                 max_retries: int = 3,
+                 enable_performance_tracking: bool = True):
         """
         Args:
             openai_client: OpenAI 클라이언트
@@ -42,23 +57,33 @@ class ImageGenerator(BaseGenerator):
             image_size: 이미지 크기 ("1024x1024", "1024x1536", "1536x1024")
             temp_storage_path: 임시 저장 경로
             max_retries: 최대 재시도 횟수
+            enable_performance_tracking: 성능 추적 활성화
         """
-        super().__init__(max_retries=max_retries, timeout=180.0)
+        super().__init__(max_retries=max_retries, timeout=240.0)
         
-        self.openai_client = openai_client
-        self.prompts_file_path = prompts_file_path
-        self.model_name = model_name
-        self.image_size = image_size
-        self.temp_storage_path = Path(temp_storage_path)
+        # Ensure performance_metrics is initialized, in case BaseGenerator doesn't or it gets overwritten.
+        self.performance_metrics: Dict[str, Any] = {
+            "generation_times": [],
+            "error_count": 0,
+            "success_rate": 0.0,
+            "age_group_usage": {} 
+        }
+        
+        self.openai_client = openai_client # OpenAI 클라이언트
+        self.prompts_file_path = prompts_file_path # 프롬프트 JSON 파일 경로
+        self.model_name = model_name # 이미지 생성 모델명 (dall-e-3)
+        self.image_size = image_size # 이미지 크기 ("1024x1024", "1024x1536", "1536x1024")
+        self.temp_storage_path = Path(temp_storage_path) # 임시 저장 경로
+        self.enable_performance_tracking = enable_performance_tracking # 성능 추적 활성화
         
         # 프롬프트 템플릿
-        self.prompts = None
-        self.image_prompt_template = None
+        self.prompts = None # 프롬프트 템플릿
+        self.image_prompt_template = None # 이미지 프롬프트 템플릿
         
         # LangChain 구성 요소
-        self.dalle_wrapper = None
-        self.prompt_enhancer_chain = None
-        self.llm = None
+        self.dalle_wrapper = None # DALL-E Wrapper
+        self.prompt_enhancer_chain: Dict[str, Any] = {} # 프롬프트 개선 체인 (연령별)
+        self.llm = None # LLM
         
         # 초기화
         self._initialize_components()
@@ -88,38 +113,64 @@ class ImageGenerator(BaseGenerator):
                 self.prompts = json.load(f)
             
             # 이미지 프롬프트 템플릿 추출
-            story_templates = self.prompts.get("story_generation_templates", {})
-            self.image_prompt_template = story_templates.get(
-                "image_prompt_system_message", 
-                "Create a beautiful illustration for: {chapter_title}\n\nContent: {chapter_content}"
-            )
+            image_generation_templates = self.prompts.get("image_generation", {}) # 이미지 프롬프트 템플릿 추출
+            dall_e_optimization = image_generation_templates.get("dall_e_3_optimization", {}) # 이미지 프롬프트 템플릿 추출
             
-            logger.info(f"프롬프트 파일 로드 완료: {self.prompts_file_path}")
+            # 연령별 템플릿 설정
+            self.age_specific_templates = {
+                "age_4_7": dall_e_optimization.get("age_4_7_template", {}),
+                "age_8_9": dall_e_optimization.get("age_8_9_template", {})
+            }
+            
+            logger.info(f"프롬프트 파일 로드 완료: {self.prompts_file_path}") # 프롬프트 파일 로드 완료 로깅
             
         except Exception as e:
-            logger.error(f"프롬프트 파일 로드 실패: {e}")
-            # 기본 템플릿 사용
-            self.image_prompt_template = "Create a beautiful illustration for: {chapter_title}\n\nContent: {chapter_content}"
+            logger.error(f"프롬프트 파일 로드 실패: {e}") # 프롬프트 파일 로드 실패 로깅
+            
+            # 기본 Template 설정
+            self._set_fallback_templates()
     
+    def _set_fallback_templates(self):
+        """기본 템플릿 설정 (Prompt Load 실패할 경우)"""
+        self.age_specific_templates = {
+            "age_4_7": {
+                "style_specifications": {
+                    "art_style": "Gentle watercolor illustration with soft, rounded shapes perfect for young children",
+                    "color_palette": "Warm pastel tones: soft mint greens, cream whites, gentle peach, sky blues, lavender",
+                    "composition": "Simple, uncluttered layouts with clear focal points and large, friendly character designs",
+                    "safety_elements": "No sharp edges, dark shadows, or potentially frightening elements"
+                },
+                "prompt_template": "Create a gentle watercolor illustration for a Korean children's storybook. Scene: {scene_description}. Style: Soft watercolor with warm pastel colors. Character design: Large friendly eyes, rounded shapes. Environment: {safe_environment_description}. Mood: {mood}. Safety: Child-friendly, no scary elements."
+            },
+            "age_8_9": {
+                "style_specifications": {
+                    "art_style": "Rich, detailed watercolor with sophisticated environmental storytelling",
+                    "color_palette": "Expanded palette with harmonious color relationships, natural tones",
+                    "composition": "More complex layouts with multiple focal points, depth layers",
+                    "symbolic_elements": "Age-appropriate symbolism and metaphorical visual elements"
+                },
+                "prompt_template": "Create a sophisticated watercolor illustration for a Korean children's storybook (ages 8-9). Scene: {scene_description}. Style: Professional watercolor with layered composition. Character details: Distinctive clothing, nuanced emotions. Environment: Rich textures, hidden details. Mood: {complex_mood}. Technical quality: Publication-ready illustration."
+            }
+        }
+                
     def _setup_langchain_components(self):
         """LangChain 구성 요소 설정"""
         try:
             # 1. LLM 초기화
             self.llm = ChatOpenAI(
-                temperature=0.7,
-                model="gpt-4o-mini"
+                temperature=0.8, # 창의성 조절 (0.0 ~ 1.0)
+                model="gpt-4o",
+                api_key=self.openai_client.api_key # OpenAI API Key
             )
             
             # 2. DALL-E Wrapper 초기화
             self.dalle_wrapper = DallEAPIWrapper(
-                model=self.model_name,
-                size=self.image_size
+                model=self.model_name, # dall-e-3
+                size=self.image_size # 1024x1024, 1024x1536, 1536x1024
             )
             
-            # 3. 프롬프트 개선 체인 설정 (JSON에서 템플릿 가져오기)
-            enhancer_template = self._get_image_enhancer_template()
-            prompt_template = ChatPromptTemplate.from_template(enhancer_template)
-            self.prompt_enhancer_chain = prompt_template | self.llm | StrOutputParser()
+            # 3. 연령별 프롬프트 개선 체인 설정
+            self._setup_age_specific_chains()
             
             logger.info("LangChain 구성 요소 설정 완료")
             
@@ -127,63 +178,93 @@ class ImageGenerator(BaseGenerator):
             logger.error(f"LangChain 구성 요소 설정 실패: {e}")
             raise
     
-    def _get_image_enhancer_template(self) -> str:
-        """JSON에서 이미지 프롬프트 개선 템플릿 가져오기"""
-        try:
-            # Korean fairy tale enhanced template 사용
-            enhanced_templates = self.prompts.get("enhanced_image_templates", {})
-            korean_template = enhanced_templates.get("korean_fairy_tale_enhanced", "")
-            
-            if korean_template:
-                # 템플릿을 LangChain 체인용으로 수정
-                enhancer_template = f"""
-                다음 동화 챕터 정보를 바탕으로 한국 전래동화 스타일의 DALL-E 3 프롬프트를 작성해주세요.
+    def _setup_age_specific_chains(self):
+        """연령별 프롬프트 개선 체인 설정"""
+        
+        for age_group, template_config in self.age_specific_templates.items():
+            try:
+                # Structured Prompt
+                system_template = self._build_prompt_template(age_group, template_config)
                 
-                챕터 제목: {{chapter_title}}
-                챕터 내용: {{chapter_content}}
+                prompt_template = ChatPromptTemplate.from_template(system_template)
+                self.prompt_enhancer_chain[age_group] = prompt_template | self.llm | StrOutputParser()
                 
-                다음 템플릿을 참고하여 영어로 작성해주세요:
-                {korean_template}
+                logger.info(f"연령별 이미지 체인 생성 완료 : {age_group}")
                 
-                scene_description을 챕터 내용으로, age_range를 적절한 연령대로 대체하여 완성된 DALL-E 3 프롬프트를 작성해주세요.
-                """
-                return enhancer_template
-            
-            # 기본 템플릿 사용
-            return """
-            다음 동화 챕터 정보를 바탕으로 DALL-E 3에 최적화된 이미지 생성 프롬프트를 작성해주세요.
-            
-            챕터 제목: {chapter_title}
-            챕터 내용: {chapter_content}
-            
-            요구사항:
-            - 동화적이고 따뜻한 분위기
-            - 아이들이 좋아할 만한 귀여운 캐릭터
-            - 밝고 화사한 색감
-            - 상세하고 구체적인 묘사
-            - 영어로 작성
-            
-            DALL-E 3 프롬프트:
-            """
-            
-        except Exception as e:
-            logger.warning(f"이미지 개선 템플릿 로드 실패, 기본 템플릿 사용: {e}")
-            return """
-            다음 동화 챕터 정보를 바탕으로 DALL-E 3에 최적화된 이미지 생성 프롬프트를 작성해주세요.
-            
-            챕터 제목: {chapter_title}
-            챕터 내용: {chapter_content}
-            
-            요구사항:
-            - 동화적이고 따뜻한 분위기
-            - 아이들이 좋아할 만한 귀여운 캐릭터
-            - 밝고 화사한 색감
-            - 상세하고 구체적인 묘사
-            - 영어로 작성
-            
-            DALL-E 3 프롬프트:
-            """
+            except Exception as e:
+                logger.error(f"연령별 이미지 체인 생성 실패 ({age_group}): {e}")
+                raise
     
+    def _build_prompt_template(self, age_group: str, template_config: Dict[str, Any]) -> str:
+        """구조화된 프롬프트 템플릿 생성"""
+        
+        style_specs = template_config.get("style_specifications", {})
+        
+        prompt_parts = [
+            "## ROLE",
+            f"You are a professional children's book illustrator specializing in {age_group.replace('_', '-')} year old content.",
+            "",
+            "## OBJECTIVE", 
+            "Create a detailed DALL-E 3 prompt that will generate beautiful, age-appropriate watercolor illustrations for a Korean children's storybook.",
+            "",
+            "## STYLE REQUIREMENTS"
+        ]
+
+        # 스타일 명세 추가
+        for spec_key, spec_value in style_specs.items():
+            prompt_parts.append(f"- **{spec_key.replace('_', ' ').title()}**: {spec_value}")
+        
+        prompt_parts.extend([
+            "",
+            "## SAFETY GUIDELINES",
+            "- Ensure all content is 100% child-safe and positive",
+            "- No violent, scary, or inappropriate elements",
+            "- Use warm, comforting colors and expressions",
+            "- Focus on friendship, learning, and positive emotions",
+            "",
+            "## INPUT PROCESSING",
+            "Based on the following information, create an optimized DALL-E 3 prompt:",
+            "",
+            "Chapter Title: {chapter_title}",
+            "Chapter Content: {chapter_content}",
+            "Story Theme: {theme}",
+            "Main Characters: {characters}",
+            "Setting: {setting}",
+            "Target Age: {target_age}",
+            "Mood: {mood}",
+            "",
+            "## OUTPUT FORMAT",
+            "Provide a single, well-crafted DALL-E 3 prompt (maximum 400 characters) that incorporates all style requirements and safety guidelines."
+        ])
+        
+        return "\n".join(prompt_parts)
+    
+    def _determine_age_group(self, target_age: Union[int, str]) -> str:
+        """연령대에 따른 체인 선택"""
+        
+        current_age = target_age
+        if isinstance(target_age, str):
+            # "age_4_7" 형태의 문자열에서 나이 추출 시도 (가운데 숫자 사용 또는 기본값)
+            try:
+                # "4-7" 부분 추출 후 첫번째 숫자 사용
+                age_range_str = target_age.split('_')[-1]
+                current_age = int(age_range_str.split('-')[0]) 
+            except:
+                logger.warning(f"target_age 문자열 '{target_age}'에서 나이 추출 실패, 기본값 7 사용")
+                current_age = 7 # 기본값
+        elif not isinstance(target_age, int):
+            logger.warning(f"target_age 타입이 올바르지 않음({type(target_age)}), 기본값 7 사용")
+            current_age = 7 # 기본값
+
+        if 4 <= current_age <= 7:
+            return "age_4_7"
+        elif 8 <= current_age <= 9:
+            return "age_8_9"
+        else:
+            # 범위를 벗어날 경우, 더 어린 연령대 또는 더 높은 연령대 중 가까운 쪽으로
+            logger.warning(f"대상 연령({current_age})이 표준 범위를 벗어났습니다.")
+            return "age_4_7" if current_age < 8 else "age_8_9"
+        
     async def generate(self, 
                       input_data: Dict[str, Any], 
                       progress_callback: Optional[Callable] = None) -> Dict[str, Any]:
@@ -200,7 +281,8 @@ class ImageGenerator(BaseGenerator):
                             "chapter_title": "챕터 제목",
                             "chapter_content": "챕터 내용"
                         }
-                    ]
+                    ],
+                    "metadata": {"age_group": "연령대"}
                 },
                 "story_id": "스토리 ID"
             }
@@ -224,420 +306,445 @@ class ImageGenerator(BaseGenerator):
             }
         """
         
-        task_id = str(uuid.uuid4())
-        self.current_task_id = task_id
+        start_time = time.time()
+        task_id = str(uuid.uuid4()) # 임시 Task ID
+        self.current_task_id = task_id # 현재 작업 ID 저장
         
         try:
-            story_data = input_data.get("story_data", {})
-            story_id = input_data.get("story_id", task_id)
-            chapters = story_data.get("chapters", [])
+            story_data = input_data.get("story_data", {}) # 스토리 데이터
+            story_id = input_data.get("story_id", task_id) # 스토리 ID
+            chapters = story_data.get("chapters", []) # 챕터 목록
             
-            if not chapters:
-                raise ValueError("생성할 챕터가 없습니다")
+            # 연령대 결정
+            metadata = story_data.get("metadata", {})
+            # target_age를 우선적으로 사용하고, 없으면 age_group에서 추출 시도, 최종적으로 기본값 7 setting
+            raw_target_age = metadata.get("target_age", metadata.get("age_group"))
             
+            if raw_target_age is None:
+                logger.warning("target_age 및 age_group 정보 없음, 기본값 7세 사용")
+                final_target_age = 7
+            elif isinstance(raw_target_age, int):
+                final_target_age = raw_target_age
+            elif isinstance(raw_target_age, str):
+                # age_group 문자열 (e.g., "age_4_7") 또는 숫자 문자열 처리
+                try:
+                    final_target_age = int(raw_target_age) # "7" 같은 경우
+                except ValueError:
+                    # age_4_7 같은 경우
+                    try:
+                        age_range_str = raw_target_age.split('_')[-1] # "4-7" 부분 추출
+                        final_target_age = int(age_range_str.split('-')[0]) # 첫번째 숫자 사용
+                        logger.info(f"age_group '{raw_target_age}'에서 target_age: {final_target_age} 추출")
+                    except:
+                        logger.warning(f"age_group 문자열 '{raw_target_age}'에서 나이 추출 실패, 기본값 7 사용")
+                        final_target_age = 7
+            else:
+                logger.warning(f"알 수 없는 target_age 형식: {raw_target_age}, 기본값 7세 사용")
+                final_target_age = 7
+                
+            age_group_key = self._determine_age_group(final_target_age)
+            
+            # 진행 상황 업데이트
             if progress_callback:
                 await progress_callback({
                     "step": "image_generation",
                     "status": "starting",
                     "total_chapters": len(chapters),
-                    "task_id": task_id
+                    "age_group": age_group_key
                 })
             
-            generated_images = []
+            # Image Batch Generation
+            image_results = await self._generate_batch(
+                chapters=chapters,
+                story_data=story_data,
+                story_id=story_id,
+                age_group=age_group_key,
+                progress_callback=progress_callback
+            )
             
-            # 각 챕터별로 이미지 생성
-            for i, chapter in enumerate(chapters):
-                chapter_start_time = asyncio.get_event_loop().time()
-                
-                if progress_callback:
-                    await progress_callback({
-                        "step": "image_generation",
-                        "status": "processing_chapter",
-                        "current_chapter": i + 1,
-                        "total_chapters": len(chapters),
-                        "chapter_title": chapter.get("chapter_title", "")
-                    })
-                
-                # 1. 이미지 프롬프트 생성 (LangChain 또는 기본)
-                image_prompt = await self._create_enhanced_image_prompt(chapter, story_data)
-                
-                # 2. 이미지 생성 (LangChain 또는 직접 API)
-                image_path = await self._generate_single_image(
-                    prompt=image_prompt,
-                    chapter_number=chapter.get("chapter_number", i + 1),
-                    story_id=story_id
-                )
-                
-                chapter_generation_time = asyncio.get_event_loop().time() - chapter_start_time
-                
-                generated_images.append({
-                    "chapter_number": chapter.get("chapter_number", i + 1),
-                    "image_path": str(image_path),
-                    "image_prompt": image_prompt,
-                    "generation_time": chapter_generation_time
-                })
-                
-                if progress_callback:
-                    await progress_callback({
-                        "step": "image_generation",
-                        "status": "chapter_completed",
-                        "current_chapter": i + 1,
-                        "total_chapters": len(chapters),
-                        "generation_time": chapter_generation_time
-                    })
+            # 성능 Metric 수집
+            generation_time = time.time() - start_time
+            self._update_performance_metrics(generation_time, True, age_group_key, len(image_results))
             
-            if progress_callback:
-                await progress_callback({
-                    "step": "image_generation",
-                    "status": "completed",
-                    "total_images": len(generated_images)
-                })
-            
-            return {
-                "images": generated_images,
+            # 최종 결과 구성
+            result = {
+                "images": image_results, # 생성된 이미지 목록
                 "metadata": {
-                    "total_images": len(generated_images),
-                    "model_used": self.model_name,
-                    "total_generation_time": self.total_generation_time,
-                    "story_id": story_id,
-                    "task_id": task_id
+                    "total_images": len(image_results), # 생성된 이미지 수
+                    "successful_images": len([img for img in image_results if img.get("image_path")]), # 성공한 이미지 수
+                    "model_used": self.model_name, # 사용된 모델
+                    "total_generation_time": generation_time, # 총 생성 시간
+                    "age_group": age_group_key, # 연령대
+                    "average_time_per_image": generation_time / len(chapters) if chapters else 0 # 평균 생성 시간
                 }
             }
             
-        except Exception as e:
-            logger.error(f"이미지 생성 실패 (task_id: {task_id}): {e}")
-            raise
-    
-    async def _create_enhanced_image_prompt(self, chapter: Dict[str, Any], story_data: Dict[str, Any] = None) -> str:
-        """LangChain을 사용한 향상된 이미지 프롬프트 생성"""
-        
-        chapter_title = chapter.get("chapter_title", "")
-        chapter_content = chapter.get("content", chapter.get("chapter_content", ""))
-        
-        # 내용이 너무 길면 요약
-        if len(chapter_content) > 500:
-            chapter_content = chapter_content[:500] + "..."
-        
-        # LangChain 프롬프트 개선 체인 사용
-        if self.prompt_enhancer_chain:
-            try:
-                enhanced_prompt = await self.prompt_enhancer_chain.ainvoke({
-                    "chapter_title": chapter_title,
-                    "chapter_content": chapter_content
+            # 진행 상황 업데이트
+            if progress_callback:
+                await progress_callback({
+                    "step": "image_generation", # 작업 단계
+                    "status": "completed", # 상태
+                    "total_images": len(image_results), # 생성된 이미지 수
+                    "generation_time": generation_time # 생성 시간
                 })
-                return enhanced_prompt.strip()
-            except Exception as e:
-                logger.warning(f"LangChain 프롬프트 개선 실패, 기본 방식 사용: {e}")
-        
-        # 기본 프롬프트 생성 (연령대 정보 전달)
-        age_group = None
-        if story_data:
-            age_group = story_data.get("age_group")
-        
-        return self._create_basic_image_prompt(chapter_title, chapter_content, age_group)
-    
-    def _create_basic_image_prompt(self, chapter_title: str, chapter_content: str, age_group: str = None) -> str:
-        """기본 이미지 프롬프트 생성 (JSON 템플릿 사용)"""
-        
-        try:
-            # JSON에서 이미지 생성 템플릿 가져오기
-            image_templates = self.prompts.get("image_generation_templates", [])
             
-            # 연령대별 템플릿 선택
-            selected_template = self._select_age_appropriate_template(image_templates, age_group)
+            return result
             
-            if selected_template:
-                # 템플릿에서 프롬프트 가져와서 데이터 삽입
-                template_prompt = selected_template.get("prompt", "")
+        except Exception as e:
+            self._update_performance_metrics(0, False, "UnKnown", 0) # 성공 여부, 연령대, 이미지 수
+            logger.error(f"이미지 생성 실패: {e}")
+            raise
+            
+    async def _generate_batch(self,
+                              chapters: List[Dict[str, Any]],
+                              story_data: Dict[str, Any],
+                              story_id: str,
+                              age_group: str,
+                              progress_callback: Optional[Callable] = None) -> List[Dict[str, Any]]:
+        """이미지 배치 생성"""
+        
+        image_results = [] # 생성된 이미지 목록
+        chain = self.prompt_enhancer_chain.get(age_group) # 연령별 특화 체인
+        
+        if not chain:
+            logger.error(f"연령별 체인을 찾을 수 없음: {age_group}")
+            return []
+        for i, chapter in enumerate(chapters):
+            try:
+                # 진행 상황 업데이트
+                if progress_callback:
+                    await progress_callback({
+                        "step": "chapter_image_generation",
+                        "status": "processing",
+                        "current_chapter": i + 1,
+                        "total_chapters": len(chapters),
+                        "chapter_title": chapter.get("chapter_title", f"Chapter {i+1}")
+                    })
                 
-                # 기본 값들 설정
-                scene_description = f"Chapter: {chapter_title}. {chapter_content[:200]}..."
-                theme = "Korean fairy tale"
-                characters = "kawaii characters"
-                setting = "magical storybook world"
-                
-                prompt = template_prompt.format(
-                    scene_description=scene_description,
-                    theme=theme,
-                    characters=characters,
-                    setting=setting
+                # Enhanced 프롬프트 생성
+                enhanced_prompt = await self._create_enhanced_image_prompt(
+                    chapter=chapter,
+                    story_data=story_data,
+                    age_group=age_group,
+                    chain=chain
                 )
                 
-                return prompt
-            
-            # JSON 템플릿이 없으면 기본 템플릿 사용
-            return self._get_fallback_image_prompt(chapter_title, chapter_content)
-            
-        except Exception as e:
-            logger.warning(f"JSON 이미지 템플릿 사용 실패, 기본 템플릿 사용: {e}")
-            return self._get_fallback_image_prompt(chapter_title, chapter_content)
-    
-    def _select_age_appropriate_template(self, templates: List[Dict], age_group: str = None) -> Dict[str, Any]:
-        """연령대에 적합한 템플릿 선택"""
-        
-        if not templates:
-            return None
-        
-        # 연령대가 지정된 경우 매칭되는 템플릿 찾기
-        if age_group:
-            # 정확한 매칭 시도
-            for template in templates:
-                if template.get("age_group") == age_group:
-                    return template
-            
-            # 연령대 범위 매칭 시도 (예: "4-7"에서 "5" 찾기)
-            try:
-                target_age = int(age_group)
-                for template in templates:
-                    template_age = template.get("age_group", "")
-                    if "-" in template_age:
-                        min_age, max_age = map(int, template_age.split("-"))
-                        if min_age <= target_age <= max_age:
-                            return template
-            except (ValueError, TypeError):
-                pass
-        
-        # 기본 템플릿 선택 (4-7세용 우선, 없으면 첫 번째)
-        for template in templates:
-            if template.get("age_group") == "4-7":
-                return template
-        
-        return templates[0] if templates else None
-    
-    def _get_fallback_image_prompt(self, chapter_title: str, chapter_content: str) -> str:
-        """기본 폴백 이미지 프롬프트"""
-        return f"""
-        Create a heartwarming Japanese anime children's storybook illustration: {chapter_title}
-        
-        Scene: {chapter_content[:200]}...
-        
-        Style: Studio Ghibli watercolor style with incredibly detailed pastoral countryside elements
-        Characters: Ultra kawaii characters with huge sparkling diamond eyes, baby-soft features, rosy button cheeks
-        Colors: Warm pastel palette - gentle mint greens, cream whites, soft peach tones, sky blues
-        Atmosphere: Golden hour lighting, peaceful countryside morning with soft warm sunbeams
-        Mood: Incredibly warm, safe, nurturing atmosphere that feels like a gentle hug
-        Art style: Studio Ghibli masterpiece quality with rich environmental storytelling
-        """
-    
-    async def _generate_single_image(self, 
-                                   prompt: str, 
-                                   chapter_number: int, 
-                                   story_id: str) -> Path:
-        """단일 이미지 생성 (LangChain 또는 직접 API)"""
-        
-        try:
-            # LangChain DALL-E Wrapper 사용
-            if self.dalle_wrapper:
-                try:
-                    image_url = await asyncio.to_thread(
-                        self.dalle_wrapper.run,
-                        prompt
-                    )
-                    
-                    # URL에서 이미지 다운로드
-                    image_path = await self._download_image_from_url(
-                        image_url, chapter_number, story_id
-                    )
-                    return image_path
-                    
-                except Exception as e:
-                    logger.warning(f"LangChain DALL-E 실패, 직접 API 사용: {e}")
-            
-            # 직접 OpenAI API 호출
-            return await self._generate_with_direct_api(prompt, chapter_number, story_id)
-            
-        except Exception as e:
-            logger.error(f"이미지 생성 실패 (챕터 {chapter_number}): {e}")
-            raise
-    
-    async def _generate_with_direct_api(self, 
-                                      prompt: str, 
-                                      chapter_number: int, 
-                                      story_id: str) -> Path:
-        """직접 OpenAI API를 사용한 이미지 생성"""
-        
-        response = await asyncio.to_thread(
-            self.openai_client.images.generate,
-            model=self.model_name,
-            prompt=prompt,
-            size=self.image_size,
-            n=1,
-            response_format="b64_json"
-        )
-        
-        # Base64 이미지 데이터 추출
-        image_data = response.data[0].b64_json
-        image_bytes = base64.b64decode(image_data)
-        
-        # 파일 저장
-        image_filename = f"chapter_{chapter_number}_{story_id[:8]}.png"
-        image_path = self.temp_storage_path / image_filename
-        
-        with open(image_path, 'wb') as f:
-            f.write(image_bytes)
-        
-        logger.info(f"이미지 생성 완료: {image_path}")
-        return image_path
-    
-    async def _download_image_from_url(self, 
-                                     image_url: str, 
-                                     chapter_number: int, 
-                                     story_id: str) -> Path:
-        """URL에서 이미지 다운로드"""
-        
-        import aiohttp
-        
-        image_filename = f"chapter_{chapter_number}_{story_id[:8]}.png"
-        image_path = self.temp_storage_path / image_filename
-        
-        async with aiohttp.ClientSession() as session:
-            async with session.get(image_url) as response:
-                if response.status == 200:
-                    image_bytes = await response.read()
-                    with open(image_path, 'wb') as f:
-                        f.write(image_bytes)
-                    
-                    logger.info(f"이미지 다운로드 완료: {image_path}")
-                    return image_path
-                else:
-                    raise Exception(f"이미지 다운로드 실패: HTTP {response.status}")
-    
-    
-    async def generate_batch(self, 
-                           chapters: List[Dict[str, Any]], 
-                           story_id: str,
-                           progress_callback: Optional[Callable] = None) -> List[Dict[str, Any]]:
-        """여러 챕터의 이미지를 병렬로 생성"""
-        
-        if progress_callback:
-            await progress_callback({
-                "step": "image_generation",
-                "status": "batch_starting",
-                "total_chapters": len(chapters)
-            })
-        
-        # 병렬 생성 태스크 생성
-        tasks = []
-        for i, chapter in enumerate(chapters):
-            task = self._generate_chapter_image_task(chapter, story_id, i + 1)
-            tasks.append(task)
-        
-        # 병렬 실행
-        results = await asyncio.gather(*tasks, return_exceptions=True)
-        
-        # 결과 처리
-        generated_images = []
-        for i, result in enumerate(results):
-            if isinstance(result, Exception):
-                logger.error(f"챕터 {i + 1} 이미지 생성 실패: {result}")
-                # 실패한 경우에도 빈 결과 추가
-                generated_images.append({
-                    "chapter_number": i + 1,
+                # 이미지 생성
+                image_result = await self._generate_single_enhanced_image(
+                    prompt=enhanced_prompt,
+                    chapter_number=chapter.get("chapter_number", i + 1),
+                    story_id=story_id,
+                    age_group=age_group
+                )
+                
+                image_results.append(image_result)
+                
+                # API 레이트 리밋 고려 (15초 대기)
+                if i < len(chapters) - 1:  # 마지막 이미지가 아니면
+                    logger.info(f"다음 이미지 생성을 위해 15초 대기...")
+                    await asyncio.sleep(10) # 10초 대기
+                
+            except Exception as e:
+                logger.error(f"챕터 {i+1} 이미지 생성 실패: {e}")
+                image_results.append({
+                    "chapter_number": chapter.get("chapter_number", i + 1),
                     "image_path": None,
-                    "error": str(result)
+                    "image_prompt": None,
+                    "status": "error",
+                    "error": str(e),
+                    "age_group": age_group
                 })
-            else:
-                generated_images.append(result)
         
-        if progress_callback:
-            successful_count = sum(1 for img in generated_images if img.get("image_path"))
-            await progress_callback({
-                "step": "image_generation",
-                "status": "batch_completed",
-                "successful_images": successful_count,
-                "total_chapters": len(chapters)
-            })
-        
-        return generated_images
+        return image_results
+                
     
-    async def _generate_chapter_image_task(self, 
-                                         chapter: Dict[str, Any], 
-                                         story_id: str, 
-                                         chapter_number: int) -> Dict[str, Any]:
-        """단일 챕터 이미지 생성 태스크"""
+    async def _create_enhanced_image_prompt(self,
+                                            chapter: Dict[str, Any],
+                                            story_data: Dict[str, Any],
+                                            age_group: str,
+                                            chain) -> str:
+        
+        """LangChain을 사용한 향상된 이미지 프롬프트 생성"""
         
         try:
-            start_time = asyncio.get_event_loop().time()
+            # 연령별 특화 프롬프트 템플릿 추출
+            age_specific_config = self.age_specific_templates.get(age_group, {}) 
+            user_defined_dalle_template = age_specific_config.get("prompt_template") # 연령별 특화 프롬프트 템플릿
+
+            if not user_defined_dalle_template: # 만약 연령별 특화 프롬프트 템플릿이 없으면
+                logger.error(f"User-defined DALL-E template not found for age group {age_group}. Falling back to basic prompt.") # 기본 프롬프트 생성
+                return self._create_fallback_prompt(chapter, age_group) # 기본 프롬프트 생성
+
+            # 프롬프트 템플릿 데이터 준비
+            characters_value = self._extract_characters(story_data)
+            setting_value = self._extract_setting(chapter)
             
-            # 이미지 프롬프트 생성 (향상된 버전)
-            image_prompt = await self._create_enhanced_image_prompt(chapter)
+            # 프롬프트 템플릿 데이터 치환
+            final_dalle_prompt = user_defined_dalle_template.replace("{{characters}}", characters_value)
+            final_dalle_prompt = final_dalle_prompt.replace("{{setting}}", setting_value)
             
-            # 이미지 생성
-            image_path = await self._generate_single_image(
-                prompt=image_prompt,
-                chapter_number=chapter_number,
-                story_id=story_id
+            # 안전성 필터 적용 및 길이 제한
+            safe_prompt = self._apply_safety_filters(final_dalle_prompt)
+            
+            logger.info(f"Using user-defined DALL-E template for age group {age_group}.") # 연령별 특화 프롬프트 사용
+            logger.debug(f"Formatted DALL-E prompt: {safe_prompt}") # 포맷팅된 DALL-E 프롬프트
+            
+            return safe_prompt
+            
+        except Exception as e:
+            logger.error(f"Failed to create image prompt from user-defined template: {e}") # 프롬프트 생성 실패
+            return self._create_fallback_prompt(chapter, age_group) # 기본 프롬프트 생성
+    
+    def _extract_characters(self, story_data: Dict[str, Any]) -> str:
+        """스토리에서 주요 캐릭터 추출"""
+        characters = []
+        
+        # 챕터들에서 캐릭터 이름 추출
+        chapters = story_data.get("chapters", [])
+        for chapter in chapters[:2]:  # 첫 2개 챕터만 확인
+            content = chapter.get("chapter_content", "")
+            # 한국어 이름 패턴 추출 (간단한 패턴)
+            import re
+            names = re.findall(r'[가-힣]{2,4}(?=은|는|이|가|을|를|와|과|에게|한테)', content)
+            characters.extend(names[:2])  # 최대 2개
+        
+        return ", ".join(list(set(characters))[:3]) if characters else "friendly characters" # 최대 3개의 캐릭터 반환
+    
+    def _extract_setting(self, chapter: Dict[str, Any]) -> str:
+        """챕터에서 배경 추출"""
+        content = chapter.get("chapter_content", "") # 챕터 내용
+        
+        # 장소 관련 키워드 검색
+        location_keywords = ["숲", "집", "학교", "공원", "바다", "산", "마을", "도시", "방", "정원"]
+        for keyword in location_keywords:
+            if keyword in content:
+                return f"{keyword}에서" # 키워드가 있으면 키워드 반환
+        
+        return "평화로운 장소에서" # 키워드가 없으면 기본값 반환
+    
+    def _determine_mood(self, chapter: Dict[str, Any]) -> str:
+        """챕터의 분위기 결정"""
+        content = chapter.get("chapter_content", "").lower()
+        
+        # 감정 키워드 매핑
+        mood_mapping = {
+            "기쁨": ["기쁘", "즐거", "행복", "웃", "놀이"],
+            "모험": ["모험", "탐험", "여행", "발견"],
+            "평화": ["평화", "조용", "안전", "편안"],
+            "우정": ["친구", "도움", "함께", "협력"],
+            "학습": ["배우", "공부", "알아", "깨달"]
+        }
+        
+        for mood, keywords in mood_mapping.items():
+            if any(keyword in content for keyword in keywords):
+                return mood # 키워드가 있으면 분위기 반환
+        
+        return "따뜻하고 평화로운" # 키워드가 없으면 기본값 반환
+    
+    def _create_fallback_prompt(self, chapter: Dict[str, Any], age_group: str) -> str:
+        """기본 프롬프트 생성 (오류 시 사용)"""
+        template = self.age_specific_templates.get(age_group, {})
+        basic_template = template.get("prompt_template", "A gentle watercolor illustration for children showing {scene}. Child-friendly, warm colors, safe environment.")
+        
+        scene = chapter.get("chapter_title", "a peaceful scene")
+        return basic_template.format(scene_description=scene, mood="peaceful", safe_environment_description="safe and welcoming")
+
+    async def _generate_single_enhanced_image(self,
+                                            prompt: str,
+                                            chapter_number: int,
+                                            story_id: str,
+                                            age_group: str) -> Dict[str, Any]:
+        """Enhanced 단일 이미지 생성"""
+        
+        start_time = time.time()
+        
+        try:
+            logger.info(f"[Enhanced 이미지 생성 시작] 챕터 {chapter_number}")
+            logger.info(f"Age Group: {age_group}")
+            logger.info(f"프롬프트: {prompt[:100]}...")
+            
+            # LangChain DALL-E Wrapper 사용 시도
+            try:
+                image_url = self.dalle_wrapper.run(prompt) # 이미지 URL 생성
+                logger.info(f"LangChain 이미지 URL 생성 성공: {image_url[:100]}...")
+                
+                # 이미지 다운로드
+                image_path = await self._download_image_from_url( 
+                    image_url=image_url, # 이미지 URL
+                    chapter_number=chapter_number, # 챕터 번호
+                    story_id=story_id # 스토리 ID
+                )
+                
+                generation_time = time.time() - start_time # 생성 시간
+                
+                result = {
+                    "chapter_number": chapter_number, # 챕터 번호
+                    "image_path": str(image_path), # 이미지 경로
+                    "image_prompt": prompt, # 이미지 프롬프트
+                    "generation_time": generation_time, # 생성 시간
+                    "age_group": age_group, # 연령대
+                    "method": "langchain_dalle_wrapper", # 메서드
+                    "status": "success" # 상태
+                }
+                
+                logger.info(f"이미지 생성 완료: {image_path}") # 이미지 생성 완료
+                return result # 결과 반환
+                
+            except Exception as e:
+                logger.warning(f"LangChain DALL-E 실패, 직접 API 시도: {e}") # 직접 API 시도
+                return await self._generate_with_direct_api_enhanced(prompt, chapter_number, story_id, age_group) # 직접 API 시도
+                
+        except Exception as e:
+            logger.error(f"Enhanced 이미지 생성 완전 실패 (챕터 {chapter_number}): {e}")
+            return {
+                "chapter_number": chapter_number, # 챕터 번호
+                "image_path": None, # 이미지 경로
+                "image_prompt": prompt, # 이미지 프롬프트
+                "status": "error", # 상태
+                "error": str(e), # 에러
+                "age_group": age_group # 연령대
+            }
+
+    async def _generate_with_direct_api_enhanced(self,
+                                               prompt: str,
+                                               chapter_number: int,
+                                               story_id: str,
+                                               age_group: str) -> Dict[str, Any]:
+        """Enhanced 직접 API 이미지 생성"""
+        
+        try:
+            logger.info(f"Enhanced 직접 API 방식 사용 (챕터 {chapter_number})") # 직접 API 방식 사용
+            
+            # OpenAI API 직접 호출
+            response = self.openai_client.images.generate(
+                model=self.model_name, # 모델 이름
+                prompt=prompt, # 이미지 프롬프트
+                size=self.image_size, # 이미지 크기
+                n=1, # 이미지 수
+                response_format="b64_json"
             )
             
-            generation_time = asyncio.get_event_loop().time() - start_time
+            # Base64 이미지 데이터 처리
+            image_data = response.data[0].b64_json
+            image_path = self.temp_storage_path / f"enhanced_chapter_{chapter_number}_{story_id[:8]}.png" # 이미지 경로
+            
+            # 이미지 저장
+            with open(image_path, "wb") as f:
+                f.write(base64.b64decode(image_data)) # 이미지 데이터 저장
+            
+            logger.info(f"직접 API 이미지 생성 완료: {image_path}") # 이미지 생성 완료
             
             return {
-                "chapter_number": chapter_number,
-                "image_path": str(image_path),
-                "image_prompt": image_prompt,
-                "generation_time": generation_time
+                "chapter_number": chapter_number, # 챕터 번호
+                "image_path": str(image_path), # 이미지 경로
+                "image_prompt": prompt, # 이미지 프롬프트
+                "method": "direct_api_enhanced", # 메서드
+                "status": "success", # 상태
+                "age_group": age_group # 연령대
             }
             
         except Exception as e:
-            logger.error(f"챕터 {chapter_number} 이미지 생성 실패: {e}")
+            logger.error(f"직접 API 실패 (챕터 {chapter_number}): {e}") # 직접 API 실패
             raise
-    
-    # 임시 파일 정리는 ContentPipeline에서 담당
-    # cleanup_temp_files 메서드 제거됨 - ContentPipeline._cleanup_temp_files() 사용
-    
-    async def health_check(self) -> bool:
-        """ImageGenerator 상태 확인"""
+
+    async def _download_image_from_url(self,
+                                     image_url: str,
+                                     chapter_number: int,
+                                     story_id: str) -> Path:
+        """URL에서 이미지 다운로드 (Enhanced)"""
+        
+        image_path = self.temp_storage_path / f"enhanced_chapter_{chapter_number}_{story_id[:8]}.png" # 이미지 경로
         
         try:
-            # 기본 상태 확인
-            if not await super().health_check():
-                return False
+            # SSL 컨텍스트 설정
+            ssl_context = ssl.create_default_context() # SSL 컨텍스트 생성
+            ssl_context.check_hostname = False # 호스트 이름 검증 비활성화
+            ssl_context.verify_mode = ssl.CERT_NONE # 인증서 검증 비활성화
             
-            # OpenAI 클라이언트 확인
-            if not self.openai_client:
-                logger.error("OpenAI 클라이언트가 설정되지 않음")
-                return False
+            timeout = aiohttp.ClientTimeout(total=60) # 타임아웃 설정
             
-            # 임시 저장소 확인
-            if not self.temp_storage_path.exists():
-                logger.error(f"임시 저장소가 존재하지 않음: {self.temp_storage_path}")
-                return False
-            
-            # 간단한 이미지 생성 테스트
-            test_prompt = "A simple test image of a cute cartoon character"
-            
-            try:
-                # 타임아웃을 짧게 설정하여 빠른 테스트
-                original_timeout = self.timeout
-                self.timeout = 30.0
-                
-                response = await asyncio.to_thread(
-                    self.openai_client.images.generate,
-                    model=self.model_name,
-                    prompt=test_prompt,
-                    size="1024x1024",
-                    n=1,
-                    response_format="b64_json"
-                )
-                
-                # 응답 확인
-                return len(response.data) > 0 and response.data[0].b64_json
-                
-            finally:
-                self.timeout = original_timeout
-                
+            async with aiohttp.ClientSession(timeout=timeout) as session: # 클라이언트 세션 생성
+                async with session.get(image_url, ssl=ssl_context) as response: # 이미지 URL 요청
+                    if response.status == 200:
+                        image_data = await response.read() # 이미지 데이터 읽기
+                        with open(image_path, 'wb') as f: # 이미지 경로에 저장
+                            f.write(image_data) # 이미지 데이터 저장
+                        
+                        logger.info(f"이미지 다운로드 완료: {image_path}") # 이미지 다운로드 완료
+                        return image_path # 이미지 경로 반환
+                    else:
+                        raise Exception(f"HTTP {response.status}: {await response.text()}") # 에러 발생
+                        
         except Exception as e:
-            logger.error(f"ImageGenerator health check 실패: {e}")
-            return False
-    
+            logger.error(f"이미지 다운로드 실패: {e}") # 이미지 다운로드 실패
+            raise
+
+    def _update_performance_metrics(self, generation_time: float, success: bool, age_group: str, image_count: int):
+        """성능 메트릭 업데이트"""
+        if not self.enable_performance_tracking: # 성능 추적 비활성화 시
+            return # 성능 추적 비활성화 시
+            
+        if success:
+            self.performance_metrics["generation_times"].append(generation_time) # 생성 시간 추가
+            
+            # 연령대별 사용량 추적
+            if age_group not in self.performance_metrics["age_group_usage"]: # 연령대별 사용량 추적
+                self.performance_metrics["age_group_usage"][age_group] = 0 # 연령대별 사용량 초기화
+            self.performance_metrics["age_group_usage"][age_group] += image_count # 연령대별 사용량 추가
+            
+            # 성공률 계산
+            total_attempts = len(self.performance_metrics["generation_times"]) + self.performance_metrics["error_count"]
+            self.performance_metrics["success_rate"] = len(self.performance_metrics["generation_times"]) / total_attempts
+        else:
+            self.performance_metrics["error_count"] += 1 # 에러 발생 시 에러 카운트 증가
+
+    def get_performance_metrics(self) -> Dict[str, Any]: # 성능 메트릭 조회
+        """성능 메트릭 조회 (Enhanced)"""
+        if not self.performance_metrics["generation_times"]: # 생성 시간이 없으면
+            return self.performance_metrics # 성능 메트릭 반환
+            
+        times = self.performance_metrics["generation_times"] # 생성 시간
+        return {
+            **self.performance_metrics,
+            "avg_generation_time": sum(times) / len(times), # 평균 생성 시간
+            "min_generation_time": min(times), # 최소 생성 시간
+            "max_generation_time": max(times), # 최대 생성 시간
+            "total_generations": len(times), # 총 생성 횟수
+            "most_used_age_group": max(self.performance_metrics["age_group_usage"], 
+                                     key=self.performance_metrics["age_group_usage"].get, 
+                                     default="unknown") if self.performance_metrics["age_group_usage"] else "unknown"
+        }
+
+    async def health_check(self) -> Dict[str, bool]:
+        """Enhanced 상태 확인"""
+        health_status = {
+            "enhanced_prompts_loaded": bool(self.prompts),
+            "dalle_wrapper_ready": bool(self.dalle_wrapper), # DALL-E 랩퍼 준비 여부
+            "age_4_7_chain_ready": "age_4_7" in self.prompt_enhancer_chain, # 4-7세 체인 준비 여부
+            "age_8_9_chain_ready": "age_8_9" in self.prompt_enhancer_chain, # 8-9세 체인 준비 여부
+            "temp_storage_accessible": self.temp_storage_path.exists(), # 임시 저장소 접근 가능 여부
+            "performance_tracking": self.enable_performance_tracking # 성능 추적 여부
+        }
+        
+        # 전체 상태
+        health_status["overall_healthy"] = all(health_status.values())
+        
+        return health_status
+
     def get_supported_sizes(self) -> List[str]:
-        """지원되는 이미지 크기 목록 반환"""
-        return ["1024x1024", "1024x1536", "1536x1024", "auto"]
-    
+        """지원되는 이미지 크기 목록"""
+        return ["1024x1024", "1024x1536", "1536x1024"]
+
     def estimate_generation_time(self, chapter_count: int) -> float:
-        """예상 생성 시간 계산 (초)"""
-        # gpt-image-1의 평균 생성 시간을 기반으로 추정
-        avg_time_per_image = 15.0  # 초
-        return chapter_count * avg_time_per_image
+        """예상 생성 시간 계산 (Enhanced)"""
+        base_time_per_image = 20.0  # 기본 20초
+        wait_time_between = 15.0    # 이미지 간 대기 시간
+        
+        if self.performance_metrics["generation_times"]:
+            avg_time = sum(self.performance_metrics["generation_times"]) / len(self.performance_metrics["generation_times"])
+            base_time_per_image = avg_time / max(1, len(self.performance_metrics["generation_times"]))
+        
+        total_time = (base_time_per_image * chapter_count) + (wait_time_between * max(0, chapter_count - 1))
+        return total_time 
     
     

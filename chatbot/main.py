@@ -1,10 +1,16 @@
 #!/usr/bin/env python3
 """
-부기와 꼬기 - 아동 상호작용 챗봇 시스템
+부기와 꼬기 - Enhanced 아동 상호작용 챗봇 시스템 v2.0
 CLI 인터페이스
 
-부기(Chat-bot A): 아이와 대화하며 관심사를 파악하고 이야기 주제 추출
-꼬기(Chat-bot B): 추출된 주제를 바탕으로 상세 동화와 삽화, 음성 생성
+부기(Chat-bot A): Enhanced 연령별 특화 대화 및 이야기 주제 추출
+꼬기(Chat-bot B): Enhanced 상세 동화, 이미지, 음성 생성 (연령별 최적화)
+
+Features v2.0:
+- 연령별 특화 프롬프트 (4-7세, 8-9세)
+- 향상된 프롬프트 엔지니어링
+- 체인 오브 소트 추론
+- 성능 추적 및 최적화
 """
 
 import os
@@ -12,17 +18,48 @@ import sys
 import time
 import argparse
 import json
-from pathlib import Pa
+from pathlib import Path
+from typing import Dict, Any, Optional
 
-from models.chat_bot_a import StoryCollectionChatBot
-from models.chat_bot_b import StoryGenerationChatBot
+# Enhanced 챗봇 시스템
+from models.chat_bot_a.chat_bot_a import ChatBotA
+from models.chat_bot_b.chat_bot_b import ChatBotB
 
-class ChatBotSystem:
-    """부기와 꼬기 챗봇 시스템 통합 클래스"""
+# 공통 유틸리티
+from shared.utils.logging_utils import get_module_logger
+
+# 워크플로우 모듈
+from workflow.orchestrator import WorkflowOrchestrator
+
+logger = get_module_logger(__name__)
+
+class EnhancedChatBotSystem:
+    """Enhanced 부기와 꼬기 챗봇 시스템 통합 클래스 v2.0"""
     
-    def __init__(self):
-        self.bugi = StoryCollectionChatBot()  # 부기 (Chat-bot A)
-        self.kkogi = StoryGenerationChatBot()  # 꼬기 (Chat-bot B)
+    def __init__(self, enhanced_mode: bool = True, enable_performance_tracking: bool = True):
+        """
+        Enhanced 챗봇 시스템 초기화
+        
+        Args:
+            enhanced_mode: Enhanced 프롬프트 시스템 사용 여부
+            enable_performance_tracking: 성능 추적 활성화
+        """
+        self.enhanced_mode = enhanced_mode
+        self.enable_performance_tracking = enable_performance_tracking
+        
+        # Enhanced 챗봇들 초기화
+        logger.info(f"Enhanced 챗봇 시스템 초기화 시작 - Mode: {'Enhanced' if enhanced_mode else 'Basic'}")
+        
+        self.bugi = ChatBotA(
+            enhanced_mode=enhanced_mode,
+            enable_performance_tracking=enable_performance_tracking
+        )  # Enhanced 부기 (Chat-bot A)
+        
+        self.kkogi = ChatBotB(
+            use_enhanced_generators=enhanced_mode,
+            enable_performance_tracking=enable_performance_tracking
+        )  # Enhanced 꼬기 (Chat-bot B)
+        
         self.conversation_history = []
         self.child_info = {
             "name": "",
@@ -31,6 +68,14 @@ class ChatBotSystem:
         }
         self.output_dir = Path("output")
         self.output_dir.mkdir(exist_ok=True)
+        
+        # 시스템 메트릭
+        self.system_metrics = {
+            "session_start_time": time.time(),
+            "total_interactions": 0,
+            "story_generation_count": 0,
+            "enhanced_features_used": 0
+        }
         
     def clear_screen(self):
         """터미널 화면 지우기"""
@@ -207,16 +252,16 @@ def main():
     parser.add_argument('--test', action='store_true', help='테스트 모드 실행')
     args = parser.parse_args()
     
-    if args.test:
+    if args.test: # 테스트 모드 실행
         print("테스트 모드를 실행합니다...")
         import unittest
-        from tests.test_integration import TestChatBotIntegration
+        from tests.test_chatbot import TestChatBotIntegration
         
         suite = unittest.TestLoader().loadTestsFromTestCase(TestChatBotIntegration)
         unittest.TextTestRunner(verbosity=2).run(suite)
-    else:
-        chatbot_system = ChatBotSystem()
-        chatbot_system.run()
+    else: # 실제 챗봇 테스트 실행
+        fairy_tail = WorkflowOrchestrator() # 워크플로우 오케스트레이터 인스턴스 생성
+        fairy_tail.run()
 
 if __name__ == "__main__":
     main() 

@@ -23,14 +23,13 @@ try:
 except ImportError:
     raise ImportError("sentence_transformers 패키지 Error")
 
+from shared.utils.logging_utils import get_module_logger
+
 # 로깅 설정
-logger = logging.getLogger(__name__)
-logger.setLevel(logging.INFO)
-if not logger.handlers:
-    handler = logging.StreamHandler()
-    formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
-    handler.setFormatter(formatter)
-    logger.addHandler(handler)
+logger = get_module_logger(__name__)
+
+# 기본 임베딩 모델 설정 (향후 설정 파일 등으로 분리 가능)
+DEFAULT_EMBEDDING_MODEL = "sentence-transformers/all-MiniLM-L6-v2"
 
 class VectorDB:
     """

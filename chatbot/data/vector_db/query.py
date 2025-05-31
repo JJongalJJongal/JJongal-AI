@@ -7,164 +7,137 @@
 - 다양한 검색 필터 지원
 """
 
-import logging
+# import logging # get_module_logger 사용
 from typing import Dict, List, Any, Optional
 
-from .core import VectorDB
+from .core import VectorDB # 상대 경로 유지 (같은 패키지 내)
+from shared.utils.logging_utils import get_module_logger
 
 # 로깅 설정
-logger = logging.getLogger(__name__)
-logger.setLevel(logging.INFO)
-if not logger.handlers:
-    handler = logging.StreamHandler()
-    formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
-    handler.setFormatter(formatter)
-    logger.addHandler(handler)
+logger = get_module_logger(__name__)
 
 def query_vector_db(
     vector_db: VectorDB, 
     query_text: str, 
     collection_name: str = "fairy_tales",
     n_results: int = 8,
-    age_group: Optional[int] = None,
-    theme: Optional[str] = None,
-    doc_type: Optional[str] = None
-) -> Dict[str, Any]:
+    metadata_filter: Optional[Dict[str, Any]] = None,
+    # age_group, theme, doc_type 등은 metadata_filter로 통합됨 (get_similar_stories 참고)
+) -> Dict[str, Any]: # VectorDB.query의 반환 타입과 일치 또는 format_query_results를 거친 타입
     """
-    벡터 DB에서 쿼리 실행
+    벡터 DB에서 쿼리 실행 (내부 사용 함수 또는 get_similar_stories의 일부로 통합 고려)
+    이 함수는 get_similar_stories에 의해 거의 대체되었으므로, 직접 사용은 줄어들 것임.
     
     Args:
         vector_db: VectorDB 인스턴스
         query_text: 쿼리 텍스트
         collection_name: 컬렉션 이름
         n_results: 반환할 결과 수
-        age_group: 연령대 필터 (선택 사항)
-        theme: 주제 필터 (선택 사항)
-        doc_type: 문서 유형 필터 (선택 사항)
+        metadata_filter: ChromaDB 'where' 절에 직접 사용될 필터
         
     Returns:
-        Dict: 쿼리 결과
+        Dict: ChromaDB 검색 결과 (또는 VectorDB.query의 결과)
     """
+    logger.info(f"컬렉션 '{collection_name}'에서 '{query_text[:50]}...' 쿼리 실행. 필터: {metadata_filter}")
     try:
-        # 컬렉션 가져오기
-        try:
-            collection = vector_db.get_collection(collection_name)
-        except Exception as e:
-            logger.error(f"컬렉션 '{collection_name}' 가져오기 실패: {str(e)}")
-            return {"error": f"컬렉션 '{collection_name}' 가져오기 실패: {str(e)}"}
-        
-        # 필터 설정
-        filter_conditions = []
-        if age_group is not None:
-            filter_conditions.append({"age_group": {"$eq": age_group}})
-        if theme:
-            filter_conditions.append({"theme": {"$contains": theme}})
-        if doc_type:
-            filter_conditions.append({"type": {"$eq": doc_type}})
-
-        where_filter = None
-        if len(filter_conditions) == 1:
-            where_filter = filter_conditions[0]
-        elif len(filter_conditions) > 1:
-            where_filter = {"$and": filter_conditions}
-            
-        # 쿼리 실행
         results = vector_db.query(
+            collection_name=collection_name,
             query_texts=[query_text],
             n_results=n_results,
-            where=where_filter if where_filter else None
+            where_filter=metadata_filter
         )
-        
-        logger.info(f"쿼리 실행 완료: '{query_text}' (결과: {len(results.get('ids', [[]]))}개)")
         return results
-        
     except Exception as e:
-        logger.error(f"쿼리 실행 실패: {str(e)}")
-        return {"error": str(e)}
+        logger.error(f"벡터 DB 쿼리 중 오류 발생: {e}", exc_info=True)
+        return {} # 오류 시 빈 결과 반환
 
-def format_query_results(query_results: Dict[str, Any]) -> List[Dict[str, Any]]:
+def format_query_results(results: Dict[str, List[Any]]) -> List[Dict[str, Any]]:
     """
-    쿼리 결과를 가공하여 사용하기 쉬운 형태로 변환
+    ChromaDB 쿼리 결과를 가공하여 반환 (기존 기능 유지, 필요시 수정)
     
     Args:
-        query_results: VectorDB의 query 메서드 반환 결과
+        results: ChromaDB 쿼리 결과 (또는 VectorDB.query의 결과)
         
     Returns:
-        List[Dict]: 포맷된 결과 목록
+        List[Dict]: 가공된 결과 리스트 (문서 내용, 메타데이터, 유사도 등 포함 가능)
     """
-    if "error" in query_results:
-        return [{"error": query_results["error"]}]
+    formatted = []
+    if not results or not results.get('ids') or not results.get('ids')[0]:
+        logger.info("쿼리 결과가 비어있거나 형식이 올바르지 않아 포맷팅할 수 없습니다.")
+        return formatted
+
+    ids = results.get('ids')[0]
+    documents = results.get('documents', [[]])[0] # 문서 내용이 없을 수 있음
+    metadatas = results.get('metadatas', [[]])[0] # 메타데이터가 없을 수 있음
+    distances = results.get('distances', [[]])[0] # 유사도(거리)가 없을 수 있음
     
-    if not query_results or "ids" not in query_results or not query_results["ids"]:
-        return []
-    
-    formatted_results = []
-    
-    # 첫 번째 쿼리 결과만 처리 (기본적으로 query_texts에 하나만 전달함)
-    ids = query_results["ids"][0]
-    documents = query_results["documents"][0]
-    metadatas = query_results["metadatas"][0]
-    distances = query_results["distances"][0]
-    
-    for i in range(len(ids)):
-        result = {
-            "id": ids[i],
-            "text": documents[i],
-            "metadata": metadatas[i],
-            "distance": distances[i]
+    for i, doc_id in enumerate(ids):
+        entry = {
+            "id": doc_id,
+            "document": documents[i] if documents and i < len(documents) else None,
+            "metadata": metadatas[i] if metadatas and i < len(metadatas) else {},
+            "distance": distances[i] if distances and i < len(distances) else None
         }
-        formatted_results.append(result)
+        formatted.append(entry)
     
-    # 거리(유사도)로 정렬
-    formatted_results.sort(key=lambda x: x["distance"])
-    
-    return formatted_results
+    # logger.debug(f"포맷된 쿼리 결과: {formatted}") # 너무 길 수 있으므로 주의
+    return formatted
 
 def get_similar_stories(
     vector_db: VectorDB, 
     query_text: str, 
-    age_group: Optional[int] = None, 
     n_results: int = 3,
-    collection_name: str = "fairy_tales"
+    collection_name: str = "fairy_tales",
+    metadata_filter: Optional[Dict[str, Any]] = None, 
+    doc_type: Optional[str] = "summary" 
 ) -> List[Dict[str, Any]]:
     """
-    유사한 스토리 검색 (높은 수준의 인터페이스)
+    유사한 스토리 검색 (TextGenerator 등 외부 모듈에서 사용하는 주 인터페이스)
     
     Args:
         vector_db: VectorDB 인스턴스
         query_text: 쿼리 텍스트
-        age_group: 연령대
         n_results: 반환할 결과 수
         collection_name: 컬렉션 이름
+        metadata_filter: ChromaDB 'where' 절에 직접 사용될 추가 필터.
+                         TextGenerator에서 연령대 필터 등을 전달할 때 사용.
+        doc_type: 문서 유형 필터 (기본값: "summary"). 이 필터는 metadata_filter와 결합됨.
         
     Returns:
-        List[Dict]: 유사한 스토리 목록
+        List[Dict]: 가공된 유사한 스토리 목록 (format_query_results를 거친 형태)
     """
-    # 요약 문서 타입으로 필터링하여 쿼리
-    results = query_vector_db(
+    
+    # doc_type 필터를 metadata_filter에 통합
+    final_filter = metadata_filter.copy() if metadata_filter else {}
+    if doc_type:
+        if "$and" in final_filter: # 이미 $and 조건이 있다면 type 조건을 추가
+            # type 조건이 이미 있는지 확인 (중복 방지)
+            type_condition_exists = False
+            for condition in final_filter["$and"]:
+                if isinstance(condition, dict) and "type" in condition:
+                    type_condition_exists = True
+                    break
+            if not type_condition_exists:
+                final_filter["$and"].append({"type": doc_type})
+        elif final_filter: # 다른 조건이 하나라도 있다면 $and로 묶음
+            # 기존 필터가 type 조건인지 확인
+            if not (len(final_filter) == 1 and "type" in final_filter):
+                 existing_filters = [{k: v} for k, v in final_filter.items()]
+                 final_filter = {"$and": existing_filters + [{"type": doc_type}]}
+            elif final_filter.get("type") != doc_type: # type 조건만 있는데 값이 다른 경우 (이 경우는 거의 없어야 함)
+                 final_filter = {"$and": [{"type": final_filter.get("type")}, {"type": doc_type}] }
+            # else: type 조건만 있고 값도 같다면 그대로 사용 (doc_type 추가 불필요)
+        else: # 필터가 아예 없었다면 type 조건만 추가
+            final_filter = {"type": doc_type}
+
+    logger.info(f"유사 스토리 검색: '{query_text[:50]}...', 컬렉션: {collection_name}, 최종 필터: {final_filter}")
+    
+    raw_results = query_vector_db(
         vector_db=vector_db,
         query_text=query_text,
         collection_name=collection_name,
         n_results=n_results,
-        age_group=age_group,
-        doc_type="summary"
+        metadata_filter=final_filter
     )
     
-    formatted_results = format_query_results(results)
-    
-    # 스토리 형식으로 변환
-    stories = []
-    for result in formatted_results:
-        if "error" in result:
-            continue
-            
-        metadata = result["metadata"]
-        stories.append({
-            "title": metadata.get("title", "제목 없음"),
-            "theme": metadata.get("theme", ""),
-            "age_group": metadata.get("age_group", 0),
-            "summary": result["text"].split("요약: ")[-1].split("\n")[0] if "요약: " in result["text"] else "",
-            "similarity": 1.0 - result["distance"]  # 거리를 유사도로 변환
-        })
-    
-    return stories 
+    return format_query_results(raw_results) 

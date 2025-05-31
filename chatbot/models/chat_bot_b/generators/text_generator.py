@@ -1,29 +1,45 @@
 """
-텍스트 생성기
+텍스트 생성기 (Enhanced for Advanced Prompt System)
 
-LangChain + ChromaDB RAG System 을 활용한 한국 동화 생성
+LangChain + ChromaDB RAG System과 개선된 프롬프트 엔지니어링을 활용한 한국 동화 생성
+- 구조화된 프롬프트 접근법 (Role → Objective → Instructions → Reasoning → Output → Examples)
+- 연령별 특화 프롬프트 (4-7세, 8-9세)
+- 체인 오브 소트 추론 통합
+- 성능 추적 및 최적화
 """
 from shared.utils.logging_utils import get_module_logger
 import uuid
+import time
 from typing import Dict, List, Optional, Callable, Any
-from pathlib import Path
 import json
+import re
+import asyncio
 
 # LangChain imports
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.output_parsers import StrOutputParser
 from langchain_openai import ChatOpenAI
-from langchain_core.runnables import RunnablePassthrough
 
 # Project imports
 from .base_generator import BaseGenerator
 from chatbot.data.vector_db.core import VectorDB
-from chatbot.data.vector_db.query import query_vector_db, format_query_results
+from chatbot.data.vector_db.query import query_vector_db
 
 # logging 설정
 logger = get_module_logger(__name__)
 
 class TextGenerator(BaseGenerator):
+    """
+    개선된 텍스트 생성기
+    
+    Features:
+    - 구조화된 프롬프트 시스템 (OpenAI 권장 형식)
+    - 연령별 맞춤 생성 (4-7세, 8-9세)
+    - 체인 오브 소트 추론 통합
+    - 성능 추적 및 메트릭
+    - A/B 테스팅 지원 준비
+    """
+    
     def __init__(self,
                  openai_client = None,
                  vector_db_path: str = None,
@@ -31,18 +47,20 @@ class TextGenerator(BaseGenerator):
                  prompts_file_path: str = "chatbot/data/prompts/chatbot_b_prompts.json",
                  max_retries: int = 3,
                  model_name: str = "gpt-4o",
-                 temperature: float = 0.7):
+                 temperature: float = 0.7,
+                 enable_performance_tracking: bool = True):
         """
         Args:
             openai_client: OpenAI 클라이언트
             vector_db_path: ChromaDB 데이터베이스 경로
             collection_name: ChromaDB 컬렉션 이름
-            prompts_file_path: 프롬프트 파일 경로
+            prompts_file_path: 개선된 프롬프트 파일 경로
             max_retries: 최대 재시도 횟수
             model_name: 사용할 LLM 모델명
             temperature: 생성 온도
+            enable_performance_tracking: 성능 추적 활성화
         """
-        super().__init__(max_retries=max_retries, timeout=120.0)
+        super().__init__(max_retries=max_retries, timeout=180.0)
         
         self.openai_client = openai_client
         self.vector_db_path = vector_db_path
@@ -50,42 +68,60 @@ class TextGenerator(BaseGenerator):
         self.prompts_file_path = prompts_file_path
         self.model_name = model_name
         self.temperature = temperature
+        self.enable_performance_tracking = enable_performance_tracking
         
-        # LangChain 구성
+        # Enhanced LangChain 구성
         self.vector_store = None
         self.retriever = None
-        self.text_chain = None
+        self.text_chains = {}  # 연령별 체인
         self.prompts = None
+        
+        # 성능 추적
+        self.performance_metrics = {
+            "generation_times": [],
+            "token_usage": [],
+            "success_rate": 0,
+            "error_count": 0,
+            "age_group_usage": {}
+            }
         
         # 초기화
         self._initialize_components()
         
     def _initialize_components(self):
-        """LangChain 구성 요소 초기화"""
+        """Enhanced LangChain 구성 요소 초기화"""
         try:
-            # 1. Prompot load
-            self._load_prompts()
+            # 1. Enhanced Prompts 로드
+            self._load_enhanced_prompts()
             
             # 2. ChromaDB 초기화
             self._initialize_vector_db()
             
-            # 3. LangChain 체인 설정
-            self._setup_langchain_chain()
+            # 3. Enhanced LangChain 체인 설정 (연령별)
+            self._setup_enhanced_chains()
             
-            logger.info("TextGenerator 초기화 완료")
+            logger.info("Enhanced TextGenerator 초기화 완료")
         
         except Exception as e:
-            logger.error(f"TextGenerator 초기화 실패 : {e}")
+            logger.error(f"Enhanced TextGenerator 초기화 실패: {e}")
             raise
-    def _load_prompts(self):
-        """프롬프트 파일 Load"""
+            
+    def _load_enhanced_prompts(self):
+        """Enhanced 프롬프트 시스템 로드"""
         try:
             with open(self.prompts_file_path, 'r', encoding='utf-8') as f:
-                self.prompts = json.load(f) # 프롬프트 파일 로드
-            logger.info(f"프롬프트 파일 로드 완료 : {self.prompts_file_path}")
+                self.prompts = json.load(f)
+            
+            # 새로운 프롬프트 구조 검증
+            required_sections = ["enhanced_story_generation", "chain_of_thought_templates"]
+            for section in required_sections:
+                if section not in self.prompts:
+                    logger.warning(f"프롬프트 섹션 '{section}' 없음. 기본값 사용")
+                    
+            logger.info(f"Enhanced 프롬프트 파일 로드 완료: {self.prompts_file_path}")
         
         except Exception as e:
-            logger.error(f"프롬프트 파일 로드 실패 : {e}")
+            logger.error(f"Enhanced 프롬프트 파일 로드 실패: {e}")
             raise
     
     def _initialize_vector_db(self):
@@ -95,323 +131,492 @@ class TextGenerator(BaseGenerator):
             return
         
         try:
-            self.vector_store = VectorDB(persist_directory=self.vector_db_path) # ChromaDB 인스턴스 생성
+            self.vector_store = VectorDB(persist_directory=self.vector_db_path)
             
             # 컬렉션 존재 확인
             try:
                 collection = self.vector_store.get_collection(self.collection_name)
                 logger.info(f"ChromaDB 컬렉션 '{self.collection_name}' 연결 완료")
             except Exception as e:
-                logger.warning(f"컬렉션 '{self.collection_name}' 연결 실패 : {e}")
+                logger.warning(f"컬렉션 '{self.collection_name}' 연결 실패: {e}")
         
         except Exception as e:
-            logger.error(f"ChromaDB 초기화 실패 : {e}")
+            logger.error(f"ChromaDB 초기화 실패: {e}")
             raise
     
-    def _setup_langchain_chain(self):
-        """LangChain 체인 설정"""
+    def _setup_enhanced_chains(self):
+        """Enhanced LangChain 체인 설정 (연령별)"""
         try:
-            # 1. 프롬프트 템플릿 생성
-            system_message = self.prompts["story_generation_templates"]["detailed_story_system_message"]
+            # 연령별 체인 생성
+            age_groups = ["age_4_7", "age_8_9"]
             
-            prompt_template = ChatPromptTemplate.from_template(system_message)
+            for age_group in age_groups:
+                self._create_age_specific_chain(age_group)
             
-            # 2. LLM Model 설정
-            llm = ChatOpenAI(
-                temperature = self.temperature,
-                model = self.model_name,
-                api_key = self.openai_client.api_key if self.openai_client else None
-            )
-            
-            # 3. 체인 구성
-            self.text_chain = prompt_template | llm | StrOutputParser()
-            
-            logger.info("LangChain 체인 설정 완료")
+            logger.info("Enhanced LangChain 체인 설정 완료")
             
         except Exception as e:
-            logger.error(f"LangChain 체인 설정 실패 : {e}")
+            logger.error(f"Enhanced LangChain 체인 설정 실패: {e}")
             raise
     
+    def _create_age_specific_chain(self, age_group: str):
+        """연령별 특화 체인 생성"""
+        try:
+            # Enhanced 프롬프트 구조에서 연령별 프롬프트 가져오기
+            enhanced_prompts = self.prompts.get("enhanced_story_generation", {})
+            age_config = enhanced_prompts.get(age_group, {})
+            structured_prompt = age_config.get("structured_prompt", {})
+            
+            # 구조화된 프롬프트 구성
+            role = structured_prompt.get("role", "전문 동화 작가로서")
+            objective = structured_prompt.get("objective", "몰입감 있는 동화를 제작해주세요.")
+            instructions = structured_prompt.get("instructions", [])
+            reasoning_steps = structured_prompt.get("reasoning_steps", [])
+            
+            # 프롬프트 템플릿 생성
+            system_template = self._build_structured_prompt(
+                role=role,
+                objective=objective,
+                instructions=instructions,
+                reasoning_steps=reasoning_steps,
+                age_group=age_group
+            )
+            
+            prompt_template = ChatPromptTemplate.from_template(system_template)
+            
+            # LLM 모델 설정
+            llm = ChatOpenAI(
+                temperature=self.temperature,
+                model=self.model_name,
+                api_key=self.openai_client.api_key if self.openai_client else None
+            )
+            
+            # 체인 구성
+            self.text_chains[age_group] = prompt_template | llm | StrOutputParser()
+            
+            logger.info(f"연령별 체인 생성 완료: {age_group}")
+            
+        except Exception as e:
+            logger.error(f"연령별 체인 생성 실패 ({age_group}): {e}")
+            raise
+    
+    def _build_structured_prompt(self, role: str, objective: str, 
+                                instructions: List[str], reasoning_steps: List[str],
+                                age_group: str) -> str:
+        """구조화된 프롬프트 생성 (OpenAI 권장 형식)"""
+        
+        # Chain-of-Thought 추론 단계 통합
+        cot_templates = self.prompts.get("chain_of_thought_templates", {})
+        # reasoning_template = cot_templates.get("story_development_reasoning", {}) # 현재 미사용
+        
+        prompt_parts = [
+            f"## ROLE\n{role}",
+            f"\n## OBJECTIVE\n{objective}",
+            "\n## INSTRUCTIONS"
+        ]
+        
+        # 지시사항 추가
+        for i, instruction in enumerate(instructions, 1):
+            prompt_parts.append(f"{i}. {instruction}")
+        
+        # 추론 단계 추가 (Chain-of-Thought)
+        prompt_parts.append("\n## REASONING PROCESS")
+        prompt_parts.append("다음 단계를 순서대로 수행하세요:")
+        
+        for step in reasoning_steps:
+            prompt_parts.append(f"- {step}")
+            
+        # 출력 형식 지정
+        # JSON 예시 부분을 일반 여러 줄 문자열로 변경하고, 내부 중괄호는 이중으로 이스케이프.
+        output_format_json_example = """    
+```json
+{{
+  \"title\": \"동화 제목\",
+  \"chapters\": [
+    {{
+      \"chapter_number\": 1,
+      \"chapter_title\": \"챕터 제목\",
+      \"chapter_content\": \"챕터 내용\",
+      \"educational_point\": \"교육적 포인트\",
+      \"interaction_question\": \"상호작용 질문\"
+    }}
+  ],
+  \"reasoning_process\": \"추론 과정 설명\"
+}}
+```"""
+
+        prompt_parts.extend([
+            "\n## OUTPUT FORMAT",
+            "다음 JSON 형식으로 응답해주세요:",
+            output_format_json_example,
+            "\n## INPUT DATA",
+            "동화 정보: {story_outline}",
+            "참고 스토리: {reference_stories}",
+            "아이 정보: {child_info}"
+        ])
+        
+        return "\n".join(prompt_parts)
+    
+    def _determine_age_group(self, target_age: int) -> str:
+        """연령대에 따른 체인 선택"""
+        if 4 <= target_age <= 7:
+            return "age_4_7"
+        elif 8 <= target_age <= 9:
+            return "age_8_9"
+        else:
+            # 기본값
+            return "age_4_7" if target_age < 8 else "age_8_9"
+
     async def generate(self,
                        input_data: Dict[str, Any],
                        progress_callback: Optional[Callable] = None) -> Dict[str, Any]:
-        
         """
-        동화 텍스트 생성 (상세한 스토리)
+        Enhanced 동화 텍스트 생성
         
         Args:
             input_data: {
                 "theme": "동화 주제",
-                "child_name": "아이 이름",
+                "child_name": "아이 이름", 
                 "age_group": "연령대",
+                "target_age": 구체적 나이,
                 "interests": ["관심사1", "관심사2"...],
                 "plot_summary": "요약 줄거리",
                 "educational_value": "교육적 가치"
             }
-            progress_callback: 진행 상황
+            progress_callback: 진행 상황 콜백
         
         Returns:
-            {
-                "story_id": "생성된 스토리 ID",
-                "title": "동화 제목",
-                "chapters": [
-                    {
-                        "chapter_number": 1,
-                        "chapter_title": "챕터 제목",
-                        "chapter_content": "챕터 내용"
-                    }
-                ],
-                "metadata": {
-                    "generation_time": 생성시간,
-                    "model_used": "사용된 모델",
-                    "rag_sources": ["참고 소스들"]
-                }
-            } 
+            Enhanced 스토리 데이터 with 성능 메트릭
         """
-        story_id = str(uuid.uuid4()) # 스토리 ID 생성
-        self.current_task_id = story_id # 현재 작업 ID 설정
+        start_time = time.time()
+        story_id = str(uuid.uuid4())
+        self.current_task_id = story_id
         
         try:
-            # 진행 상태 호출
+            # 연령대 결정
+            target_age = input_data.get("target_age", input_data.get("age_group", 7))
+            age_group_key = self._determine_age_group(target_age)
+            
+            # 진행 상황 업데이트
             if progress_callback:
                 await progress_callback({
-                    "step": "text_generation", # 현재 단계
-                    "status": "starting", # 상태
-                    "story_id": story_id, # 스토리 ID
+                    "step": "enhanced_text_generation",
+                    "status": "starting",
+                    "story_id": story_id,
+                    "age_group": age_group_key,
+                    "prompt_version": "2.0_enhanced"
                 })
             
-            # 1. RAG 검색 수행
+            # 1. RAG 검색 수행 (Enhanced)
             reference_stories = await self._retrieve_similar_stories(input_data)
             
-            # 진행 상태 호출
+            # 진행 상황 업데이트
             if progress_callback:
                 await progress_callback({
-                    "step": "text_generation", # 현재 단계
-                    "status": "rag_completed", # 상태
-                    "reference_count": len(reference_stories), # 참고 스토리 수
-                })
-
-            # 2. Prompt 데이터 준비
-            prompt_data = self._prepare_prompt_data(input_data, reference_stories)
-            
-            # 3. LangChain 체인으로 텍스트 생성
-            if progress_callback:
-                await progress_callback({
-                    "step": "text_generation", # 현재 단계
-                    "status": "generation_text" # 상태
-                })
-
-            generated_text = await self.text_chain.ainvoke(prompt_data)
-            
-            # 4. 결과 파싱 및 구조화
-            story_data = self._parse_generated_story(generated_text)
-            
-            if progress_callback:
-                await progress_callback({
-                    "step": "text_generation", # 현재 단계
-                    "status": "generation_completed", # 상태
-                    "chapters_generated": len(story_data.get("chapters", [])) # 챕터 수
+                    "step": "rag_retrieval",
+                    "status": "completed",
+                    "retrieved_count": len(reference_stories)
                 })
             
-            return {
-                "story_id": story_id, # 스토리 ID
-                **story_data,
-                "metadata": {
-                    "generation_time": self.total_generation_time, # 생성 시간
-                    "model_used": self.model_name, # 사용된 모델
-                    "rag_sources": [ref.get("source", "") for ref in reference_stories], # 참고 소스
-                    "input_data": input_data # 입력 데이터
-                }
-            }
-        except Exception as e:
-            logger.error(f"텍스트 생성 실패 (story_id : {story_id}) : {e}")
-            raise
-    
-    async def _retrieve_similar_stories(self, input_data: Dict[str, Any]) -> List[Dict[str, Any]]:
-        """ChromaDB에서 유사 스토리 검색"""
-        
-        if not self.vector_store: # ChromaDB 연결 확인
-            logger.warning("ChromaDB 연결 실패. 빈 참고 스토리 반환")
-            return []
-        
-        try: 
-            # 검색 쿼리 구성
-            search_query = f"{input_data.get('theme', '')} {input_data.get('plot_summary', '')}"
-            
-            # ChromaDB 검색 수행
-            search_results = query_vector_db(
-                vector_db = self.vector_store, # 벡터 DB 인스턴스
-                collection_name = self.collection_name, # 컬렉션 이름
-                query_text = search_query, # 검색 쿼리
-                n_results = 5 # 상위 5개 결과
+            # 2. Enhanced 프롬프트 데이터 준비
+            prompt_data = self._prepare_enhanced_prompt_data(
+                input_data, reference_stories, age_group_key
             )
             
-            # 결과 포맷팅
-            formatted_results = format_query_results(search_results)
-            
-            logger.info(f"RAG 검색 완료 : {len(formatted_results)}개의 유사 스토리 반환")
-            
-            return formatted_results
-        
-        except Exception as e:
-            logger.warning(f"RAG 검색 실패 : {e}. 빈 참고 스토리 반환")
-            return []
-        
-    def _prepare_prompt_data(self, input_data: Dict[str, Any], reference_stories: List[Dict[str, Any]]) -> Dict[str, Any]:
-        """Prompt 데이터 준비"""
-        
-        # 참고 스토리 텍스트 구성
-        reference_text = ""
-        if reference_stories:
-            reference_text = "\n\n".join([
-                f"참고 스토리 {i+1}: {story.get('text', story.get('content', ''))}"
-                for i, story in enumerate(reference_stories[:3]) # 상위 3개만 사용
-            ])
-        else:
-            reference_text = "참고 스토리가 없습니다."
-        
-        # 캐릭터 정보 JSON 형식으로 구성
-        characters = input_data.get("characters", [])
-        if isinstance(characters, list) and characters:
-            characters_json = json.dumps(characters, ensure_ascii=False)
-        else:
-            characters_json = '[{"name": "주인공", "type": "child"}]'
-        
-        # 연령대 정보
-        age_group = input_data.get("age_group", 5)
-        target_age = age_group
-        
-        return {
-            "reference_stories": reference_text, # 참고 스토리 텍스트
-            "theme": input_data.get("theme", ""), # 주제
-            "child_name": input_data.get("child_name", ""), # 아이 이름
-            "age_group": age_group, # 연령대
-            "target_age": target_age, # 타겟 연령 (템플릿용)
-            "interests": ", ".join(input_data.get("interests", [])), # 관심사
-            "plot_summary": input_data.get("plot_summary", ""), # 요약 줄거리
-            "educational_value": input_data.get("educational_value", ""), # 교육적 가치
-            "characters": ", ".join([c.get("name", c) if isinstance(c, dict) else str(c) for c in characters]), # 캐릭터 이름들
-            "characters_json": characters_json, # 캐릭터 JSON
-            "setting": input_data.get("setting", ""), # 배경
-        }
-   
-    def _parse_generated_story(self, generated_text: str) -> Dict[str, Any]:
-       """생성된 텍스트를 구조화된 스토리로 파싱"""
-       
-       try:
-           # JSON 형태로 파싱 시도
-           if generated_text.strip().startswith('{'):
-               story_data = json.loads(generated_text) # JSON 파싱
-               return story_data
-
-           # JSON 이 아닌 경우 text parsing
-           return self._parse_text_story(generated_text)
-       
-       except json.JSONDecodeError:
-           # JSON 파싱 실패 시 text parsing
-           return self._parse_text_story(generated_text)
-               
-    def _parse_text_story(self, text: str) -> Dict[str, Any]:
-        """일반 텍스트를 스토리 구조로 parsing"""
-        
-        lines = text.strip().split("\n") # 줄 단위로 분리
-        title = "생성된 동화" # 제목
-        chapters = [] # 챕터 리스트
-        
-        current_chapter = None # 현재 챕터
-        current_content = [] # 현재 챕터 내용
-        
-        for line in lines:
-            line = line.strip() # 공백 제거
-            
-            if not line:
-                continue # 빈 줄 건너뛰기
-            
-            # 제목 추출
-            if line.startswith("제목:"):
-                title = line.split(":", 1)[1].strip() # 제목 추출
-                continue
-            
-            # 챕터 시작 감지
-            if any(keyword in line for keyword in ["챕터", "Chapter", "장", "편"]):
-                # 이전 챕터 저장
-                if current_chapter:
-                    current_chapter["content"] = "\n".join(current_content).strip()
-                    chapters.append(current_chapter)
+            # 3. 연령별 체인으로 생성
+            chain = self.text_chains.get(age_group_key)
+            if not chain:
+                raise ValueError(f"연령별 체인을 찾을 수 없음: {age_group_key}")
                 
-                # 새 챕터 시작
-                chapter_number = len(chapters) + 1
-                current_chapter = {
-                    "chapter_number": chapter_number,
-                    "chapter_title": line,
-                    "content": ""
+            # 진행 상황 업데이트
+            if progress_callback:
+                await progress_callback({
+                    "step": "story_generation",
+                    "status": "processing",
+                    "chain_type": age_group_key
+                })
+            
+            # 4. 텍스트 생성 with 체인 오브 소트
+            generated_text = await chain.ainvoke(prompt_data)
+            
+            # 5. Enhanced 파싱
+            story_data = self._parse_enhanced_story(generated_text)
+            
+            # 6. 성능 메트릭 수집
+            generation_time = time.time() - start_time
+            self._update_performance_metrics(generation_time, True, age_group_key)
+            
+            # 7. 최종 결과 구성
+            result = {
+                "story_id": story_id,
+                "title": story_data.get("title", "생성된 동화"),
+                "chapters": story_data.get("chapters", []),
+                "metadata": {
+                    "generation_time": generation_time,
+                    "model_used": self.model_name,
+                    "age_group": age_group_key,
+                    "rag_sources": [story.get("title", "Unknown") for story in reference_stories],
+                    "reasoning_process": story_data.get("reasoning_process", ""),
+                    "prompt_version": "2.0_enhanced",
+                    "educational_integration": story_data.get("educational_integration", ""),
+                    "chain_of_thought": True
                 }
-                current_content = []
-            else:
-                # 챕터 내용 추가
-                if current_chapter:
-                    current_content.append(line)
-                else:
-                    # 첫 번째 챕터가 명시되지 않은 경우
-                    if not chapters:
-                        current_chapter = {
-                            "chapter_number": 1,
-                            "chapter_title": "시작",
-                            "content": ""
-                        }
-                        current_content = []
-                    current_content.append(line)
-        
-        # 마지막 챕터 저장
-        if current_chapter:
-            current_chapter["content"] = "\n".join(current_content).strip()
-            chapters.append(current_chapter)
-        
-        # 챕터가 없는 경우 전체 텍스트를 하나의 챕터로
-        if not chapters:
-            chapters = [{
-                "chapter_number": 1,
-                "chapter_title": "동화",
-                "content": text.strip()
-            }]
-        
-        return {
-            "title": title,
-            "chapters": chapters
-        }
-        
-    async def health_check(self) -> bool:
-        """TextGenerator 상태 확인"""
-        try:
-            # 기본 상태 확인
-            if not await super().health_check():
-                return False
-            
-            # LangChain 체인 확인
-            if not self.text_chain:
-                logger.error("LangChain 체인이 초기화되지 않음")
-                return False
-            
-            # 간단한 생성 테스트
-            test_data = {
-                "theme": "테스트",
-                "child_name": "테스트",
-                "age_group": 6,
-                "interests": ["테스트"],
-                "plot_summary": "테스트 스토리",
-                "educational_value": "테스트"
             }
             
-            # 타임아웃을 짧게 설정하여 빠른 테스트
-            original_timeout = self.timeout
-            self.timeout = 10.0
+            # 진행 상황 업데이트
+            if progress_callback:
+                await progress_callback({
+                    "step": "enhanced_text_generation",
+                    "status": "completed",
+                    "story_id": story_id,
+                    "generation_time": generation_time,
+                    "chapters_count": len(story_data.get("chapters", []))
+                })
             
-            try:
-                result = await self.generate(test_data)
-                return "story_id" in result
-            finally:
-                self.timeout = original_timeout
-                
+            return result
+            
         except Exception as e:
-            logger.error(f"TextGenerator health check 실패: {e}")
-            return False
+            self._update_performance_metrics(0, False, age_group_key if 'age_group_key' in locals() else "unknown")
+            logger.error(f"Enhanced 텍스트 생성 실패: {e}")
+            raise
+
+    async def _retrieve_similar_stories(self, input_data: Dict[str, Any]) -> List[Dict[str, Any]]:
+        """ChromaDB에서 유사 스토리 검색 (Enhanced)"""
+        if not self.vector_store:
+            logger.warning("VectorDB가 초기화되지 않음. RAG 검색 생략")
+            return []
+        
+        try:
+            # 쿼리 구성 (더 정교한 검색)
+            theme = input_data.get("theme", "")
+            educational_value = input_data.get("educational_value", "")
+            interests = input_data.get("interests", [])
+            age_group = input_data.get("target_age", input_data.get("age_group", 7))
+            
+            query_text = f"{theme} {educational_value} {' '.join(interests)}"
+            
+            # 연령대에 따른 필터링
+            metadata_filter = {
+                "age_min": {"$lte": age_group},
+                "age_max": {"$gte": age_group}
+            } if isinstance(age_group, int) else {}
+            
+            # 벡터 검색 수행 (get_similar_stories 사용)
+            # get_similar_stories는 동기 함수이므로 asyncio.to_thread 사용
+            results = await asyncio.to_thread(
+                get_similar_stories,
+                vector_db=self.vector_store,
+                query_text=query_text,
+                n_results=5,
+                metadata_filter=metadata_filter,
+                collection_name=self.collection_name,
+                doc_type="summary" # 필요시 다른 doc_type 지정 가능
+            )
+            
+            logger.info(f"RAG 검색 완료: {len(results)}개의 유사 스토리 반환")
+            return results
+            
+        except Exception as e:
+            logger.warning(f"Enhanced RAG 검색 실패: {e}. 빈 참고 스토리 반환")
+            return []
+
+    def _prepare_enhanced_prompt_data(self, input_data: Dict[str, Any], 
+                                    reference_stories: List[Dict[str, Any]], 
+                                    age_group: str) -> Dict[str, Any]:
+        """Enhanced 프롬프트 데이터 준비"""
+        
+        # 기본 스토리 정보
+        story_outline = {
+            "theme": input_data.get("theme", ""),
+            "plot_summary": input_data.get("plot_summary", ""),
+            "educational_value": input_data.get("educational_value", ""),
+            "target_age": input_data.get("target_age", 7),
+            "setting": input_data.get("setting", ""),
+            "characters": input_data.get("characters", [])
+        }
+        
+        # 아이 정보
+        child_info = {
+            "name": input_data.get("child_name", "친구"),
+            "age": input_data.get("target_age", 7),
+            "interests": input_data.get("interests", []),
+            "learning_preferences": input_data.get("learning_preferences", [])
+        }
+        
+        # 참고 스토리 포맷팅 (더 정교한 구조)
+        formatted_references = []
+        for story in reference_stories[:3]:  # 상위 3개만 사용
+            formatted_references.append({
+                "title": story.get("title", ""),
+                "summary": story.get("content", "")[:300] + "...",
+                "educational_theme": story.get("educational_theme", ""),
+                "age_group": story.get("age_group", ""),
+                "key_lessons": story.get("key_lessons", [])
+            })
+        
+        return {
+            "story_outline": json.dumps(story_outline, ensure_ascii=False, indent=2),
+            "reference_stories": json.dumps(formatted_references, ensure_ascii=False, indent=2),
+            "child_info": json.dumps(child_info, ensure_ascii=False, indent=2)
+        }
+    
+    def _parse_enhanced_story(self, generated_text: str) -> Dict[str, Any]:
+        """Enhanced 스토리 파싱 (JSON 형식 지원 + 추론 과정 추출)"""
+        try:
+            # JSON 블록 추출 시도
+            json_match = re.search(r'```json\s*(.*?)\s*```', generated_text, re.DOTALL)
+            
+            if json_match:
+                json_str = json_match.group(1)
+                parsed_data = json.loads(json_str)
+                
+                # 추론 과정이 포함되어 있는지 확인
+                if "reasoning_process" not in parsed_data:
+                    # 텍스트에서 추론 과정 추출 시도
+                    reasoning_match = re.search(r'추론\s*과정[:\s]*(.*?)(?=\n\n|\n#|$)', generated_text, re.DOTALL | re.IGNORECASE)
+                    if reasoning_match:
+                        parsed_data["reasoning_process"] = reasoning_match.group(1).strip()
+                
+                return parsed_data
+            else:
+                # JSON 블록이 없으면 텍스트 파싱
+                return self._parse_text_story_enhanced(generated_text)
+                
+        except json.JSONDecodeError as e:
+            logger.warning(f"JSON 파싱 실패, Enhanced 텍스트 파싱으로 전환: {e}")
+            return self._parse_text_story_enhanced(generated_text)
+    
+    def _parse_text_story_enhanced(self, text: str) -> Dict[str, Any]:
+        """Enhanced 텍스트 스토리 파싱"""
+        try:
+            # 기본 제목 추출
+            title_match = re.search(r'제목[:\s]*(.*?)(?=\n|$)', text, re.IGNORECASE)
+            title = title_match.group(1).strip() if title_match else "생성된 동화"
+            
+            # 챕터 추출 (더 정교한 패턴)
+            chapter_patterns = [
+                r'챕터\s*(\d+)[:\s]*(.*?)(?=챕터\s*\d+|$)',
+                r'장\s*(\d+)[:\s]*(.*?)(?=장\s*\d+|$)',
+                r'(\d+)\.\s*(.*?)(?=\d+\.|$)'
+            ]
+            
+            chapters = []
+            for pattern in chapter_patterns:
+                matches = re.finditer(pattern, text, re.DOTALL | re.IGNORECASE)
+                if matches:
+                    for match in matches:
+                        chapter_num = int(match.group(1))
+                        chapter_content = match.group(2).strip()
+                        
+                        # 챕터 제목과 내용 분리
+                        lines = chapter_content.split('\n', 1)
+                        chapter_title = lines[0].strip()
+                        chapter_text = lines[1].strip() if len(lines) > 1 else chapter_content
+                        
+                        chapters.append({
+                            "chapter_number": chapter_num,
+                            "chapter_title": chapter_title,
+                            "chapter_content": chapter_text,
+                            "educational_point": self._extract_educational_point(chapter_text),
+                            "interaction_question": self._extract_interaction_question(chapter_text)
+                        })
+                    break
+            
+            # 추론 과정 추출
+            reasoning_match = re.search(r'추론\s*과정[:\s]*(.*?)(?=\n\n|\n#|$)', text, re.DOTALL | re.IGNORECASE)
+            reasoning_process = reasoning_match.group(1).strip() if reasoning_match else ""
+            
+            return {
+                "title": title,
+                "chapters": chapters if chapters else [{"chapter_number": 1, "chapter_title": "동화", "chapter_content": text}],
+                "reasoning_process": reasoning_process
+            }
+            
+        except Exception as e:
+            logger.error(f"Enhanced 텍스트 파싱 실패: {e}")
+            return {
+                "title": "생성된 동화",
+                "chapters": [{"chapter_number": 1, "chapter_title": "동화", "chapter_content": text}],
+                "reasoning_process": ""
+            }
+    
+    def _extract_educational_point(self, text: str) -> str:
+        """교육적 포인트 추출"""
+        educational_patterns = [
+            r'교육[적인]*\s*[포인트|내용|가치][:\s]*(.*?)(?=\n|$)',
+            r'배울\s*점[:\s]*(.*?)(?=\n|$)',
+            r'교훈[:\s]*(.*?)(?=\n|$)'
+        ]
+        
+        for pattern in educational_patterns:
+            match = re.search(pattern, text, re.IGNORECASE)
+            if match:
+                return match.group(1).strip()
+        
+        return ""
+    
+    def _extract_interaction_question(self, text: str) -> str:
+        """상호작용 질문 추출"""
+        question_patterns = [
+            r'질문[:\s]*(.*?\?)',
+            r'(.*?는\s*어떻게\s*생각하나요\?)',
+            r'(.*?라면\s*어떻게\s*할까요\?)'
+        ]
+        
+        for pattern in question_patterns:
+            match = re.search(pattern, text, re.IGNORECASE)
+            if match:
+                return match.group(1).strip()
+        
+        return ""
+    
+    def _update_performance_metrics(self, generation_time: float, success: bool, age_group: str):
+        """성능 메트릭 업데이트 (Enhanced)"""
+        if not self.enable_performance_tracking:
+            return
+            
+        if success:
+            self.performance_metrics["generation_times"].append(generation_time)
+            
+            # 연령대별 사용량 추적
+            if age_group not in self.performance_metrics["age_group_usage"]:
+                self.performance_metrics["age_group_usage"][age_group] = 0
+            self.performance_metrics["age_group_usage"][age_group] += 1
+            
+            # 성공률 계산
+            total_attempts = len(self.performance_metrics["generation_times"]) + self.performance_metrics["error_count"]
+            self.performance_metrics["success_rate"] = len(self.performance_metrics["generation_times"]) / total_attempts
+        else:
+            self.performance_metrics["error_count"] += 1
+    
+    def get_performance_metrics(self) -> Dict[str, Any]:
+        """성능 메트릭 조회 (Enhanced)"""
+        if not self.performance_metrics["generation_times"]:
+            return self.performance_metrics
+            
+        times = self.performance_metrics["generation_times"]
+        return {
+            **self.performance_metrics,
+            "avg_generation_time": sum(times) / len(times),
+            "min_generation_time": min(times),
+            "max_generation_time": max(times),
+            "total_generations": len(times),
+            "most_used_age_group": max(self.performance_metrics["age_group_usage"], 
+                                     key=self.performance_metrics["age_group_usage"].get, 
+                                     default="unknown") if self.performance_metrics["age_group_usage"] else "unknown"
+        }
+    
+    async def health_check(self) -> Dict[str, bool]:
+        """Enhanced 상태 확인"""
+        health_status = {
+            "enhanced_prompts_loaded": bool(self.prompts),
+            "vector_db_connected": bool(self.vector_store),
+            "age_4_7_chain_ready": "age_4_7" in self.text_chains,
+            "age_8_9_chain_ready": "age_8_9" in self.text_chains,
+            "performance_tracking": self.enable_performance_tracking
+        }
+        
+        # 전체 상태
+        health_status["overall_healthy"] = all(health_status.values())
+        
+        return health_status 

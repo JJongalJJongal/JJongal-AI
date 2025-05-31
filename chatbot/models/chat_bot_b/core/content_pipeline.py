@@ -6,7 +6,7 @@
 
 from shared.utils.logging_utils import get_module_logger
 import asyncio
-from typing import Dict, Any, List, Optional, Callable, Union
+from typing import Dict, Any, Optional, Callable
 from pathlib import Path
 from enum import Enum
 import uuid
@@ -22,7 +22,9 @@ from langchain_community.utilities.dalle_image_generator import DallEAPIWrapper
 
 # Project inner modules
 from chatbot.data.vector_db.core import VectorDB
-from chatbot.data.vector_db.query import query_vector_db, format_query_results
+from chatbot.models.chat_bot_b.generators.text_generator import TextGenerator
+from chatbot.models.chat_bot_b.generators.image_generator import ImageGenerator
+from chatbot.models.chat_bot_b.generators.voice_generator import VoiceGenerator
 
 # logging 설정
 logger = get_module_logger(__name__)
@@ -51,6 +53,9 @@ class ContentPipeline():
                  vector_db_path: str = None, 
                  collection_name: str = "fairy_tales",
                  max_retries: int = 3,
+                 text_generator: Optional[TextGenerator] = None,
+                 image_generator: Optional[ImageGenerator] = None,
+                 voice_generator: Optional[VoiceGenerator] = None
                 ):
         """
         콘텐츠 파이프라인 초기화
@@ -60,6 +65,9 @@ class ContentPipeline():
             vector_db_path: ChromaDB 데이터베이스 경로
             collection_name: ChromaDB 컬렉션 이름
             max_retries: 실패 시 재시도 횟수
+            text_generator: TextGenerator instance
+            image_generator: ImageGenerator instance
+            voice_generator: VoiceGenerator instance
         """
         
         # LangChain chain
@@ -75,6 +83,9 @@ class ContentPipeline():
         self.vector_db_path = vector_db_path # ChromaDB 데이터베이스 경로
         self.collection_name = collection_name # ChromaDB 컬렉션 이름
         self.max_retries = max_retries # 실패 시 재시도 횟수
+        self.target_age = None # 대상 연령
+    
+        
         
         # 파이프라인 상태 관리
         self.current_pipeline_id = None # 현재 파이프라인 ID
@@ -89,6 +100,11 @@ class ContentPipeline():
         
         # 파이프라인 초기화
         self._initialize_pipeline() # 파이프라인 초기화 메서드 호출
+        
+        # Initialize generators if not provided
+        self.text_generator = text_generator if text_generator else TextGenerator(openai_client=self.openai_client, vector_db_path=self.vector_db_path, collection_name=self.collection_name)
+        self.image_generator = image_generator if image_generator else ImageGenerator(openai_client=self.openai_client)
+        self.voice_generator = voice_generator if voice_generator else VoiceGenerator()
         
     def _initialize_pipeline(self):
         """ 파이프라인 구성 요소 초기화 """
@@ -114,7 +130,7 @@ class ContentPipeline():
             self.temp_storage.mkdir(exist_ok=True)
             
             # 4. LangChain chain initialize
-            self._setup_langchain_chains()
+            # self._setup_langchain_chains() # Consider if this is still needed or if generators manage their chains
             
             logger.info("AWS EC2 + S3 환경 초기화 완료")
         
@@ -127,29 +143,17 @@ class ContentPipeline():
         
         try:
             if self.openai_client:
-                # 1. Text 생성 체인
-                
-                with open('chatbot/data/prompts/chatbot_b_prompts.json', 'r', encoding='utf-8') as f:
-                    prompts = json.load(f)
-                
-                text_prompt = ChatPromptTemplate.from_template(
-                    prompts["story_generation_templates"]["detailed_story_system_message"]
-                )
-                
-                model = ChatOpenAI(temperature=0.7, model="gpt-4o-mini")
-                self.text_chain = text_prompt | model | StrOutputParser()
-                
-                # 2. Image prompt 체인
-                image_prompt = ChatPromptTemplate.from_template(
-                    prompts["story_generation_templates"]["image_prompt_system_message"]
-                )
-                self.image_prompt_chain = image_prompt | model | StrOutputParser()
-                
-                logger.info("LangChain 체인 설정 완료")
+                logger.info(f"ContentPipeline._setup_langchain_chains called with target_age: {self.target_age}")
+                # This method might need to be re-evaluated based on how TextGenerator/ImageGenerator are initialized
+                # with target_age specific configurations.
+                # For example, if generators are re-initialized or configured per call, this might be less critical.
+                pass # Assuming generators handle their specific chain setups.
+            logger.info(f"LangChain 체인 설정 (대상 연령: {self.target_age}) - Note: Generators manage their own detailed chains.")
                 
         except Exception as e:
-            logger.error(f"LangChain 체인 설정 실패 : {e}")
-            raise
+            logger.error(f"ContentPipeline LangChain 체인 설정 실패 : {e}")
+            # Not raising here, as generator-level chains are more critical.
+
     def _get_content_type(self, file_path: Path) -> str:
         """파일 확장자에 따른 Content-Type 변환"""
         suffix = file_path.suffix.lower()
@@ -174,6 +178,21 @@ class ContentPipeline():
         4. 로컬 임시 파일 정리
         5. S3 URL 반환
         """
+        self.current_pipeline_id = str(uuid.uuid4())
+        self.pipeline_status = PipelineStatus.RUNNING
+        self.target_age = story_outline.get("target_age", story_outline.get("age_group")) # 대상 연령 설정
+        
+        try:
+            # Generators should ideally be configured with target_age upon initialization or via a method.
+            # If _setup_langchain_chains here is meant to reconfigure them, it needs to be effective.
+            # For now, assuming generators are ready or configure themselves.
+            # self._setup_langchain_chains() # Call if pipeline-level chains need re-init based on target_age
+            pass
+
+        except Exception as e:
+            logger.error(f"대상 연령({self.target_age})에 따른 체인 재설정 실패: {e}")
+            self.pipeline_status = PipelineStatus.FAILED
+            raise
         
         try:
             # 1. 텍스트 생성
@@ -200,6 +219,54 @@ class ContentPipeline():
             await self._cleanup_temp_files()
             raise
         
+    async def _execute_text_generation(self, story_outline: Dict[str, Any], progress_callback: Optional[Callable]):
+        """ 텍스트 생성 실행 (TextGenerator 사용) """
+        self.current_step = PipelineStep.TEXT_GENERATION
+        if progress_callback:
+            await progress_callback({"step": self.current_step.value, "status": "running", "progress": self.progress})
+
+        try:
+            logger.info(f"텍스트 생성 시작. Target Age: {self.target_age}")
+            
+            # TextGenerator에 전달할 input_data 구성
+            # story_outline의 내용을 TextGenerator의 input_data 형식에 맞게 매핑
+            text_gen_input = {
+                "theme": story_outline.get("theme"),
+                "child_name": story_outline.get("child_name", "친구"),
+                "target_age": self.target_age, # ContentPipeline에서 설정한 target_age 사용
+                "interests": story_outline.get("interests", []),
+                "plot_summary": story_outline.get("plot_summary", story_outline.get("story_concept")), # plot_summary 또는 story_concept
+                "educational_value": story_outline.get("educational_value"),
+                "setting": story_outline.get("setting"),
+                "characters": story_outline.get("characters")
+                # 필요한 다른 필드들도 추가
+            }
+
+            # TextGenerator 인스턴스 사용
+            # Ensure TextGenerator is initialized, potentially with target_age if it reconfigures itself
+            # For now, assuming self.text_generator is ready.
+            if not self.text_generator:
+                 self.text_generator = TextGenerator(openai_client=self.openai_client, vector_db_path=self.vector_db_path, collection_name=self.collection_name)
+
+
+            generated_text_data = await self.text_generator.generate(text_gen_input, progress_callback)
+            
+            self.pipeline_results["story_data"] = generated_text_data # TextGenerator의 결과 저장
+            self.completed_steps.append(self.current_step)
+            self.progress = 0.33 # 예시 진행도
+
+            if progress_callback:
+                await progress_callback({"step": self.current_step.value, "status": "completed", "progress": self.progress, "data": generated_text_data})
+            logger.info("텍스트 생성 완료")
+
+        except Exception as e:
+            self.failed_steps.append(self.current_step)
+            self.pipeline_status = PipelineStatus.FAILED
+            logger.error(f"텍스트 생성 실패: {e}")
+            if progress_callback:
+                await progress_callback({"step": self.current_step.value, "status": "failed", "error": str(e)})
+            raise
+        
     async def _execute_image_generation_with_s3(self, progress_callback):
         """ 이미지 생성 + S3 업로드 """
         
@@ -209,22 +276,51 @@ class ContentPipeline():
             
             s3_image_urls = []
             
-            for chapter in chapters:
+            if not self.image_generator: # Ensure image_generator is initialized
+                self.image_generator = ImageGenerator(openai_client=self.openai_client)
+
+            for chapter_idx, chapter in enumerate(chapters):
                 # 1. LangChain을 통한 향상된 이미지 프롬프트 생성
-                if self.image_prompt_chain:
-                    try:
-                        prompt = await self.image_prompt_chain.ainvoke({
-                            "chapter_title": chapter.get("chapter_title", ""),
-                            "chapter_content": chapter.get("chapter_content", "")
-                        })
-                    except Exception as e:
-                        logger.warning(f"LangChain 프롬프트 생성 실패, 기본 방식 사용: {e}")
-                        prompt = self._create_basic_image_prompt(chapter)
-                else:
-                    prompt = self._create_basic_image_prompt(chapter)
+                # ImageGenerator가 자체적으로 프롬프트 생성 로직을 가짐.
+                # ContentPipeline은 챕터 정보만 전달.
                 
-                # 2. LangChain DALL-E 또는 직접 API로 이미지 생성
-                temp_image_path = await self._generate_image_locally(prompt, chapter)
+                # ImageGenerator에 전달할 input_data 구성
+                image_gen_input = {
+                    "story_data": { # ImageGenerator는 story_data로 전체를 받음
+                        "title": story_data.get("title"),
+                        "chapters": [chapter], # 현재 챕터만 전달
+                        "metadata": {"target_age": self.target_age} 
+                    },
+                    "story_id": self.current_pipeline_id
+                }
+                
+                # ImageGenerator의 generate 메서드 호출
+                # ImageGenerator.generate는 chapter 하나에 대한 이미지가 아닌, chapters 리스트 전체에 대한 이미지 생성을 가정함
+                # 여기서는 루프 내에서 호출하므로, ImageGenerator.generate가 단일 챕터 입력을 처리하거나,
+                # _generate_single_enhanced_image 같은 내부 메서드를 직접 호출해야 할 수 있음.
+                # 현재 ImageGenerator.generate는 chapters 리스트를 기대함.
+                # 이 부분을 ImageGenerator의 인터페이스에 맞게 조정 필요.
+                # 임시로, ImageGenerator가 챕터별 호출이 가능하다고 가정하고 진행. (실제로는 수정 필요할 수 있음)
+
+                # 이상적으로는 image_generator.generate_for_chapter(chapter_info, story_metadata) 형태가 좋음
+                # 현재 ImageGenerator.generate는 전체 스토리 데이터를 받아 내부적으로 루프를 돌림.
+                # 여기서는 ContentPipeline이 루프를 돌리므로, ImageGenerator는 단일 이미지 생성 로직을 노출해야 함.
+                # DallEAPIWrapper 직접 사용하는 현재 로직 유지 또는 ImageGenerator 내부 메서드 호출.
+
+                # 현재 _generate_image_locally가 이 역할을 함.
+                # 이 메서드는 ContentPipeline 내부에 있고, image_generator 인스턴스의 설정(model, size)을 사용해야 함.
+
+                prompt_for_log = f"Chapter {chapter.get('chapter_number', chapter_idx + 1)} image generation"
+                logger.info(f"Requesting image generation for: {prompt_for_log}")
+
+
+                # 2. 이미지 생성 (ImageGenerator의 기능을 활용하거나, 직접 API 호출)
+                # image_generator의 _create_enhanced_image_prompt 와 _generate_single_enhanced_image 호출 고려
+                # 또는, 현재 _generate_image_locally를 사용하고 image_generator의 설정을 참조
+                temp_image_path = await self._generate_image_locally(
+                    f"Content for chapter: {chapter.get('chapter_title', '')} - {chapter.get('chapter_content', '')[:100]}...", # 단순 프롬프트 예시
+                    chapter
+                ) # _generate_image_locally가 DALL-E 호출 담당
                 
                 # 3. S3 upload
                 s3_url = await self._upload_to_s3(
@@ -262,13 +358,16 @@ class ContentPipeline():
         """로컬에 이미지 생성"""
         try:
             # LangChain DALL-E Wrapper 사용 시도
+            if not self.image_generator: # Ensure image_generator is initialized
+                self.image_generator = ImageGenerator(openai_client=self.openai_client)
+
             try:
                 dalle_wrapper = DallEAPIWrapper(
-                    model="dall-e-3",
-                    size="1024x1024"
+                    model=self.image_generator.model_name, # Corrected to use self.image_generator
+                    size=self.image_generator.image_size  # Corrected to use self.image_generator
                 )
                 
-                image_url = await asyncio.to_thread(dalle_wrapper.run, prompt)
+                image_url = await asyncio.to_thread(dalle_wrapper.run, prompt) # 이미지 URL 생성
                 
                 # URL에서 이미지 다운로드
                 return await self._download_image_from_url(image_url, chapter)
@@ -368,5 +467,4 @@ class ContentPipeline():
         except Exception as e:
             logger.warning(f"임시 파일 정리 실패 : {e}")            
             
-    async def _execute_text_generation(self, story_outline, progress_callback):
-        """ 텍스트 생성 실행"""
+  

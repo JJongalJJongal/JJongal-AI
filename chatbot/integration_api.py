@@ -17,7 +17,7 @@ from chatbot.db import initialize_db as initialize_story_task_db
 
 # 환경 변수 로드 (프로젝트 루트 .env 파일 기준)
 current_dir = os.path.dirname(os.path.abspath(__file__))
-project_root = os.path.abspath(os.path.join(current_dir, '..')) # integration_api.py is in chatbot/
+project_root = os.path.abspath(os.path.join(current_dir, '..')) 
 dotenv_path = os.path.join(project_root, '.env')
 load_dotenv(dotenv_path=dotenv_path)
 
