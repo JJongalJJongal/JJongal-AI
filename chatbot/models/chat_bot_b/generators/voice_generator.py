@@ -118,6 +118,8 @@ class VoiceGenerator(BaseGenerator):
             # 2. API 키 확인
             if not self.api_key:
                 logger.warning("ElevenLabs API 키가 설정되지 않음")
+            else:
+                logger.info(f"ElevenLabs API 키 설정 완료")
             
             logger.info("VoiceGenerator 초기화 완료 (등장인물별 음성 지원)")
             

@@ -13,7 +13,7 @@ from openai import OpenAI
 from dotenv import load_dotenv
 
 from shared.utils.logging_utils import get_module_logger
-from ..utils import retry_operation
+from shared.utils.async_utils import retry_operation
 
 logger = get_module_logger(__name__)
 
@@ -127,14 +127,20 @@ class AudioProcessor:
                 )
                 return tts_result
                 
-            tts_result = await retry_operation(tts_operation)
+            tts_audio, error_msg, error_code = await retry_operation(tts_operation) # type: ignore
             
-            if isinstance(tts_result, tuple) and tts_result[0] is None:
-                _, error_msg, error_code = tts_result
-                logger.error(f"TTS 생성 실패 후 재시도 모두 실패: {error_msg}")
-                return "", "error", error_msg or "TTS 생성 실패", error_code or "tts_generation_failed"
-            
-            tts_audio = tts_result.content
+            if tts_audio is None:
+                logger.error(f"TTS 생성 실패 후 재시도 모두 실패 : {error_msg}")
+                return "", "error", error_msg or "TTS 생성 실패", error_code or "tts_generation_failed"            
+        
+            # tts_audio가 실제 오디오 데이터, 바이트 데이터로 변환
+            if hasattr(tts_audio, 'read') and callable(tts_audio.read):
+                tts_audio = tts_audio.read()
+            elif hasattr(tts_audio, 'content') and isinstance(tts_audio.content, bytes):
+                tts_audio = tts_audio.content
+            elif not isinstance(tts_audio, bytes):
+                logger.error(f"추출된 tts_audio가 바이트 형식이 아닙니다. 타입: {type(tts_audio)}")
+                return "", "error", "추출된 오디오 데이터 형식 오류", "tts_audio_not_bytes"
             
             if len(tts_audio) < 2 * 1024 * 1024: # 2MB 미만
                 return base64.b64encode(tts_audio).decode("utf-8"), "ok", None, None

@@ -7,7 +7,7 @@ CCB_AI Integration API
 
 import asyncio
 import logging
-from typing import Dict, List, Any, Optional
+from typing import Dict, List, Any, Optional, TYPE_CHECKING
 from datetime import datetime
 from enum import Enum
 from dataclasses import dataclass
@@ -23,7 +23,10 @@ except ImportError:
     logging.warning("FastAPI not available. API endpoints will not be functional.")
 
 from .story_schema import StoryDataSchema, ChildProfile, AgeGroup, ElementType
-from .orchestrator import WorkflowOrchestrator
+
+# TYPE_CHECKING을 사용하여 순환 임포트 해결
+if TYPE_CHECKING:
+    from .orchestrator import WorkflowOrchestrator
 
 class APIEndpoints(Enum):
     """API 엔드포인트"""
@@ -85,7 +88,7 @@ class IntegrationAPI:
     워크플로우 오케스트레이터와 외부 시스템 간의 통신을 담당합니다.
     """
     
-    def __init__(self, orchestrator: Optional[WorkflowOrchestrator] = None):
+    def __init__(self, orchestrator: Optional["WorkflowOrchestrator"] = None):
         """
         통합 API 초기화
         
@@ -107,7 +110,7 @@ class IntegrationAPI:
             self.app = None
             self.logger.warning("FastAPI를 사용할 수 없어 API 엔드포인트가 비활성화됩니다.")
     
-    def set_orchestrator(self, orchestrator: WorkflowOrchestrator):
+    def set_orchestrator(self, orchestrator: "WorkflowOrchestrator"):
         """오케스트레이터 설정"""
         self.orchestrator = orchestrator
     

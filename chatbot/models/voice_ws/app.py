@@ -17,13 +17,24 @@ from .processors.auth_processor import AuthProcessor
 from .processors.audio_processor import AudioProcessor 
 from .handlers.audio_handler import handle_audio_websocket
 from .handlers.story_handler import handle_story_generation_websocket
+from chatbot.data.vector_db.core import VectorDB # VectorDB 임포트 추가
 
-logger = get_module_logger(__name__)
+logger = get_module_logger(__name__) # 로거 설정
 
 # 서비스 시작/종료 관리
+@asynccontextmanager # asynccontextmanager로 변경
 async def lifespan_manager(app: FastAPI):
     # WebSocket 서버 시작
     logger.info("음성 WebSocket 서버 시작") 
+    
+    # VectorDB 인스턴스 사전 로드
+    logger.info("VectorDB 사전 로드 중...")
+    try:
+        app.state.vector_db = VectorDB() # app.state에 저장
+        logger.info("VectorDB 사전 로드 완료.")
+    except Exception as e:
+        logger.error(f"VectorDB 사전 로드 실패: {e}")
+        app.state.vector_db = None
     
     print("서비스 시작")
     asyncio.create_task(connection_engine.cleanup_inactive_clients()) # 비활성 클라이언트 정리 task 시작

@@ -14,7 +14,7 @@ from chatbot.models.chat_bot_a import ChatBotA # 부기 챗봇 import
 from ..core.connection_engine import ConnectionEngine
 from ..core.websocket_engine import WebSocketDisconnect # WebSocket 연결 종료 처리
 from ..processors.audio_processor import AudioProcessor
-# from ..processors.message_processor import MessageProcessor # 필요시 추가
+
 
 logger = get_module_logger(__name__)
 
@@ -25,7 +25,6 @@ async def handle_audio_websocket(
     interests_str: Optional[str],
     connection_engine: ConnectionEngine,
     audio_processor: AudioProcessor,
-    # message_processor: MessageProcessor # 필요시 추가
 ):
     """
     오디오 WebSocket 연결의 전체 라이프사이클을 관리합니다.
@@ -50,7 +49,27 @@ async def handle_audio_websocket(
         await websocket.accept() # WebSocket 연결 수락
         logger.info(f"오디오 WebSocket 연결 수락: {client_id} ({child_name}, {age}세)") # 로깅
         
-        chatbot_a = ChatBotA() # ChatBot A 인스턴스 생성
+        # 사전 로드된 VectorDB 인스턴스 가져오기
+        vector_db_instance = websocket.app.state.vector_db
+        if vector_db_instance is None: # VectorDB 인스턴스 누락 시
+            logger.error("사전 로드된 VectorDB 인스턴스를 찾을 수 없습니다. RAG 기능 없이 ChatBotA를 초기화합니다.") # 로깅
+            await websocket.close(code=status.WS_1003_UNSUPPORTED_DATA, reason="VectorDB 인스턴스 누락") # 연결 종료
+            return # 연결 종료
+        
+        # ChatBot A 인스턴스 생성 시 VectorDB 인스턴스 주입
+        chatbot_a = ChatBotA(vector_db_instance=vector_db_instance) 
+        
+        # 디버그: 챗봇 객체 타입 및 메서드 확인
+        logger.info(f"[DEBUG] 생성된 chatbot_a 타입: {type(chatbot_a)}, 메서드 목록: {dir(chatbot_a)}")
+        if not hasattr(chatbot_a, 'get_conversation_history'):
+            logger.error(f"[DEBUG] 생성된 chatbot_a 객체에 get_conversation_history 메서드가 없습니다. 실제 타입: {type(chatbot_a)}")
+            await websocket.send_json({
+                "type": "error",
+                "error_message": "챗봇 객체에 get_conversation_history 메서드가 없습니다.",
+                "error_code": "chatbot_object_invalid",
+                "status": "error"
+            })
+            return
         
         connection_info = {
             "websocket": websocket, # WebSocket 객체 저장
@@ -97,57 +116,121 @@ async def handle_audio_websocket(
             audio_bytes_accumulated += len(data) # 오디오 byte 누적
             elapsed_chunk_time = time.time() - chunk_collection_start_time # 오디오 chunk 수집 시간 계산
 
-            if elapsed_chunk_time >= 2.0 or audio_bytes_accumulated >= 128 * 1024: # 오디오 chunk 수집 시간이 2초 이상이거나 오디오 byte 누적 값이 128KB 이상일 경우
+            if elapsed_chunk_time >= 1.0 or audio_bytes_accumulated >= 64 * 1024: # 오디오 chunk 수집 시간이 1초 이상이거나 오디오 byte 누적 값이 64KB 이상일 경우
                 temp_file_path = None # 임시 파일 경로 초기화
+                processing_start_time = time.time()
+                logger.info(f"[AUDIO_PROCESS] 오디오 처리 시작 - client_id: {client_id}, 누적크기: {audio_bytes_accumulated}바이트, 누적시간: {elapsed_chunk_time:.2f}초")
+                
                 try:
+                    # === 1단계: 오디오 청크 결합 ===
+                    logger.info(f"[AUDIO_PROCESS] 1단계: 오디오 청크 결합 시작 - {len(audio_chunks)}개 청크")
                     full_audio_data = b"".join(audio_chunks) # 오디오 chunk 결합
                     audio_chunks = [] # 청크 리셋
                     audio_bytes_accumulated = 0 # 오디오 byte 누적 값 초기화
                     chunk_collection_start_time = time.time() # 오디오 chunk 수집 시간 리셋
+                    logger.info(f"[AUDIO_PROCESS] 1단계 완료: 전체 오디오 크기 {len(full_audio_data)}바이트")
 
+                    # === 2단계: 오디오 파일 처리 ===
+                    step2_start = time.time()
+                    logger.info(f"[AUDIO_PROCESS] 2단계: 오디오 파일 처리 시작")
                     temp_file_path, proc_error, proc_code = await audio_processor.process_audio_chunk(full_audio_data, client_id) # 오디오 청크 처리
+                    step2_time = time.time() - step2_start
+                    logger.info(f"[AUDIO_PROCESS] 2단계 완료: {step2_time:.2f}초 소요, temp_file: {temp_file_path}")
+                    
                     if proc_error:
+                        logger.error(f"[AUDIO_PROCESS] 2단계 오류: {proc_error} (코드: {proc_code})")
                         await websocket.send_json({"type": "error", "error_message": proc_error, "error_code": proc_code, "status": "error"}) # 오디오 처리 오류 전송
                         continue
                     
                     connection_engine.get_client_info(client_id)["temp_files"].append(temp_file_path) # 임시 파일 경로 추가
                     
+                    # === 3단계: STT (음성→텍스트) ===
+                    step3_start = time.time()
+                    logger.info(f"[AUDIO_PROCESS] 3단계: STT 처리 시작")
                     user_text, stt_error, stt_code = await audio_processor.transcribe_audio(temp_file_path) # 오디오 파일 텍스트 변환
-                    logger.info(f"음성 인식 결과 ({client_id}): {user_text}") # 로깅
+                    step3_time = time.time() - step3_start
+                    logger.info(f"[AUDIO_PROCESS] 3단계 완료: {step3_time:.2f}초 소요, 인식결과: '{user_text}'")
+                    
                     if stt_error: # 오디오 텍스트 변환 오류 시
+                        logger.error(f"[AUDIO_PROCESS] 3단계 오류: {stt_error} (코드: {stt_code})")
                         await websocket.send_json({"type": "error", "error_message": stt_error, "error_code": stt_code, "status": "error", "user_text": ""}) # 오디오 텍스트 변환 오류 전송
                         continue
                     
-                    # 챗봇 응답 처리
+                    # === 4단계: 빈 텍스트 처리 ===
                     if not user_text:
-                         # 빈 텍스트라도 user_text 필드는 포함하여 전송
+                        logger.warning(f"[AUDIO_PROCESS] 4단계: 빈 텍스트 감지, 기본 응답 전송")
                         response_packet = {"type": "ai_response", "text": "", "audio": "", "status": "ok", "user_text": user_text}
                         response_packet["error_message"] = "다시 말해줄래? 잘 안들렸어 미안해!" # 오류 메시지
                         response_packet["error_code"] = "no_valid_speech" # 오류 코드
                         await websocket.send_json(response_packet) # 오류 메시지 전송
                         continue
                     
-                    bot_response_text, bot_error, bot_code = await handle_chat_a_response(chatbot_a, user_text) # 챗봇 응답 처리
-                    if bot_error: # 챗봇 응답 오류 시 
-                        await websocket.send_json({"type": "error", "error_message": bot_error, "error_code": bot_code, "status": "error", "user_text": user_text}) # 챗봇 응답 오류 전송
+                    # === 5단계: 챗봇 객체 검증 ===
+                    step5_start = time.time()
+                    logger.info(f"[AUDIO_PROCESS] 5단계: 챗봇 객체 검증 시작")
+                    logger.info(f"[AUDIO_PROCESS] 챗봇 객체 타입: {type(chatbot_a)}, hasattr get_conversation_history: {hasattr(chatbot_a, 'get_conversation_history')}")
+                    if not hasattr(chatbot_a, 'get_conversation_history'):
+                        logger.error(f"[AUDIO_PROCESS] 5단계 오류: 챗봇 객체에 get_conversation_history 메서드가 없습니다. 타입: {type(chatbot_a)}")
+                        await websocket.send_json({
+                            "type": "error",
+                            "error_message": "챗봇 객체에 get_conversation_history 메서드가 없습니다.",
+                            "error_code": "chatbot_object_invalid",
+                            "status": "error",
+                            "user_text": user_text
+                        })
+                        continue
+                    logger.info(f"[AUDIO_PROCESS] 5단계 완료: 챗봇 객체 검증 성공")
+                    
+                    # === 6단계: 챗봇 응답 생성 ===
+                    step6_start = time.time()
+                    logger.info(f"[AUDIO_PROCESS] 6단계: 챗봇 응답 생성 시작 - 입력텍스트: '{user_text}'")
+                    try:
+                        start_time = time.time()
+                        response = await asyncio.to_thread(chatbot_a.get_response, user_text)
+                        elapsed_time = time.time() - start_time
+                        logger.info(f"ChatBot A 응답 생성 완료 (소요 시간: {elapsed_time:.2f}초)")
+                    except Exception as e:
+                        step6_time = time.time() - step6_start
+                        logger.error(f"[AUDIO_PROCESS] 6단계 예외: {e} ({step6_time:.2f}초 소요)")
+                        await websocket.send_json({"type": "error", "error_message": f"챗봇 응답 생성 중 예외: {e}", "error_code": "chatbot_response_exception", "status": "error", "user_text": user_text})
                         continue
                     
-                    bot_audio_b64, bot_tts_status, bot_tts_error, bot_tts_code = await audio_processor.synthesize_tts(bot_response_text) # 챗봇 응답 음성 생성
+                    # === 7단계: TTS (텍스트→음성) ===
+                    step7_start = time.time()
+                    logger.info(f"[AUDIO_PROCESS] 7단계: TTS 처리 시작 - 텍스트: '{response[:50]}...'")
+                    try:
+                        bot_audio_b64, bot_tts_status, bot_tts_error, bot_tts_code = await audio_processor.synthesize_tts(response) # 챗봇 응답 음성 생성
+                        step7_time = time.time() - step7_start
+                        logger.info(f"[AUDIO_PROCESS] 7단계 완료: {step7_time:.2f}초 소요, 오디오크기: {len(bot_audio_b64) if bot_audio_b64 else 0}자")
+                    except Exception as e:
+                        step7_time = time.time() - step7_start
+                        logger.error(f"[AUDIO_PROCESS] 7단계 예외: {e} ({step7_time:.2f}초 소요)")
+                        bot_audio_b64, bot_tts_status, bot_tts_error, bot_tts_code = "", "error", f"TTS 처리 중 예외: {e}", "tts_exception"
                     
-                    # 챗봇 응답 전송
+                    # === 8단계: 응답 전송 ===
+                    step8_start = time.time()
+                    logger.info(f"[AUDIO_PROCESS] 8단계: 응답 전송 시작")
                     response_packet = {
-                        "type": "ai_response", "text": bot_response_text, "audio": bot_audio_b64, # 챗봇 응답 텍스트 및 음성 전송
+                        "type": "ai_response", "text": response, "audio": bot_audio_b64, # 챗봇 응답 텍스트 및 음성 전송
                         "status": bot_tts_status, "user_text": user_text, # 챗봇 응답 상태 및 사용자 텍스트 전송
                         "error_message": bot_tts_error, "error_code": bot_tts_code # 챗봇 응답 오류 메시지 및 코드 전송
                     }
                     await websocket.send_json(response_packet) # 챗봇 응답 전송
+                    step8_time = time.time() - step8_start
+                    total_time = time.time() - processing_start_time
+                    logger.info(f"[AUDIO_PROCESS] 8단계 완료: {step8_time:.2f}초 소요, 전체처리시간: {total_time:.2f}초")
+                    logger.info(f"[AUDIO_PROCESS] 처리 완료 - client_id: {client_id}")
                 
                 except WebSocketDisconnect: # WebSocket 연결 종료 시
-                    logger.info(f"클라이언트 연결 종료됨 (오디오 처리 중): {client_id}") # 로깅
+                    logger.info(f"[AUDIO_PROCESS] WebSocket 연결 종료됨 (오디오 처리 중): {client_id}") # 로깅
                     raise # 상위 핸들러에서 처리하도록 다시 발생
                 except Exception as e: # 오디오 처리 루프 오류 시
-                    logger.error(f"오디오 처리 루프 오류 ({client_id}): {e}\n{traceback.format_exc()}") # 로깅
-                    await websocket.send_json({"type": "error", "error_message": str(e), "error_code": "audio_loop_error", "status": "error"}) # 오류 메시지 전송
+                    total_time = time.time() - processing_start_time
+                    logger.error(f"[AUDIO_PROCESS] 예상치 못한 오류 ({client_id}): {e} (처리시간: {total_time:.2f}초)\n{traceback.format_exc()}") # 로깅
+                    try:
+                        await websocket.send_json({"type": "error", "error_message": f"오디오 처리 중 예상치 못한 오류: {str(e)}", "error_code": "audio_processing_unexpected_error", "status": "error"}) # 오류 메시지 전송
+                    except:
+                        logger.error(f"[AUDIO_PROCESS] 오류 응답 전송도 실패: {client_id}")
                 finally:
                     if temp_file_path and temp_file_path in connection_engine.get_client_info(client_id)["temp_files"]: # 임시 파일 경로 확인
                          # 임시 파일은 disconnect 시 일괄 정리되므로 여기서 삭제 X

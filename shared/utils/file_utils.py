@@ -9,7 +9,8 @@ import logging
 from pathlib import Path
 from typing import Dict, Any, Optional, List, Union
 
-logger = logging.getLogger(__name__)
+from shared.utils.logging_utils import get_module_logger
+logger = get_module_logger(__name__)
 
 
 def ensure_directory(path: Union[str, Path]) -> Path:
@@ -224,3 +225,19 @@ def get_file_size(file_path: Union[str, Path]) -> int:
     if not file_exists(file_path):
         return 0
     return os.path.getsize(file_path)
+
+def cleanup_temp_files(file_paths: List[Union[str, Path]], logger_instance: Optional[logging.Logger] = None):
+    """임시 파일 목록을 정리합니다."""
+    current_logger = logger_instance if logger_instance else logger # 외부 로거 또는 현재 모듈 로거 사용
+    for file_path_item in file_paths:
+        try:
+            file_to_delete = Path(file_path_item) # Path 객체로 변환
+            if file_to_delete.exists() and file_to_delete.is_file():
+                file_to_delete.unlink() # Path.unlink()를 사용하여 파일 삭제
+                current_logger.info(f"임시 파일 삭제: {file_to_delete}")
+            elif not file_to_delete.exists():
+                current_logger.warning(f"삭제할 임시 파일이 존재하지 않음: {file_to_delete}")
+            elif not file_to_delete.is_file():
+                current_logger.warning(f"삭제 대상이 파일이 아님 (디렉토리 등): {file_to_delete}")
+        except Exception as e:
+            current_logger.error(f"임시 파일 삭제 실패 ({file_path_item}): {e}")

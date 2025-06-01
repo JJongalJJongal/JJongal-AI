@@ -135,21 +135,23 @@ class ImageGenerator(BaseGenerator):
         self.age_specific_templates = {
             "age_4_7": {
                 "style_specifications": {
-                    "art_style": "Gentle watercolor illustration with soft, rounded shapes perfect for young children",
-                    "color_palette": "Warm pastel tones: soft mint greens, cream whites, gentle peach, sky blues, lavender",
-                    "composition": "Simple, uncluttered layouts with clear focal points and large, friendly character designs",
-                    "safety_elements": "No sharp edges, dark shadows, or potentially frightening elements"
+                    "art_style": "Adorable kawaii-style illustration with extremely soft, rounded shapes and cute characters perfect for young children",
+                    "color_palette": "Soft pastel tones: gentle mint green, cream white, warm peach, soft sky blue, light lavender, warm yellow",
+                    "composition": "Simple, clean layouts with cute focal points and large, friendly round character designs",
+                    "character_design": "Round, chubby characters with large sparkly eyes, soft features, and gentle expressions",
+                    "safety_elements": "No sharp edges, dark shadows, or potentially frightening elements - only cute and comforting imagery"
                 },
-                "prompt_template": "Create a gentle watercolor illustration for a Korean children's storybook. Scene: {scene_description}. Style: Soft watercolor with warm pastel colors. Character design: Large friendly eyes, rounded shapes. Environment: {safe_environment_description}. Mood: {mood}. Safety: Child-friendly, no scary elements."
+                "prompt_template": "Create an adorable kawaii-style illustration for a Korean children's storybook. Scene: {scene_description}. Style: Soft, cute cartoon illustration with rounded shapes and gentle gradients. Character design: Extremely cute animals or characters with big round eyes, chubby cheeks, soft pastel colors. Environment: {safe_environment_description} with rolling hills, soft trees, and peaceful nature. Mood: {mood}. Technical: Smooth gradients, no harsh lines, child-friendly and heartwarming atmosphere like a gentle storybook illustration."
             },
             "age_8_9": {
                 "style_specifications": {
-                    "art_style": "Rich, detailed watercolor with sophisticated environmental storytelling",
-                    "color_palette": "Expanded palette with harmonious color relationships, natural tones",
-                    "composition": "More complex layouts with multiple focal points, depth layers",
-                    "symbolic_elements": "Age-appropriate symbolism and metaphorical visual elements"
+                    "art_style": "Charming kawaii illustration with more detailed but still soft, appealing character designs",
+                    "color_palette": "Rich but gentle pastels with harmonious color relationships and warm undertones",
+                    "composition": "More sophisticated layouts with multiple cute elements and gentle depth layers",
+                    "character_design": "Detailed kawaii characters with expressive large eyes, soft clothing, and endearing poses",
+                    "symbolic_elements": "Age-appropriate cute symbols and gentle metaphorical visual elements"
                 },
-                "prompt_template": "Create a sophisticated watercolor illustration for a Korean children's storybook (ages 8-9). Scene: {scene_description}. Style: Professional watercolor with layered composition. Character details: Distinctive clothing, nuanced emotions. Environment: Rich textures, hidden details. Mood: {complex_mood}. Technical quality: Publication-ready illustration."
+                "prompt_template": "Create a charming kawaii-style illustration for a Korean children's storybook (ages 8-9). Scene: {scene_description}. Style: Professional cute cartoon illustration with soft gradients and detailed kawaii elements. Character details: Adorable characters with distinctive cute clothing, gentle emotions, and round features. Environment: Rich textures with cute details, peaceful backgrounds with soft hills and friendly nature elements. Mood: {complex_mood}. Technical quality: High-quality cute illustration with soft lighting and warm, comforting atmosphere."
             }
         }
                 
@@ -158,7 +160,7 @@ class ImageGenerator(BaseGenerator):
         try:
             # 1. LLM 초기화
             self.llm = ChatOpenAI(
-                temperature=0.8, # 창의성 조절 (0.0 ~ 1.0)
+                temperature=1.0, # 창의성 조절 (0.0 ~ 1.0)
                 model="gpt-4o",
                 api_key=self.openai_client.api_key # OpenAI API Key
             )
@@ -166,7 +168,11 @@ class ImageGenerator(BaseGenerator):
             # 2. DALL-E Wrapper 초기화
             self.dalle_wrapper = DallEAPIWrapper(
                 model=self.model_name, # dall-e-3
-                size=self.image_size # 1024x1024, 1024x1536, 1536x1024
+                size=self.image_size, # 1024x1024, 1024x1536, 1536x1024
+                quality="hd", # hd, standard
+                style="natural", # vivid, natural
+                response_format="url", # url, b64_json
+                n=1 # 1, 2, 3, 4, 5, 6, 7, 8, 9, 10
             )
             
             # 3. 연령별 프롬프트 개선 체인 설정
@@ -252,9 +258,6 @@ class ImageGenerator(BaseGenerator):
             except:
                 logger.warning(f"target_age 문자열 '{target_age}'에서 나이 추출 실패, 기본값 7 사용")
                 current_age = 7 # 기본값
-        elif not isinstance(target_age, int):
-            logger.warning(f"target_age 타입이 올바르지 않음({type(target_age)}), 기본값 7 사용")
-            current_age = 7 # 기본값
 
         if 4 <= current_age <= 7:
             return "age_4_7"
@@ -548,6 +551,50 @@ class ImageGenerator(BaseGenerator):
         
         scene = chapter.get("chapter_title", "a peaceful scene")
         return basic_template.format(scene_description=scene, mood="peaceful", safe_environment_description="safe and welcoming")
+
+    def _apply_safety_filters(self, prompt: str) -> str:
+        """안전성 필터 적용 및 프롬프트 정리"""
+        try:
+            # 1. 기본적인 정리
+            safe_prompt = prompt.strip()
+            
+            # 2. 부적절한 키워드 필터링 (아동용 안전성)
+            unsafe_keywords = [
+                "violence", "violent", "scary", "frightening", "dark", "evil", 
+                "weapon", "gun", "knife", "blood", "death", "kill", "hurt",
+                "폭력", "무서운", "어두운", "악한", "무기", "총", "칼", "피", "죽음", "죽이"
+            ]
+            
+            for keyword in unsafe_keywords:
+                safe_prompt = safe_prompt.replace(keyword, "gentle")
+            
+            # 3. 긍정적 키워드로 대체
+            replacements = {
+                "fight": "play together",
+                "attack": "approach kindly", 
+                "destroy": "transform",
+                "싸우": "함께 놀다",
+                "공격": "친근하게 다가가다",
+                "파괴": "변화시키다"
+            }
+            
+            for old, new in replacements.items():
+                safe_prompt = safe_prompt.replace(old, new)
+            
+            # 4. 길이 제한 (DALL-E 3 권장사항: 400자 이하)
+            if len(safe_prompt) > 400:
+                safe_prompt = safe_prompt[:397] + "..."
+            
+            # 5. 아동 안전성 강조
+            if "child-friendly" not in safe_prompt.lower() and "kawaii" not in safe_prompt.lower():
+                safe_prompt += " Child-friendly and safe."
+            
+            return safe_prompt
+            
+        except Exception as e:
+            logger.warning(f"안전성 필터 적용 중 오류: {e}")
+            # 오류 시 기본 안전 프롬프트 반환
+            return "A gentle, child-friendly kawaii illustration with soft colors and cute characters."
 
     async def _generate_single_enhanced_image(self,
                                             prompt: str,

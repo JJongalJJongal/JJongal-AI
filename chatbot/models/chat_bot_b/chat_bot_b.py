@@ -102,12 +102,19 @@ class ChatBotB:
             self.openai_client = initialize_client()
             
             # ElevenLabs API 키 로드
-            self.elevenlabs_api_key = os.getenv("ELEVENLABS_API_KEY")
+            raw_key = os.getenv("ELEVENLABS_API_KEY")
+            if raw_key:
+                logger.info(f"ElevenLabs API 키 로드 성공 (길이: {len(raw_key)})")
+            else:
+                logger.warning("ElevenLabs API 키가 환경 변수에 설정되지 않음")
+            
+            self.elevenlabs_api_key = raw_key
             
             logger.info("API 클라이언트 초기화 완료")
             
         except Exception as e:
             logger.error(f"API 클라이언트 초기화 실패: {e}")
+            raise
             
     def _initialize_engines(self, vector_db_path: str, collection_name: str):
         """엔진 및 생성기 초기화 (Enhanced 포함)"""

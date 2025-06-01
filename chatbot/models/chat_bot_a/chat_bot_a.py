@@ -37,8 +37,8 @@ class ChatBotA:
     """
     
     def __init__(self, 
+                 vector_db_instance: VectorDB,
                  token_limit: int = 10000, 
-                 enable_rag: bool = True, 
                  legacy_compatibility: bool = True,
                  enhanced_mode: bool = True,
                  enable_performance_tracking: bool = True):
@@ -46,15 +46,14 @@ class ChatBotA:
         ChatBot A 초기화
         
         Args:
+            vector_db_instance: 미리 초기화된 VectorDB 인스턴스
             token_limit: 대화 토큰 제한
-            enable_rag: RAG 시스템 사용 여부
             legacy_compatibility: 레거시 호환성 유지 여부
             enhanced_mode: Enhanced 모드 사용 여부
             enable_performance_tracking: 성능 추적 활성화
         """
         # 기본 설정
         self.token_limit = token_limit
-        self.enable_rag = enable_rag
         self.legacy_compatibility = legacy_compatibility
         self.enhanced_mode = enhanced_mode
         self.enable_performance_tracking = enable_performance_tracking
@@ -88,13 +87,14 @@ class ChatBotA:
             logger.error(f"OpenAI 클라이언트 초기화 실패: {e}")
             self.openai_client = None
         
-        # RAG 시스템 초기화
-        try:
-            self.rag_system = VectorDB()
-            logger.info("RAG 시스템 초기화 완료")
-        except Exception as e:
-            logger.error(f"RAG 시스템 초기화 실패: {e}")
-            self.rag_system = None
+        # RAG 시스템 설정
+        self.rag_system = vector_db_instance
+        if self.rag_system:
+            logger.info("RAG 시스템 (VectorDB) 주입 완료")
+            self.enable_rag = True
+        else:
+            logger.warning("RAG 시스템 (VectorDB)이 주입되지 않았거나 None입니다.")
+            self.enable_rag = False
         
         # 핵심 엔진들 초기화
         self._initialize_engines()
@@ -103,7 +103,7 @@ class ChatBotA:
         if legacy_compatibility:
             self._setup_legacy_compatibility()
         
-        logger.info(f"ChatBot A (Enhanced v2.0) 초기화 완료 - Mode: {self.prompt_version}")
+        logger.info(f"ChatBot A (Enhanced v2.0) 초기화 완료 - Mode: {self.prompt_version}, RAG: {self.enable_rag}")
     
     def _initialize_engines(self):
         """핵심 엔진들 초기화 (Enhanced)"""
@@ -350,10 +350,10 @@ class ChatBotA:
     
     def get_story_outline_for_chatbot_b(self) -> Dict[str, Any]:
         """
-        Chat Bot B를 위한 Enhanced 스토리 개요 생성
+        Chat Bot B (부기) 를 위한 강화된 스토리 개요 (RAG) 생성
         
         Returns:
-            Dict: Enhanced 스토리 개요 (v2.0 호환)
+            Dict: 스토리 개요
         """
         try:
             collection_start_time = time.time()
@@ -539,7 +539,6 @@ class ChatBotA:
                     logger.info(f"Enhanced 대화 로드 완료: {metadata.get('chatbot_version', 'unknown')}")
             return True
             
-            return False
         except Exception as e:
             logger.error(f"Enhanced 대화 로드 실패: {e}")
             return False
@@ -559,6 +558,3 @@ class ChatBotA:
         """토큰 사용량 조회"""
         return self.conversation.get_token_usage()
 
-
-# 기존 클래스명과의 호환성을 위한 별칭
-StoryCollectionChatBot = ChatBotA 

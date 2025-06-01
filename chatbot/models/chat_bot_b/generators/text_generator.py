@@ -23,7 +23,7 @@ from langchain_openai import ChatOpenAI
 # Project imports
 from .base_generator import BaseGenerator
 from chatbot.data.vector_db.core import VectorDB
-from chatbot.data.vector_db.query import query_vector_db
+from chatbot.data.vector_db.query import query_vector_db, get_similar_stories
 
 # logging 설정
 logger = get_module_logger(__name__)

@@ -19,7 +19,7 @@ logger = get_module_logger(__name__)
 
 # 모듈화된 앱 임포트
 from .app import app
-from .utils import setup_logging
+from shared.utils.logging_utils import setup_logger
 
 def run_server(host="0.0.0.0", port=8000, log_level="info", reload=False):
     """
@@ -32,14 +32,14 @@ def run_server(host="0.0.0.0", port=8000, log_level="info", reload=False):
         reload (bool): 코드 변경 시 자동 리로드 여부 (기본값: False)
     """
     # 로깅 설정
-    setup_logging()
+    setup_logger(name="voice_ws")
     
     # 서버 시작 정보 로깅
     logger.info(f"음성 WebSocket 서버 시작: {host}:{port}, Log Level: {log_level}")
     
     # 서버 실행
     uvicorn.run(
-        "chatbot.voice_ws.app:app",
+        "chatbot.models.voice_ws.app:app",
         host=host,
         port=port,
         log_level=log_level,

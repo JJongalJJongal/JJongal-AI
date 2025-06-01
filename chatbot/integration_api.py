@@ -6,14 +6,15 @@
 """
 
 import uvicorn
-from fastapi import FastAPI, HTTPException, status
+from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from dotenv import load_dotenv
 import os
-
+from dotenv import load_dotenv
 from shared.utils.logging_utils import get_module_logger
-from .routers import story_router
+
+from chatbot.routers import story_router
 from chatbot.db import initialize_db as initialize_story_task_db
+
 
 # 환경 변수 로드 (프로젝트 루트 .env 파일 기준)
 current_dir = os.path.dirname(os.path.abspath(__file__))
@@ -41,10 +42,7 @@ app.add_middleware(
 # --- API Routers --- 
 # (추후 라우터들을 추가하고 여기서 include_router 할 예정)
 from .routers import story_router
-# from .routers import rag_router, feedback_router
 app.include_router(story_router.router, prefix="/stories", tags=["Story Management"])
-# app.include_router(rag_router.router, prefix="/rag", tags=["RAG System"])
-# app.include_router(feedback_router.router, prefix="/feedback", tags=["User Feedback"])
 
 # --- Event Handlers ---
 @app.on_event("startup")

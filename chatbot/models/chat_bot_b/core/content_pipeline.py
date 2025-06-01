@@ -104,7 +104,15 @@ class ContentPipeline():
         # Initialize generators if not provided
         self.text_generator = text_generator if text_generator else TextGenerator(openai_client=self.openai_client, vector_db_path=self.vector_db_path, collection_name=self.collection_name)
         self.image_generator = image_generator if image_generator else ImageGenerator(openai_client=self.openai_client)
-        self.voice_generator = voice_generator if voice_generator else VoiceGenerator()
+        
+        # VoiceGenerator 초기화 시 ElevenLabs API 키 전달
+        if voice_generator:
+            self.voice_generator = voice_generator
+        else:
+            import os
+            elevenlabs_key = os.getenv("ELEVENLABS_API_KEY")
+            self.voice_generator = VoiceGenerator(elevenlabs_api_key=elevenlabs_key)
+            logger.info(f"ContentPipeline VoiceGenerator 초기화: API 키 존재={bool(elevenlabs_key)}")
         
     def _initialize_pipeline(self):
         """ 파이프라인 구성 요소 초기화 """

@@ -28,7 +28,10 @@ from .handlers.audio_handler import handle_audio_websocket
 from .handlers.story_handler import handle_story_generation_websocket
 
 # 유틸리티
-from .utils import setup_logging, retry_operation, cleanup_temp_files, save_conversation
+from shared.utils.logging_utils import setup_logger
+from shared.utils.async_utils import retry_operation
+from shared.utils.file_utils import cleanup_temp_files
+from chatbot.utils.conversation_utils import save_conversation
 
 # 서버 실행 함수
 from .voice_ws_server import run_server
@@ -42,11 +45,13 @@ __all__ = [
     'AudioProcessor',
     'AuthProcessor',
     'MessageProcessor',
-    'setup_logging',
+    'setup_logger',
     'retry_operation',
     'cleanup_temp_files',
-    'save_conversation'
+    'save_conversation',
+    'handle_audio_websocket',
+    'handle_story_generation_websocket'
 ]
 
-logger = setup_logging() # 최상위 로거 설정
+logger = setup_logger(name="voice_ws") # 최상위 로거 설정
 logger.info("음성 WebSocket 모듈 로드 완료") 

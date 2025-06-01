@@ -4,26 +4,25 @@ Router for Story Management API Endpoints
 Handles creating, retrieving, updating, and deleting stories,
 and managing the story generation workflow via ChatBotB.
 """
-import time # Ensure time is imported at the top
+import time # 시간 관련 모듈
 from fastapi import APIRouter, HTTPException, status, Body, BackgroundTasks
 from typing import Dict, Any, Optional, List
 from pydantic import BaseModel, Field
-import asyncio # For async operations with ChatBotB
+import asyncio # 비동기 작업을 위한 모듈
 
 from shared.utils.logging_utils import get_module_logger
-# Assuming ChatBotB and RAGSystem are accessible; adjust imports as needed
-from ..models.chat_bot_b import StoryGenerationChatBot
-# from ..models.rag_system import RAGSystem # If RAG interactions are part of story management
-# Import the new DB functions
+# ChatBotB 관련 함수
+from chatbot.models.chat_bot_b import StoryGenerationChatBot
+
+# DB 관련 함수
 from chatbot.db import ( 
     upsert_task,
     get_task as get_task_from_db,
-    update_task_status as update_task_status_in_db,
-    # delete_task # if needed later
+    update_task_status as update_task_status_in_db
 )
 
-logger = get_module_logger("story_router")
-router = APIRouter()
+logger = get_module_logger("story_router") # 로깅 설정
+router = APIRouter() # APIRouter 설정
 
 # --- Pydantic Models for Story API ---
 class StoryOutlineRequest(BaseModel):
@@ -31,22 +30,21 @@ class StoryOutlineRequest(BaseModel):
     age: int = Field(..., ge=3, le=12, description="아이 나이 (3-12세)")
     interests: Optional[List[str]] = Field(None, description="아이 관심사 목록")
     story_theme_summary: str = Field(..., description="ChatBot A 또는 사용자가 제공한 이야기 주제/줄거리 요약")
-    # Add other fields from ChatBotA's story_outline if needed, e.g., tags, characters
     initial_tags: Optional[List[str]] = Field(None, description="초기 태그")
 
 class StoryGenerationStatus(BaseModel):
     story_id: str
-    status: str # e.g., "pending", "generating_text", "generating_images", "generating_voice", "completed", "failed"
+    status: str # 상태 (예: "pending", "generating_text", "generating_images", "generating_voice", "completed", "failed")
     message: Optional[str] = None
     details: Optional[Dict[str, Any]] = None
-    input_outline: Optional[Dict[str, Any]] = None # To store the original input outline
+    input_outline: Optional[Dict[str, Any]] = None # 원본 입력 개요 저장
 
 class GeneratedStoryResponse(BaseModel):
     story_id: str
     title: Optional[str]
-    content: Dict[str, Any] # Full story content (scenes, characters etc.)
-    illustrations: Optional[List[Dict[str, str]]] # list of {scene_id: ..., image_url: ...}
-    audio_files: Optional[List[Dict[str, str]]]  # list of {narration/character: ..., audio_url: ...}
+    content: Dict[str, Any] # 전체 이야기 내용 (장면, 캐릭터 등)
+    illustrations: Optional[List[Dict[str, str]]] # 장면 ID와 이미지 URL 리스트
+    audio_files: Optional[List[Dict[str, str]]]  # 음성 파일 리스트 (예: {narration/character: ..., audio_url: ...})
 
 # --- Background Task Function ---
 async def process_story_generation_task_background(story_id: str):
@@ -61,10 +59,10 @@ async def process_story_generation_task_background(story_id: str):
         logger.error(f"백그라운드 작업: Story task ID {story_id}를 DB에서 찾을 수 없습니다. 작업 중단.")
         return
 
-    # Convert task_data (dict from DB) to StoryGenerationStatus Pydantic model for consistency if needed
-    # Or directly use fields from task_data dict. For status updates, we call DB functions directly.
+    # task_data를 StoryGenerationStatus Pydantic 모델로 변환하여 일관성을 유지합니다.
+    # 또는 task_data 딕셔너리의 필드를 직접 사용합니다. 상태 업데이트의 경우 DB 함수를 직접 호출합니다.
     current_status_str = task_data.get("status")
-    current_details = task_data.get("details", {}) # Ensure details is a dict
+    current_details = task_data.get("details", {}) # 상세 정보 확인
     input_outline_data = task_data.get("input_outline")
 
     if current_status_str not in ["queued_for_generation", "failed_text_generation", "failed_image_generation", "failed_voice_generation", "failed_runtime_error"]:
@@ -102,7 +100,7 @@ async def process_story_generation_task_background(story_id: str):
             logger.error(f"백그라운드 작업 [{story_id}]: 상세 텍스트 생성 실패")
             return
         logger.info(f"백그라운드 작업 [{story_id}]: 상세 텍스트 생성 완료")
-        # current_details is already a dict from task_data or initialized to {}
+        # current_details는 task_data에서 이미 딕셔너리이거나 {}로 초기화되어 있습니다.
         current_details["text_content_preview"] = str(detailed_story_content)[:200]
         current_details["full_text_content"] = detailed_story_content
         update_task_status_in_db(story_id, "generating_text", "텍스트 생성 완료, 삽화 생성 준비 중...", details_update=current_details)
@@ -154,7 +152,7 @@ async def initiate_story_generation(
 
     existing_task_data = get_task_from_db(story_id)
     if existing_task_data:
-        existing_status = StoryGenerationStatus(**existing_task_data) # Convert dict to Pydantic model
+        existing_status = StoryGenerationStatus(**existing_task_data) # 딕셔너리를 Pydantic 모델로 변환
         if existing_status.status not in ["failed", "failed_text_generation", "failed_image_generation", "failed_voice_generation", "failed_missing_outline", "failed_init_chatbot_b", "failed_runtime_error"]:
             raise HTTPException(status_code=status.HTTP_409_CONFLICT, 
                                 detail=f"Story generation for ID {story_id} is already active or completed: {existing_status.status}")
@@ -162,7 +160,7 @@ async def initiate_story_generation(
 
     try:
         input_outline_dict = outline_request.model_dump()
-        # Initial upsert with input_outline, details will be populated by background task
+        # 초기 upsert (input_outline, 상세 정보는 백그라운드 작업에서 채워짐)
         upsert_task(
             story_id=story_id,
             status="queued_for_generation",
@@ -174,19 +172,19 @@ async def initiate_story_generation(
         background_tasks.add_task(process_story_generation_task_background, story_id=story_id)
         
         logger.info(f"이야기 생성 작업 백그라운드 처리 시작됨 (ID: {story_id})")
-        # Fetch the just-created task to return its initial state as StoryGenerationStatus
-        # This ensures the returned object is consistent with what get_status would return
-        # (though details will be minimal initially)
+        # 방금 생성된 작업을 가져와서 StoryGenerationStatus 형태로 반환
+        # 이는 get_status가 반환하는 객체와 일관성을 유지합니다.
+        # (상세 정보는 초기에 최소한으로 반환됩니다.)
         created_task_data = get_task_from_db(story_id)
         if not created_task_data:
-             # This should ideally not happen if upsert_task succeeded
+            # 이는 upsert_task가 성공했다면 발생해서는 안 됩니다.
             logger.error(f"Failed to retrieve task {story_id} immediately after creation for response.")
             raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Task created but could not be retrieved.")
         return StoryGenerationStatus(**created_task_data)
 
     except Exception as e:
         logger.error(f"이야기 생성 작업 등록 또는 백그라운드 시작 실패 (ID: {story_id}): {e}", exc_info=True)
-        # No partial record to clean up from DB here as upsert_task is one operation
+    
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, 
                             detail=f"Failed to register or start story generation task: {str(e)}")
 
@@ -198,7 +196,7 @@ async def get_story_status(story_id: str):
     task_data = get_task_from_db(story_id)
     if not task_data:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Story ID {story_id} not found.")
-    return StoryGenerationStatus(**task_data) # Convert dict from DB to Pydantic model
+    return StoryGenerationStatus(**task_data) # 딕셔너리를 Pydantic 모델로 변환
 
 @router.get("/{story_id}/content", 
             response_model=GeneratedStoryResponse, 
@@ -210,7 +208,7 @@ async def get_generated_story_content(story_id: str):
     if not task_data:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Story ID {story_id} not found.")
 
-    # Convert to Pydantic model for easier field access and validation
+    # Pydantic 모델로 변환하여 필드 접근과 검증을 용이하게 합니다.
     status_info = StoryGenerationStatus(**task_data) 
 
     if status_info.status != "completed":
@@ -222,7 +220,7 @@ async def get_generated_story_content(story_id: str):
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Completed story data is missing details.")
 
     try:
-        # Details from DB (already a dict) contains full_text_content, illustrations, voice_data
+        # DB에서 가져온 상세 정보 (이미 딕셔너리)에는 full_text_content, illustrations, voice_data가 포함됩니다.
         full_text_content = status_info.details.get("full_text_content", {})
         title = full_text_content.get("title", "제목 미정")
         content = full_text_content

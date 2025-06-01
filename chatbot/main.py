@@ -19,17 +19,21 @@ import time
 import argparse
 import json
 from pathlib import Path
-from typing import Dict, Any, Optional
+
+# 경로 설정
+current_dir = os.path.dirname(os.path.abspath(__file__)) # chatbot/main.py
+parent_dir = os.path.dirname(current_dir) # CCB_AI
+sys.path.append(parent_dir) # 경로 설정
 
 # Enhanced 챗봇 시스템
-from models.chat_bot_a.chat_bot_a import ChatBotA
-from models.chat_bot_b.chat_bot_b import ChatBotB
+from chatbot.models.chat_bot_a.chat_bot_a import ChatBotA
+from chatbot.models.chat_bot_b.chat_bot_b import ChatBotB
 
 # 공통 유틸리티
 from shared.utils.logging_utils import get_module_logger
 
 # 워크플로우 모듈
-from workflow.orchestrator import WorkflowOrchestrator
+from chatbot.workflow.orchestrator import WorkflowOrchestrator
 
 logger = get_module_logger(__name__)
 

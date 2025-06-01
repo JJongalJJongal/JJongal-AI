@@ -31,7 +31,7 @@ def query_vector_db(
     Args:
         vector_db: VectorDB 인스턴스
         query_text: 쿼리 텍스트
-        collection_name: 컬렉션 이름
+        collection_name: 컬렉션 이름 (VectorDB는 이미 컬렉션이 설정된 상태)
         n_results: 반환할 결과 수
         metadata_filter: ChromaDB 'where' 절에 직접 사용될 필터
         
@@ -40,11 +40,12 @@ def query_vector_db(
     """
     logger.info(f"컬렉션 '{collection_name}'에서 '{query_text[:50]}...' 쿼리 실행. 필터: {metadata_filter}")
     try:
+        # VectorDB.query()는 collection_name을 파라미터로 받지 않음 
+        # (이미 get_collection으로 설정된 상태)
         results = vector_db.query(
-            collection_name=collection_name,
             query_texts=[query_text],
             n_results=n_results,
-            where_filter=metadata_filter
+            where=metadata_filter
         )
         return results
     except Exception as e:

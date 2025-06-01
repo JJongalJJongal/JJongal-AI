@@ -1,13 +1,8 @@
 """
 로깅 관련 유틸리티 모듈
 """
-import os
 import logging
 from typing import Optional, Union
-from pathlib import Path
-
-from .file_utils import ensure_directory
-
 
 def setup_logger(
     name: str, 
@@ -46,10 +41,6 @@ def setup_logger(
     
     # 파일 핸들러 설정
     if log_file:
-        # 로그 디렉토리 확인
-        log_dir = Path(log_file).parent
-        ensure_directory(log_dir)
-        
         file_handler = logging.FileHandler(log_file, encoding='utf-8')
         file_handler.setLevel(level)
         file_handler.setFormatter(formatter)

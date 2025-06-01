@@ -9,7 +9,8 @@ from typing import Dict, List, Any, Optional
 from fastapi import WebSocket
 
 from shared.utils.logging_utils import get_module_logger
-from ..utils import save_conversation, cleanup_temp_files
+from chatbot.utils.conversation_utils import save_conversation
+from shared.utils.file_utils import cleanup_temp_files
 
 logger = get_module_logger(__name__)
 
@@ -97,7 +98,10 @@ class ConnectionEngine:
             if "chatbot" in connection_info and "child_name" in connection_info:
                 chatbot = connection_info["chatbot"]
                 child_name = connection_info.get("child_name", "unknown")
-                await save_conversation(chatbot, child_name, client_id)
+                if not hasattr(chatbot, "get_conversation_history"):
+                    logger.error(f"[DISCONNECT] chatbot에 get_conversation_history 없음! 타입: {type(chatbot)} client_id: {client_id}")
+                else:
+                    await save_conversation(chatbot, child_name, client_id)
             
             # 임시 파일 정리
             if "temp_files" in connection_info:

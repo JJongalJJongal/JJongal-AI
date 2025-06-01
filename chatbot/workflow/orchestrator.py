@@ -8,10 +8,10 @@ CCB_AI Workflow Orchestrator
 전체 파이프라인을 자동화합니다.
 """
 
-import logging
 from typing import Dict, List, Any, Optional, Callable
 from datetime import datetime
 import os
+from shared.utils.logging_utils import get_module_logger
 
 from .story_schema import (
     StoryDataSchema, StoryStage, StoryElement, ElementType,
@@ -22,12 +22,15 @@ from .pipeline_manager import PipelineManager
 from .integration_api import IntegrationAPI
 from .multimedia_coordinator import MultimediaCoordinator
 
+# 로깅 설정
+logger = get_module_logger(__name__)
+
 # 챗봇 모듈 임포트
 try:
     from chatbot.models.chat_bot_a import ChatBotA
     from chatbot.models.chat_bot_b import ChatBotB
 except ImportError as e:
-    logging.warning(f"챗봇 모듈 임포트 실패: {e}")
+    logger.warning(f"챗봇 모듈 임포트 실패: {e}")
 
 class WorkflowOrchestrator:
     """
@@ -63,7 +66,7 @@ class WorkflowOrchestrator:
         self.config = config or {}
         
         # 로깅 설정
-        self.logger = logging.getLogger(__name__)
+        self.logger = get_module_logger(__name__)
         
         # 상태 관리자
         self.state_manager = StateManager(output_dir)
