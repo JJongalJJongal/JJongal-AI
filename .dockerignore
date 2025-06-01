@@ -1,0 +1,107 @@
+# Git 관련 파일
+.git
+.gitignore
+.gitattributes
+
+# Python 관련 파일
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# 가상환경
+venv/
+env/
+ENV/
+env.bak/
+venv.bak/
+fairy_tail/
+
+# IDE 관련
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# macOS 파일
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# 테스트 관련
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+.cache
+nosetests.xml
+coverage.xml
+*.cover
+.hypothesis/
+
+# 로그 파일
+*.log
+logs/
+server.log
+
+# 환경 설정 (민감한 정보)
+.env.local
+.env.development
+.env.test
+.env.production
+
+# 출력 파일들 (컨테이너에서 생성될 예정)
+output/
+temp/
+*.tmp
+
+# 개발 도구
+.cursor/
+.github/
+
+# Jupyter Notebook
+.ipynb_checkpoints
+
+# 기타
+README.md
+CHANGELOG.md
+LICENSE
+docs/
+
+# 테스트 응답 파일들
+chatbot/tests/responses/
+chatbot/tests/output/
+chatbot/tests/*.wav
+chatbot/tests/*.mp3
+
+# 대용량 모델 파일들 (필요시 제외)
+*.bin
+*.safetensors
+models/
+
+# 백업 파일
+*.bak
+*.backup 

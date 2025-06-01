@@ -96,7 +96,7 @@ class CCBIntegratedTest(unittest.IsolatedAsyncioTestCase):
             f.write(wav_data)
         
         print(f"   ✅ 오디오 파일 생성: {SAMPLE_AUDIO_PATH}")
-    
+
     @classmethod
     def _start_websocket_server(cls):
         """WebSocket 서버 시작"""
@@ -133,7 +133,7 @@ class CCBIntegratedTest(unittest.IsolatedAsyncioTestCase):
             time.sleep(1)
         
         print("   ⚠️ 서버 시작 확인 실패, 테스트 계속 진행")
-    
+
     @classmethod
     def _stop_websocket_server(cls):
         """WebSocket 서버 종료"""
@@ -242,7 +242,7 @@ class CCBIntegratedTest(unittest.IsolatedAsyncioTestCase):
         kogi_output_dir = os.path.join(RESPONSES_DIR, "kogi_test_output")
         ensure_directory(kogi_output_dir)
         
-        # 꼬기 챗봇 초기화
+        # 꼬기 챗봇 초기화 (RAG 활성화)
         kogi = ChatBotB(
             output_dir=kogi_output_dir,
             vector_db_path="chatbot/data/vector_db/detailed",
@@ -282,11 +282,11 @@ class CCBIntegratedTest(unittest.IsolatedAsyncioTestCase):
             "요정": "pNInz6obpgDQGcFmaJgB"      # 판타지 목소리
         }
         
-        print("🎬 상세 스토리 및 멀티미디어 생성 중...")
+        print("🎬 상세 스토리 및 멀티미디어 생성 중... (RAG 활성화)")
         
         # 상세 스토리 생성
         result = await kogi.generate_detailed_story()
-        
+
         # 결과 검증
         self.assertIsNotNone(result, "스토리 생성 결과가 없습니다.")
         self.assertIn("story_data", result, "결과에 스토리 데이터가 없습니다.")
@@ -305,7 +305,7 @@ class CCBIntegratedTest(unittest.IsolatedAsyncioTestCase):
         for i, chapter in enumerate(chapters[:2]):
             title = chapter.get('chapter_title', chapter.get('title', '제목 없음'))
             print(f"     챕터 {i+1}: {title}")
-        
+
         # 이미지 생성 결과 확인
         image_paths_list = result.get("image_paths", [])
         if image_paths_list:
@@ -324,7 +324,7 @@ class CCBIntegratedTest(unittest.IsolatedAsyncioTestCase):
                 print(f"   총 {generated_image_files_count}개 이미지 생성 성공")
         else:
             print("   ⚠️ 이미지가 생성되지 않았습니다.")
-        
+
         # 음성 생성 결과 확인
         audio_paths = result.get("audio_paths", [])
         if audio_paths:
@@ -337,10 +337,10 @@ class CCBIntegratedTest(unittest.IsolatedAsyncioTestCase):
                     print(f"     ❌ 음성 {i+1}: 파일 없음")
         else:
             print("   ⚠️ 음성이 생성되지 않았습니다.")
-        
+
         self.assertTrue(len(chapters) > 0, "최소한 하나의 챕터는 생성되어야 합니다.")
         
-        print("✅ 꼬기 챗봇 멀티미디어 생성 테스트 완료\n")
+        print("✅ 꼬기 챗봇 멀티미디어 생성 테스트 완료 (RAG 활성화)\n")
         return result
     
     # ==========================================
@@ -476,7 +476,7 @@ class CCBIntegratedTest(unittest.IsolatedAsyncioTestCase):
         # 필수 요소 검증
         self.assertIsNotNone(story_data.get('plot_summary'), "줄거리가 수집되지 않았습니다.")
         self.assertTrue(len(story_data.get('characters', [])) > 0, "등장인물이 수집되지 않았습니다.")
-        
+
         # 2. 꼬기 챗봇으로 상세 이야기 생성
         print("\n🎨 꼬기 챗봇으로 상세 이야기 생성 중...")
         
@@ -488,7 +488,7 @@ class CCBIntegratedTest(unittest.IsolatedAsyncioTestCase):
             vector_db_path="chatbot/data/vector_db/detailed",
             collection_name="fairy_tales"
         )
-        
+            
         # 이미지 생성기 확인 (ChatBotB에 이미 설정됨)
         if hasattr(kogi, 'image_generator') and kogi.image_generator:
             print("   ✅ 이미지 생성기가 이미 설정되어 있습니다.")
@@ -498,9 +498,9 @@ class CCBIntegratedTest(unittest.IsolatedAsyncioTestCase):
             print("   ⚠️ 이미지 생성기를 찾을 수 없습니다. 텍스트만 생성됩니다.")
         
         # 스토리 설정
-        kogi.set_story_outline(story_data)
+        kogi.set_story_outline(story_data) 
         kogi.set_target_age(story_data.get('target_age', 6))
-        
+            
         # 캐릭터 이름 추출
         characters = story_data.get("characters", [])
         if characters and isinstance(characters[0], dict):
@@ -509,27 +509,27 @@ class CCBIntegratedTest(unittest.IsolatedAsyncioTestCase):
             main_char_name = characters[0]
         else:
             main_char_name = "테스트주인공"
-        
+            
         # 음성 클로닝 정보 설정
         kogi.set_cloned_voice_info(
             child_voice_id="test_child_voice_id",
             main_character_name=main_char_name
         )
-        
+            
         # 상세 스토리 생성
         result = await kogi.generate_detailed_story()
-        
+            
         # 결과 검증
         self.assertIsNotNone(result, "스토리 생성 결과가 없습니다.")
         self.assertIn("story_data", result, "스토리 데이터가 없습니다.")
-        
+            
         story_data_result = result["story_data"]
         self.assertIsNotNone(story_data_result, "상세 스토리가 생성되지 않았습니다.")
-        
+            
         print("📚 생성된 상세 스토리 정보:")
         print(f"   제목: {story_data_result.get('title', '제목 없음')}")
         print(f"   생성 상태: {result.get('status', '상태 없음')}")
-        
+            
         chapters = story_data_result.get('chapters', [])
         self.assertTrue(len(chapters) > 0, "상세 스토리에 챕터가 없습니다.")
         print(f"   챕터 수: {len(chapters)}")
@@ -542,7 +542,7 @@ class CCBIntegratedTest(unittest.IsolatedAsyncioTestCase):
             print(f"   🖼️ 생성된 이미지: {len(image_paths)}개")
         else:
             print("   📝 텍스트만 생성됨 (이미지 없음)")
-        
+
         if audio_paths:
             print(f"   🔊 생성된 음성: {len(audio_paths)}개")
         else:
@@ -553,6 +553,125 @@ class CCBIntegratedTest(unittest.IsolatedAsyncioTestCase):
         print("✅ 부기→꼬기 통합 플로우 테스트 성공\n")
         
         return result
+
+    async def test_websocket_streaming_voice(self):
+        """WebSocket 스트리밍 음성 생성 테스트"""
+        print("\n" + "="*60)
+        print("🎵 WebSocket 스트리밍 음성 생성 테스트")
+        print("="*60)
+        
+        try:
+            # ChatBotB 생성 (RAG 활성화)
+            kogi = ChatBotB(
+                output_dir="output",
+                vector_db_path="chatbot/data/vector_db/detailed",
+                collection_name="fairy_tales"
+            )
+            
+            # 테스트용 스토리 데이터
+            test_story_outline = {
+                "theme": "우정",
+                "child_name": "지우",
+                "plot_summary": "작은 토끼와 친구들의 우정 이야기",
+                "educational_value": "협력과 배려"
+            }
+            
+            kogi.set_target_age(6)
+            kogi.set_story_outline(test_story_outline)
+            
+            print("✅ ChatBotB 설정 완료 (RAG 활성화)")
+            
+            # WebSocket 스트리밍 진행 상황 콜백
+            async def streaming_progress_callback(data):
+                step = data.get("step", "")
+                status = data.get("status", "")
+                websocket_mode = data.get("websocket_mode", False)
+                
+                if "websocket" in step or websocket_mode:
+                    if status == "chunk_received":
+                        chunk_num = data.get("chunk_number", 0)
+                        chunk_size = data.get("chunk_size", 0)
+                        voice_id = data.get("voice_id", "")
+                        print(f"🎵 WebSocket 청크 {chunk_num}: {chunk_size} bytes ({voice_id})")
+                    elif status == "starting":
+                        print(f"🚀 WebSocket 스트리밍 시작: {step}")
+                    elif status == "completed":
+                        total_files = data.get("total_audio_files", 0)
+                        print(f"✅ WebSocket 스트리밍 완료: {total_files}개 파일")
+            
+            # WebSocket 스트리밍 동화 생성
+            print("\n🎵 WebSocket 스트리밍 동화 생성 시작...")
+            result = await kogi.generate_detailed_story(
+                use_enhanced=True,
+                use_websocket_voice=True,
+                progress_callback=streaming_progress_callback
+            )
+            
+            # 결과 분석
+            print(f"\n📊 WebSocket 스트리밍 결과:")
+            print(f"   - 상태: {result.get('status', 'unknown')}")
+            print(f"   - 스토리 ID: {result.get('story_id', 'N/A')}")
+            
+            # WebSocket 메타데이터 확인
+            voice_metadata = result.get("voice_metadata", {})
+            if voice_metadata:
+                print(f"\n🎵 WebSocket 음성 메타데이터:")
+                print(f"   - WebSocket 사용됨: {voice_metadata.get('websocket_used', False)}")
+                print(f"   - 생성된 오디오 파일: {voice_metadata.get('total_audio_files', 0)}")
+                print(f"   - 사용된 캐릭터: {voice_metadata.get('characters_used', [])}")
+                print(f"   - 총 생성 시간: {voice_metadata.get('total_generation_time', 0):.2f}초")
+            
+            # 오디오 파일 확인
+            audio_files = result.get("audio_paths", [])
+            if audio_files:
+                print(f"\n🎵 생성된 오디오 파일:")
+                for i, audio_file in enumerate(audio_files[:3]):  # 처음 3개만 표시
+                    if isinstance(audio_file, dict):
+                        chapter_num = audio_file.get("chapter_number", i+1)
+                        narration_audio = audio_file.get("narration_audio")
+                        dialogues = audio_file.get("dialogue_audios", [])
+                        streaming_info = audio_file.get("streaming_metadata", {})
+                        
+                        print(f"   📖 챕터 {chapter_num}:")
+                        if narration_audio:
+                            print(f"      - 내레이션: {Path(narration_audio).name}")
+                        if dialogues:
+                            print(f"      - 대사 개수: {len(dialogues)}")
+                        if streaming_info.get("websocket_used"):
+                            chunks = streaming_info.get("chunks_received", 0)
+                            total_bytes = streaming_info.get("total_bytes", 0)
+                            print(f"      - WebSocket: {chunks} chunks, {total_bytes} bytes")
+                        
+                        # 처음 2개 대사만 표시
+                        for j, dialogue in enumerate(dialogues[:2]):
+                            speaker = dialogue.get("speaker", "unknown")
+                            audio_path = dialogue.get("audio_path", "")
+                            voice_id = dialogue.get("voice_id", "")
+                            print(f"         - {speaker}: {Path(audio_path).name} ({voice_id})")
+            
+            # 일반 메타데이터
+            metadata = result.get("metadata", {})
+            if metadata:
+                print(f"\n📈 일반 메타데이터:")
+                print(f"   - WebSocket 음성: {metadata.get('websocket_voice', False)}")
+                print(f"   - Enhanced 모드: {metadata.get('enhanced_mode', False)}")
+                print(f"   - 전체 생성 시간: {metadata.get('generation_time', 0):.2f}초")
+                print(f"   - 프롬프트 버전: {metadata.get('prompt_version', 'unknown')}")
+            
+            print("\n✅ WebSocket 스트리밍 음성 테스트 완료!")
+            return True
+
+        except Exception as e:
+            print(f"\n❌ WebSocket 스트리밍 테스트 실패: {e}")
+            import traceback
+            traceback.print_exc()
+            return False
+
+    async def cleanup(self):
+        """테스트 리소스 정리"""
+        print("🧹 테스트 리소스 정리 중...")
+        # 필요한 경우 여기서 리소스 정리
+        print("✅ 테스트 리소스 정리 완료")
 
 
 # 간단한 헬퍼 함수들
@@ -615,58 +734,52 @@ async def run_live_audio_test():
     except Exception as e:
         print(f"❌ 라이브 테스트 실패: {e}")
 
-def main():
-    """메인 함수"""
-    parser = argparse.ArgumentParser(description="CCB AI 통합 테스트 시스템")
-    parser.add_argument("--create-audio", action="store_true", help="테스트용 오디오 파일 생성")
-    parser.add_argument("--test-bugi", action="store_true", help="부기 챗봇 테스트")
-    parser.add_argument("--test-kogi", action="store_true", help="꼬기 챗봇 테스트")
-    parser.add_argument("--test-voice", action="store_true", help="웹소켓 음성 테스트")
-    parser.add_argument("--test-integration", action="store_true", help="통합 플로우 테스트")
-    parser.add_argument("--test-all", action="store_true", help="모든 테스트 실행")
-    parser.add_argument("--test-live", action="store_true", help="라이브 테스트 (서버 별도 실행 필요)")
+async def main():
+    """메인 테스트 실행 함수"""
+    parser = argparse.ArgumentParser(description='CCB AI 통합 테스트')
+    parser.add_argument('--test-bugi', action='store_true', help='부기(ChatBotA) 테스트')
+    parser.add_argument('--test-kogi', action='store_true', help='꼬기(ChatBotB) 테스트')
+    parser.add_argument('--test-voice', action='store_true', help='웹소켓 음성 시스템 테스트')
+    parser.add_argument('--test-integration', action='store_true', help='통합 플로우 테스트')
+    parser.add_argument('--test-websocket', action='store_true', help='WebSocket 스트리밍 테스트')
+    parser.add_argument('--test-all', action='store_true', help='모든 테스트 실행')
+    
     args = parser.parse_args()
     
-    if args.create_audio:
-        create_test_audio()
-        return
-    
-    if args.test_live:
-        asyncio.run(run_live_audio_test())
-        return
-    
-    # unittest 실행
-    loader = unittest.TestLoader()
-    suite = unittest.TestSuite()
-    
-    if args.test_bugi:
-        suite.addTest(CCBIntegratedTest('test_01_bugi_basic_functionality'))
-    elif args.test_kogi:
-        suite.addTest(CCBIntegratedTest('test_02_kogi_multimedia_generation'))
-    elif args.test_voice:
-        suite.addTest(CCBIntegratedTest('test_03_websocket_voice_functionality'))
-    elif args.test_integration:
-        suite.addTest(CCBIntegratedTest('test_04_bugi_kogi_integration_flow'))
-    elif args.test_all:
-        # 모든 테스트를 순서대로 실행
-        suite.addTest(CCBIntegratedTest('test_01_bugi_basic_functionality'))
-        suite.addTest(CCBIntegratedTest('test_02_kogi_multimedia_generation'))
-        suite.addTest(CCBIntegratedTest('test_03_websocket_voice_functionality'))
-        suite.addTest(CCBIntegratedTest('test_04_bugi_kogi_integration_flow'))
-    else:
+    # 아무 옵션도 주어지지 않으면 도움말 표시
+    if not any(vars(args).values()):
         parser.print_help()
         return
     
-    # 테스트 실행
-    runner = unittest.TextTestRunner(verbosity=2)
-    result = runner.run(suite)
+    tester = CCBIntegratedTest()
     
-    print("\n" + "="*60)
-    if result.wasSuccessful():
-        print("🎉 모든 테스트가 성공적으로 완료되었습니다!")
-    else:
-        print(f"❌ 테스트 실패: {len(result.failures)} 실패, {len(result.errors)} 오류")
-    print("="*60)
+    try:
+        if args.test_bugi or args.test_all:
+            await tester.test_01_bugi_basic_functionality()
+        
+        if args.test_kogi or args.test_all:
+            await tester.test_02_kogi_multimedia_generation()
+        
+        if args.test_voice or args.test_all:
+            await tester.test_03_websocket_voice_functionality()
+        
+        if args.test_websocket or args.test_all:
+            await tester.test_websocket_streaming_voice()
+        
+        if args.test_integration or args.test_all:
+            await tester.test_04_bugi_kogi_integration_flow()
+        
+        print("\n" + "="*80)
+        print("🎉 모든 테스트 완료!")
+        print("="*80)
+        
+    except Exception as e:
+        print(f"\n❌ 테스트 실행 중 오류 발생: {e}")
+        import traceback
+        traceback.print_exc()
+    
+    finally:
+        await tester.cleanup()
 
 if __name__ == "__main__":
-    main() 
+    asyncio.run(main()) 

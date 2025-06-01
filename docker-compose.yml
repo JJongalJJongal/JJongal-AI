@@ -1,0 +1,92 @@
+version: '3.8'
+
+services:
+  # 꼬꼬북 메인 애플리케이션
+  ccb-ai:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: ccb-ai:latest
+    container_name: ccb-ai-app
+    ports:
+      - "8000:8000"
+    environment:
+      # 환경 변수는 .env 파일에서 로드
+      - PYTHONPATH=/app
+      - APP_ENV=production
+      # API 키들은 .env 파일에서 설정
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - ELEVENLABS_API_KEY=${ELEVENLABS_API_KEY}
+      # 데이터베이스 설정
+      - CHROMA_DB_PATH=/app/data/vector_db
+    volumes:
+      # 출력 파일들을 호스트에 저장
+      - ./output:/app/output
+      - ./chatbot/data:/app/chatbot/data
+      # 로그 파일 저장
+      - ./logs:/app/logs
+      # 환경 설정 파일 (선택적)
+      - ./.env:/app/.env:ro
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    restart: unless-stopped
+    depends_on:
+      - redis
+    networks:
+      - ccb-network
+
+  # Redis (캐싱 및 세션 관리용)
+  redis:
+    image: redis:7-alpine
+    container_name: ccb-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+    restart: unless-stopped
+    networks:
+      - ccb-network
+
+  # Nginx (리버스 프록시 및 로드 밸런싱)
+  nginx:
+    image: nginx:alpine
+    container_name: ccb-nginx
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./ssl:/etc/nginx/ssl:ro
+    depends_on:
+      - ccb-ai
+    restart: unless-stopped
+    networks:
+      - ccb-network
+
+# 볼륨 정의
+volumes:
+  redis_data:
+    driver: local
+  vector_db_data:
+    driver: local
+  output_data:
+    driver: local
+
+# 네트워크 정의
+networks:
+  ccb-network:
+    driver: bridge
+    name: ccb-network
+
+# 개발 환경용 오버라이드 (docker-compose.override.yml)
+# 개발 시에는 다음과 같이 실행:
+# docker-compose -f docker-compose.yml -f docker-compose.dev.yml up 

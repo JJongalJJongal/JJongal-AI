@@ -1,0 +1,34 @@
+version: '3.8'
+
+services:
+  ccb-ai:
+    # 개발 환경에서는 소스 코드를 마운트하여 실시간 변경 반영
+    volumes:
+      - .:/app
+      - ./output:/app/output
+      - ./logs:/app/logs
+    environment:
+      - APP_ENV=development
+      - PYTHONPATH=/app
+    # 개발 모드로 실행 (--reload 옵션 추가)
+    command: ["uvicorn", "chatbot.models.voice_ws.app:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]
+    
+  # 개발 환경에서는 Nginx 제외
+  nginx:
+    profiles:
+      - production
+
+  # 개발용 추가 서비스들
+  jupyter:
+    image: jupyter/scipy-notebook:latest
+    container_name: ccb-jupyter
+    ports:
+      - "8888:8888"
+    volumes:
+      - .:/home/jovyan/work
+    environment:
+      - JUPYTER_ENABLE_LAB=yes
+    networks:
+      - ccb-network
+    profiles:
+      - dev-tools 

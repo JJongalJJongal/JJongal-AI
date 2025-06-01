@@ -210,12 +210,14 @@ class ChatBotB:
     
     async def generate_detailed_story(self, 
                                     use_enhanced: bool = None,
+                                    use_websocket_voice: bool = True,
                                     progress_callback: Optional[Callable] = None) -> Dict[str, Any]:
         """
-        상세 동화 생성 (메인 메서드)
+        상세 동화 생성 (메인 메서드, WebSocket 스트리밍 지원)
         
         Args:
             use_enhanced: Enhanced 생성기 사용 여부 (None이면 초기화 설정 사용)
+            use_websocket_voice: WebSocket 음성 스트리밍 사용 여부 (기본 True)
             progress_callback: 진행 상황 콜백 함수
             
         Returns:
@@ -248,15 +250,24 @@ class ChatBotB:
                 **self.story_outline,
                 "age_group": self.target_age,
                 "target_age": self.target_age,
-                "enhanced_mode": use_enhanced_mode
+                "enhanced_mode": use_enhanced_mode,
+                "websocket_voice": use_websocket_voice
             }
             
             if use_enhanced_mode and self.enhanced_text_generator:
                 # Enhanced 모드로 생성
-                result = await self._generate_with_enhanced_mode(enhanced_outline, progress_callback)
+                result = await self._generate_with_enhanced_mode(
+                    enhanced_outline, 
+                    use_websocket_voice,
+                    progress_callback
+                )
             else:
                 # 기본 모드로 생성
-                result = await self.story_engine.generate_complete_story(enhanced_outline)
+                result = await self._generate_with_basic_mode(
+                    enhanced_outline,
+                    use_websocket_voice,
+                    progress_callback
+                )
         
             # 성능 메트릭 업데이트
             generation_time = time.time() - start_time
@@ -267,8 +278,9 @@ class ChatBotB:
             result["metadata"] = result.get("metadata", {})
             result["metadata"].update({
                 "enhanced_mode": use_enhanced_mode,
+                "websocket_voice": use_websocket_voice,
                 "generation_time": generation_time,
-                "prompt_version": "2.0_enhanced" if use_enhanced_mode else "1.0_basic",
+                "prompt_version": "2.0_enhanced_websocket" if use_enhanced_mode else "1.0_basic_websocket",
                 "age_group": age_group_key
             })
             
@@ -280,8 +292,9 @@ class ChatBotB:
 
     async def _generate_with_enhanced_mode(self, 
                                          enhanced_outline: Dict[str, Any],
+                                         use_websocket_voice: bool,
                                          progress_callback: Optional[Callable] = None) -> Dict[str, Any]:
-        """생성자 모드로 완전한 스토리 생성"""
+        """Enhanced 생성기 모드로 완전한 스토리 생성"""
         
         # 1. Enhanced 텍스트 생성
         if progress_callback:
@@ -308,30 +321,61 @@ class ChatBotB:
             "story_id": story_data.get("story_id")
         }, progress_callback)
         
-        # 3. 음성 생성 (기본 생성기 사용)
+        # 3. 음성 생성 (WebSocket 지원)
         if progress_callback:
             await progress_callback({
                 "step": "voice_generation",
-                "status": "starting"
+                "status": "starting",
+                "websocket_enabled": use_websocket_voice
             })
         
         voice_data = await self.voice_generator.generate({
             "story_data": story_data,
             "story_id": story_data.get("story_id")
-        }, progress_callback)
+        }, progress_callback, use_websocket=use_websocket_voice)
         
         # 4. 결과 통합
         return {
             "story_data": story_data,
             "image_paths": [img.get("image_path") for img in image_data.get("images", [])],
-            "audio_paths": voice_data.get("audio_paths", []),
+            "audio_paths": voice_data.get("audio_files", []),
             "story_id": story_data.get("story_id"),
             "status": "enhanced_complete",
             "enhanced_metadata": {
                 "text_metrics": self.enhanced_text_generator.get_performance_metrics(),
                 "image_metrics": self.enhanced_image_generator.get_performance_metrics()
-            }
+            },
+            "voice_metadata": voice_data.get("metadata", {})
         }
+    
+    async def _generate_with_basic_mode(self, 
+                                      enhanced_outline: Dict[str, Any],
+                                      use_websocket_voice: bool,
+                                      progress_callback: Optional[Callable] = None) -> Dict[str, Any]:
+        """기본 모드로 스토리 생성 (WebSocket 음성 지원)"""
+        
+        # 기본 StoryEngine 사용하되 WebSocket 음성은 별도 처리
+        story_result = await self.story_engine.generate_complete_story(enhanced_outline)
+        
+        # WebSocket 음성 생성
+        if progress_callback:
+            await progress_callback({
+                "step": "voice_generation",
+                "status": "starting",
+                "websocket_enabled": use_websocket_voice
+            })
+        
+        voice_data = await self.voice_generator.generate({
+            "story_data": story_result.get("story_data", {}),
+            "story_id": story_result.get("story_id")
+        }, progress_callback, use_websocket=use_websocket_voice)
+        
+        # 기존 결과와 음성 결과 통합
+        story_result["audio_paths"] = voice_data.get("audio_files", [])
+        story_result["voice_metadata"] = voice_data.get("metadata", {})
+        story_result["status"] = "basic_complete"
+        
+        return story_result
     
     async def generate_text_only(self, 
                                 use_enhanced: bool = None,

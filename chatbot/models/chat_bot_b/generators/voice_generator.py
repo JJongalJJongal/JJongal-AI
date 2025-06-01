@@ -2,11 +2,15 @@
 음성 생성기
 ElevenLabs API를 사용한 챕터별 음성 생성
 등장인물별 다른 음성 지원
+WebSocket 실시간 스트리밍 지원
 """
 
 from shared.utils.logging_utils import get_module_logger
 import uuid
 import asyncio
+import json
+import base64
+import websockets
 from typing import Dict, Any, Optional, Callable, List
 from pathlib import Path
 import aiohttp
@@ -181,9 +185,10 @@ class VoiceGenerator(BaseGenerator):
 
     async def generate(self, 
                       input_data: Dict[str, Any], 
-                      progress_callback: Optional[Callable] = None) -> Dict[str, Any]:
+                      progress_callback: Optional[Callable] = None,
+                      use_websocket: bool = True) -> Dict[str, Any]:
         """
-        챕터별 음성 생성 (등장인물별 다른 음성 지원)
+        챕터별 음성 생성 (등장인물별 다른 음성 지원, WebSocket 스트리밍 지원)
         
         Args:
             input_data: {
@@ -211,6 +216,7 @@ class VoiceGenerator(BaseGenerator):
                 }
             }
             progress_callback: 진행 상황 콜백
+            use_websocket: WebSocket 스트리밍 사용 여부 (기본 True)
             
         Returns:
             {
@@ -233,13 +239,19 @@ class VoiceGenerator(BaseGenerator):
                     "total_audio_files": 생성된 오디오 파일 수,
                     "characters_used": ["사용된 캐릭터 목록"],
                     "voice_mapping": {"캐릭터": "음성ID"},
-                    "total_generation_time": 총 생성 시간
+                    "total_generation_time": 총 생성 시간,
+                    "websocket_used": WebSocket 사용 여부
                 }
             }
         """
         
         task_id = str(uuid.uuid4())
         self.current_task_id = task_id
+        
+        # WebSocket 사용 여부 결정
+        use_websocket_streaming = use_websocket and bool(self.api_key)
+        if use_websocket and not self.api_key:
+            logger.warning("ElevenLabs API 키가 없어 WebSocket 스트리밍을 사용할 수 없습니다. HTTP API를 사용합니다.")
         
         try:
             story_data = input_data.get("story_data", {})
@@ -262,7 +274,8 @@ class VoiceGenerator(BaseGenerator):
                     "step": "voice_generation",
                     "status": "starting",
                     "total_chapters": len(chapters),
-                    "task_id": task_id
+                    "task_id": task_id,
+                    "websocket_mode": use_websocket_streaming
                 })
             
             generated_audio = []
@@ -278,15 +291,23 @@ class VoiceGenerator(BaseGenerator):
                         "status": "processing_chapter",
                         "current_chapter": i + 1,
                         "total_chapters": len(chapters),
-                        "chapter_title": chapter.get("chapter_title", "")
+                        "chapter_title": chapter.get("chapter_title", ""),
+                        "websocket_mode": use_websocket_streaming
                     })
                 
-                # 챕터별 음성 생성
-                chapter_audio = await self._generate_chapter_audio(
-                    chapter=chapter,
-                    story_id=story_id,
-                    model_id=current_model_id
-                )
+                # 챕터별 음성 생성 (WebSocket 또는 HTTP)
+                if use_websocket_streaming:
+                    chapter_audio = await self._generate_chapter_audio_websocket(
+                        chapter=chapter,
+                        story_id=story_id,
+                        progress_callback=progress_callback
+                    )
+                else:
+                    chapter_audio = await self._generate_chapter_audio_http(
+                        chapter=chapter,
+                        story_id=story_id,
+                        model_id=current_model_id
+                    )
                 
                 # 사용된 캐릭터 추적
                 if "dialogue_audios" in chapter_audio:
@@ -304,14 +325,16 @@ class VoiceGenerator(BaseGenerator):
                         "status": "chapter_completed",
                         "current_chapter": i + 1,
                         "total_chapters": len(chapters),
-                        "generation_time": chapter_generation_time
+                        "generation_time": chapter_generation_time,
+                        "websocket_mode": use_websocket_streaming
                     })
             
             if progress_callback:
                 await progress_callback({
                     "step": "voice_generation",
                     "status": "completed",
-                    "total_audio_files": len(generated_audio)
+                    "total_audio_files": len(generated_audio),
+                    "websocket_mode": use_websocket_streaming
                 })
             
             return {
@@ -322,19 +345,24 @@ class VoiceGenerator(BaseGenerator):
                     "voice_mapping": self.character_voice_mapping,
                     "total_generation_time": self.total_generation_time,
                     "story_id": story_id,
-                    "task_id": task_id
+                    "task_id": task_id,
+                    "websocket_used": use_websocket_streaming
                 }
             }
             
         except Exception as e:
             logger.error(f"음성 생성 실패 (task_id: {task_id}): {e}")
+            # WebSocket 실패 시 HTTP로 폴백
+            if use_websocket_streaming:
+                logger.info("WebSocket 실패 - HTTP API로 폴백 시도")
+                return await self.generate(input_data, progress_callback, use_websocket=False)
             raise
     
-    async def _generate_chapter_audio(self, 
-                                    chapter: Dict[str, Any], 
-                                    story_id: str,
-                                    model_id: str) -> Dict[str, Any]:
-        """단일 챕터의 음성 생성 (내레이션 + 대사)"""
+    async def _generate_chapter_audio_http(self, 
+                                         chapter: Dict[str, Any], 
+                                         story_id: str,
+                                         model_id: str) -> Dict[str, Any]:
+        """HTTP API를 사용한 단일 챕터 음성 생성"""
         
         chapter_number = chapter.get("chapter_number", 1)
         narration = chapter.get("narration", "")
@@ -349,7 +377,7 @@ class VoiceGenerator(BaseGenerator):
         
         # 1. 내레이션 음성 생성
         if narration:
-            narration_audio = await self._generate_single_audio(
+            narration_audio = await self._generate_single_audio_http(
                 text=narration,
                 voice_id=self.narrator_voice_id,
                 voice_settings=self.character_voice_settings["narrator"],
@@ -368,7 +396,7 @@ class VoiceGenerator(BaseGenerator):
                 voice_id = self.get_voice_for_character(speaker)
                 voice_settings = self.get_voice_settings_for_character(speaker)
                 
-                dialogue_audio = await self._generate_single_audio(
+                dialogue_audio = await self._generate_single_audio_http(
                     text=text,
                     voice_id=voice_id,
                     voice_settings=voice_settings,
@@ -383,8 +411,90 @@ class VoiceGenerator(BaseGenerator):
                     "voice_id": voice_id
                 })
         
-        # 3. 통합 오디오 생성 (선택적)
-        # TODO: 내레이션과 대사를 순서대로 결합하는 기능 추가 가능
+        return result
+    
+    async def _generate_chapter_audio_websocket(self, 
+                                              chapter: Dict[str, Any], 
+                                              story_id: str,
+                                              progress_callback: Optional[Callable] = None) -> Dict[str, Any]:
+        """WebSocket을 사용한 단일 챕터 스트리밍 음성 생성"""
+        
+        chapter_number = chapter.get("chapter_number", 1)
+        narration = chapter.get("narration", "")
+        dialogues = chapter.get("dialogues", [])
+        
+        result = {
+            "chapter_number": chapter_number,
+            "narration_audio": None,
+            "dialogue_audios": [],
+            "combined_audio": None,
+            "streaming_metadata": {
+                "chunks_received": 0,
+                "total_bytes": 0,
+                "websocket_used": True
+            }
+        }
+        
+        # 1. 내레이션 스트리밍 음성 생성
+        if narration:
+            narration_audio, streaming_info = await self._generate_single_audio_websocket(
+                text=narration,
+                voice_id=self.narrator_voice_id,
+                voice_settings=self.character_voice_settings["narrator"],
+                filename_prefix=f"narration_ch{chapter_number}_{story_id[:8]}",
+                progress_callback=progress_callback
+            )
+            result["narration_audio"] = str(narration_audio)
+            result["streaming_metadata"]["narration_chunks"] = streaming_info["chunks_received"]
+        
+        # 2. 대사별 스트리밍 음성 생성
+        for i, dialogue in enumerate(dialogues):
+            speaker = dialogue.get("speaker", "unknown")
+            text = dialogue.get("text", "")
+            
+            if text:
+                # 캐릭터에 맞는 음성 ID와 설정 가져오기
+                voice_id = self.get_voice_for_character(speaker)
+                voice_settings = self.get_voice_settings_for_character(speaker)
+                
+                try:
+                    dialogue_audio, streaming_info = await self._generate_single_audio_websocket(
+                        text=text,
+                        voice_id=voice_id,
+                        voice_settings=voice_settings,
+                        filename_prefix=f"dialogue_ch{chapter_number}_{i}_{story_id[:8]}",
+                        progress_callback=progress_callback
+                    )
+                    
+                    result["dialogue_audios"].append({
+                        "speaker": speaker,
+                        "audio_path": str(dialogue_audio),
+                        "text": text,
+                        "voice_id": voice_id,
+                        "streaming_info": streaming_info
+                    })
+                    
+                    result["streaming_metadata"]["chunks_received"] += streaming_info["chunks_received"]
+                    result["streaming_metadata"]["total_bytes"] += streaming_info["total_bytes"]
+                    
+                except Exception as e:
+                    logger.warning(f"WebSocket 대사 생성 실패 ({speaker}), HTTP로 폴백: {e}")
+                    # WebSocket 실패 시 HTTP로 폴백
+                    dialogue_audio = await self._generate_single_audio_http(
+                        text=text,
+                        voice_id=voice_id,
+                        voice_settings=voice_settings,
+                        model_id=self.model_id,
+                        filename_prefix=f"dialogue_ch{chapter_number}_{i}_{story_id[:8]}"
+                    )
+                    
+                    result["dialogue_audios"].append({
+                        "speaker": speaker,
+                        "audio_path": str(dialogue_audio),
+                        "text": text,
+                        "voice_id": voice_id,
+                        "fallback_used": True
+                    })
         
         return result
     
@@ -439,13 +549,13 @@ class VoiceGenerator(BaseGenerator):
         
         return text.strip()
     
-    async def _generate_single_audio(self, 
-                                   text: str, 
-                                   voice_id: str,
-                                   voice_settings: Dict[str, Any],
-                                   model_id: str,
-                                   filename_prefix: str) -> Path:
-        """단일 오디오 생성"""
+    async def _generate_single_audio_http(self, 
+                                         text: str, 
+                                         voice_id: str,
+                                         voice_settings: Dict[str, Any],
+                                         model_id: str,
+                                         filename_prefix: str) -> Path:
+        """HTTP API를 사용한 단일 오디오 생성"""
         
         try:
             # API 요청 데이터
@@ -474,11 +584,11 @@ class VoiceGenerator(BaseGenerator):
             with open(audio_path, 'wb') as f:
                 f.write(audio_data)
             
-            logger.info(f"음성 생성 완료: {audio_path} ({len(audio_data)} bytes)")
+            logger.info(f"HTTP 음성 생성 완료: {audio_path} ({len(audio_data)} bytes)")
             return audio_path
             
         except Exception as e:
-            logger.error(f"음성 생성 실패 ({filename_prefix}): {e}")
+            logger.error(f"HTTP 음성 생성 실패 ({filename_prefix}): {e}")
             raise
     
     async def get_available_voices(self) -> List[Dict[str, Any]]:
@@ -557,3 +667,120 @@ class VoiceGenerator(BaseGenerator):
         avg_time_per_1000_chars = 10.0
         base_time = (text_length / 1000) * avg_time_per_1000_chars
         return base_time * num_characters
+
+    async def _generate_single_audio_websocket(self, 
+                                             text: str, 
+                                             voice_id: str,
+                                             voice_settings: Dict[str, Any],
+                                             filename_prefix: str,
+                                             progress_callback: Optional[Callable] = None) -> tuple[Path, Dict[str, Any]]:
+        """WebSocket을 사용한 단일 오디오 스트리밍 생성"""
+        
+        try:
+            # WebSocket URI 구성
+            model_id = "eleven_flash_v2_5"  # 낮은 지연시간을 위한 모델
+            uri = f"wss://api.elevenlabs.io/v1/text-to-speech/{voice_id}/stream-input?model_id={model_id}"
+            
+            # 오디오 파일 경로 설정
+            audio_filename = f"{filename_prefix}.mp3"
+            audio_path = self.temp_storage_path / audio_filename
+            
+            # 스트리밍 정보 추적
+            streaming_info = {
+                "chunks_received": 0,
+                "total_bytes": 0,
+                "first_chunk_time": None,
+                "total_time": None
+            }
+            
+            start_time = asyncio.get_event_loop().time()
+            
+            # WebSocket 연결 및 스트리밍
+            async with websockets.connect(
+                uri, 
+                extra_headers={"xi-api-key": self.api_key}
+            ) as websocket:
+                
+                # 1. 초기화 메시지 전송 (음성 설정)
+                init_message = {
+                    "text": " ",  # 공백으로 연결 유지
+                    "voice_settings": voice_settings,
+                    "generation_config": {
+                        "chunk_length_schedule": [120, 160, 250, 290]  # 기본 설정
+                    }
+                }
+                await websocket.send(json.dumps(init_message))
+                
+                # 2. 텍스트 전송
+                text_message = {"text": text}
+                await websocket.send(json.dumps(text_message))
+                
+                # 3. 종료 신호 전송
+                end_message = {"text": ""}
+                await websocket.send(json.dumps(end_message))
+                
+                # 4. 오디오 데이터 수신 및 저장
+                audio_chunks = []
+                
+                while True:
+                    try:
+                        message = await websocket.recv()
+                        data = json.loads(message)
+                        
+                        if data.get("audio"):
+                            # 첫 번째 청크 시간 기록
+                            if streaming_info["first_chunk_time"] is None:
+                                streaming_info["first_chunk_time"] = asyncio.get_event_loop().time() - start_time
+                            
+                            # Base64 디코딩 및 저장
+                            audio_chunk = base64.b64decode(data["audio"])
+                            audio_chunks.append(audio_chunk)
+                            
+                            streaming_info["chunks_received"] += 1
+                            streaming_info["total_bytes"] += len(audio_chunk)
+                            
+                            # 진행 상황 콜백
+                            if progress_callback:
+                                await progress_callback({
+                                    "step": "websocket_audio_streaming",
+                                    "status": "chunk_received",
+                                    "chunk_number": streaming_info["chunks_received"],
+                                    "chunk_size": len(audio_chunk),
+                                    "voice_id": voice_id,
+                                    "filename": filename_prefix
+                                })
+                        
+                        elif data.get('isFinal'):
+                            logger.info(f"WebSocket 스트리밍 완료: {filename_prefix}")
+                            break
+                            
+                    except websockets.exceptions.ConnectionClosed:
+                        logger.info(f"WebSocket 연결 종료: {filename_prefix}")
+                        break
+                
+                # 5. 전체 오디오 파일 저장
+                with open(audio_path, 'wb') as f:
+                    for chunk in audio_chunks:
+                        f.write(chunk)
+                
+                streaming_info["total_time"] = asyncio.get_event_loop().time() - start_time
+                
+                logger.info(f"WebSocket 음성 생성 완료: {audio_path} "
+                          f"({streaming_info['chunks_received']} chunks, "
+                          f"{streaming_info['total_bytes']} bytes, "
+                          f"TTFB: {streaming_info['first_chunk_time']:.2f}s)")
+                
+                return audio_path, streaming_info
+                
+        except Exception as e:
+            logger.error(f"WebSocket 음성 생성 실패 ({filename_prefix}): {e}")
+            # WebSocket 실패 시 HTTP API로 폴백
+            logger.info(f"WebSocket 실패 - HTTP API로 폴백: {filename_prefix}")
+            fallback_path = await self._generate_single_audio_http(
+                text=text,
+                voice_id=voice_id,
+                voice_settings=voice_settings,
+                model_id="eleven_multilingual_v2",
+                filename_prefix=filename_prefix
+            )
+            return fallback_path, {"websocket_fallback": True, "chunks_received": 0, "total_bytes": 0}
