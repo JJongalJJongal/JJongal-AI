@@ -59,7 +59,7 @@ if FASTAPI_AVAILABLE:
         name: str = Field(..., min_length=1, max_length=50, description="아이 이름")
         age: int = Field(..., ge=3, le=12, description="아이 나이 (3-12세)")
         interests: List[str] = Field(default=[], max_items=10, description="관심사 목록")
-        language_level: str = Field(default="basic", regex="^(basic|intermediate|advanced)$", description="언어 수준")
+        language_level: str = Field(default="basic", pattern="^(basic|intermediate|advanced)$", description="언어 수준")
         special_needs: List[str] = Field(default=[], max_items=5, description="특별한 요구사항")
         
         @field_validator('interests')
@@ -77,7 +77,7 @@ if FASTAPI_AVAILABLE:
         enable_multimedia: bool = Field(True, description="멀티미디어 생성 활성화")
         
         class Config:
-            max_anystr_length = 10000  # 전체 요청 크기 제한
+            str_max_length = 10000  # 전체 요청 크기 제한
     
     class StandardResponse(BaseModel):
         """표준 응답 모델"""
@@ -515,4 +515,19 @@ class IntegrationAPI:
         if age <= 7:
             return AgeGroup.YOUNG_CHILDREN
         else:
-            return AgeGroup.ELEMENTARY 
+            return AgeGroup.ELEMENTARY
+
+# Global app instance for uvicorn
+# This is what uvicorn will look for when starting the server
+if FASTAPI_AVAILABLE:
+    # Create the integration API instance
+    integration_api = IntegrationAPI()
+    
+    # Export the app instance for uvicorn
+    app = integration_api.app
+    
+    # Note: The orchestrator will be set later when the system initializes
+else:
+    # Fallback for when FastAPI is not available
+    app = None
+    integration_api = None 
