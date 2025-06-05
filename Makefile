@@ -79,7 +79,7 @@ demo-status:
 	@docker ps --format "table {{.Names}}\t{{.Status}}\t{{.Ports}}" | grep -E "(ccb-|NAMES)"
 	@echo ""
 	@echo "헬스체크:"
-	@curl -s http://localhost:8000/health | jq '.' || echo "API 서버 연결 실패"
+	@curl -s http://localhost:8000/api/v1/health | jq '.' || echo "API 서버 연결 실패"
 	@echo ""
 	@echo "메모리 사용량:"
 	@docker stats --no-stream --format "table {{.Name}}\t{{.MemUsage}}\t{{.MemPerc}}" | grep -E "(ccb-|NAME)"
@@ -90,7 +90,7 @@ demo-test:
 	@echo "꼬꼬북 AI 기능 테스트 중..."
 	@echo ""
 	@echo "1️⃣ API 헬스체크:"
-	@curl -s http://localhost:8000/health || echo "실패"
+	@curl -s http://localhost:8000/api/v1/health || echo "실패"
 	@echo ""
 	@echo "2️⃣ WebSocket 연결 테스트:"
 	@curl -s "http://localhost:8000/ws/test" || echo "WebSocket 테스트 실패"
@@ -136,7 +136,7 @@ test:
 # 헬스체크
 .PHONY: health
 health:
-	curl -f http://localhost:8000/health
+	curl -f http://localhost:8000/api/v1/health
 
 # 성능 모니터링
 .PHONY: monitor
@@ -151,7 +151,7 @@ monitor:
 		docker stats --no-stream --format "table {{.Name}}\t{{.CPUPerc}}\t{{.MemUsage}}\t{{.MemPerc}}\t{{.NetIO}}" | grep -E "(ccb-|NAME)"; \
 		echo ""; \
 		echo "API 응답 시간:"; \
-		curl -w "응답시간: %{time_total}s\n" -s -o /dev/null http://localhost:8000/health || echo "❌ API 연결 실패"; \
+		curl -w "응답시간: %{time_total}s\n" -s -o /dev/null http://localhost:8000/api/v1/health || echo "❌ API 연결 실패"; \
 		sleep 5; \
 	done
 

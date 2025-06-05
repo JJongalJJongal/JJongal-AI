@@ -99,7 +99,7 @@ USER ccb_user
 
 # 헬스체크 설정
 HEALTHCHECK --interval=30s --timeout=10s --start-period=90s --retries=3 \
-    CMD curl -f http://localhost:8000/health || exit 1
+    CMD curl -f http://localhost:8000/api/v1/health || exit 1
 
 # 시작 스크립트 생성
 RUN echo '#!/bin/bash\n\
