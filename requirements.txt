@@ -30,7 +30,7 @@ durationpy==0.10
 elevenlabs==1.59.0
 enum-tools==0.13.0
 exa-py==1.13.1
-fastapi==0.115.12
+fastapi==0.115.9
 filelock==3.18.0
 flatbuffers==25.2.10
 fonttools==4.58.0
@@ -74,13 +74,6 @@ llvmlite==0.44.0
 markdown-it-py==3.0.0
 MarkupSafe==3.0.2
 marshmallow==3.26.1
-matplotlib==3.10.3
-mcp==1.9.0
-mcp-neo4j-cypher==0.2.1
-mcp-server-git==2025.1.14
-mcp-server-mas-sequential-thinking==0.2.3
-mcp-server-neo4j==0.1.5
-mcp-server-time==0.6.2
 mdurl==0.1.2
 mmh3==5.1.0
 more-itertools==10.7.0
@@ -127,8 +120,6 @@ PyJWT==2.8.0
 pyparsing==3.2.3
 PyPika==0.48.9
 pyproject_hooks==1.2.0
-pytest==8.3.5
-pytest-mock==3.14.0
 python-dateutil==2.9.0.post0
 python-dotenv==1.1.0
 python-multipart==0.0.20
@@ -177,7 +168,6 @@ uvloop==0.19.0
 watchfiles==1.0.5
 websocket-client==1.8.0
 websockets==12.0
-whisper==1.1.10
 wrapt==1.17.2
 yarl==1.20.0
 zipp==3.21.0

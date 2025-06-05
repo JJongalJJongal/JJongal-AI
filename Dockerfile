@@ -4,7 +4,7 @@
 # =============================================================================
 # Stage 1: Build Stage - 빌드 도구 및 컴파일 의존성 설치
 # =============================================================================
-FROM python:3.11-slim as builder
+FROM python:3.11-slim AS builder
 
 # 빌드 인수
 ARG DEBIAN_FRONTEND=noninteractive
@@ -32,7 +32,7 @@ RUN pip install --no-cache-dir -r /tmp/requirements.txt
 # =============================================================================
 # Stage 2: Runtime Stage - 실행 환경 구성
 # =============================================================================
-FROM python:3.11-slim as runtime
+FROM python:3.11-slim AS runtime
 
 # 빌드 인수
 ARG DEBIAN_FRONTEND=noninteractive
@@ -68,16 +68,15 @@ RUN chown -R ccb_user:ccb_user /app
 RUN mkdir -p /app/output \
              /app/logs \
              /app/chatbot/data/vector_db \
-             /app/chatbot/data/processed \
-             /app/chatbot/data/raw \
+             /app/chatbot/data/prompts \
              /app/shared \
     && chown -R ccb_user:ccb_user /app
 
-# 애플리케이션 코드 복사
+# 애플리케이션 코드 복사 (경량화된 데이터만)
 COPY --chown=ccb_user:ccb_user . /app/
 
 # Python 경로 설정
-ENV PYTHONPATH="/app:$PYTHONPATH"
+ENV PYTHONPATH="/app"
 ENV PYTHONUNBUFFERED=1
 ENV PYTHONDONTWRITEBYTECODE=1
 
@@ -88,7 +87,7 @@ ENV CHROMA_DB_PATH=/app/chatbot/data/vector_db
 ENV LOG_LEVEL=INFO
 
 # 성능 최적화 설정
-ENV TORCH_NUM_THREADS=4
+ENV TORCH_NUM_THREADS=4 
 ENV OMP_NUM_THREADS=4
 ENV TOKENIZERS_PARALLELISM=false
 

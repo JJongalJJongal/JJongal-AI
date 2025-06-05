@@ -5,6 +5,10 @@ CCB_AI Integration API
 통합을 위한 RESTful API를 제공.
 """
 
+import os
+# HuggingFace Tokenizers 병렬 처리 경고 해결
+os.environ["TOKENIZERS_PARALLELISM"] = "false"
+
 import asyncio
 import logging
 from typing import Dict, List, Any, Optional
@@ -17,7 +21,7 @@ try:
     from fastapi import FastAPI, HTTPException, Depends, Request
     from fastapi.middleware.cors import CORSMiddleware
     from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
-    from pydantic import BaseModel, Field, validator
+    from pydantic import BaseModel, Field, field_validator
     from slowapi import Limiter, _rate_limit_exceeded_handler
     from slowapi.util import get_remote_address
     from slowapi.errors import RateLimitExceeded
@@ -58,7 +62,7 @@ if FASTAPI_AVAILABLE:
         language_level: str = Field(default="basic", regex="^(basic|intermediate|advanced)$", description="언어 수준")
         special_needs: List[str] = Field(default=[], max_items=5, description="특별한 요구사항")
         
-        @validator('interests')
+        @field_validator('interests')
         def validate_interests(cls, v):
             for interest in v:
                 if len(interest) > 30:

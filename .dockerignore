@@ -67,13 +67,13 @@ coverage.xml
 logs/
 server.log
 
-# 환경 설정 (민감한 정보)
+# 환경 설정 (API Key 등)
 .env.local
 .env.development
 .env.test
 .env.production
 
-# 출력 파일들 (컨테이너에서 생성될 예정)
+# 출력 파일들 
 output/
 temp/
 *.tmp
@@ -101,6 +101,13 @@ chatbot/tests/*.mp3
 *.bin
 *.safetensors
 models/
+
+# 대용량 원본 데이터 (VectorDB는 포함하지 않았음.)
+chatbot/data/raw/
+chatbot/data/processed/
+chatbot/data/results/
+chatbot/data/*.ipynb
+chatbot/data/analyze_story_data.py
 
 # 백업 파일
 *.bak

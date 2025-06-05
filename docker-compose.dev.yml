@@ -9,6 +9,10 @@ services:
       - .:/app
       - ./output:/app/output
       - ./logs:/app/logs
+      # 개발 환경에서는 raw 데이터 제외 (VectorDB만 사용)
+      - /app/chatbot/data/raw
+      - /app/chatbot/data/processed
+      - /app/chatbot/data/results
     environment:
       - APP_ENV=development
       - PYTHONPATH=/app

@@ -25,7 +25,7 @@ services:
       # 성능 최적화 설정
       - TORCH_NUM_THREADS=4 # PyTorch thread 수
       - OMP_NUM_THREADS=4 # OpenMP thread 수
-      - TOKENIZERS_PARALLELISM=true # Tokenizer 병렬 처리 여부
+      - TOKENIZERS_PARALLELISM=false # Tokenizer 병렬 처리 비활성화 (Fork 환경에서 경고 제거)
       
       # 로깅 설정
       - LOG_LEVEL=${LOG_LEVEL:-INFO} # 로깅 레벨 (기본 : Info)
@@ -34,7 +34,8 @@ services:
     volumes:
       # 출력 파일들을 호스트에 저장
       - ./output:/app/output  # 생성된 출력 파일들 저장 (Image, Audio)
-      - ./chatbot/data:/app/chatbot/data # 데이터 저장 경로
+      - ./chatbot/data/vector_db:/app/chatbot/data/vector_db # VectorDB만 마운트
+      - ./chatbot/data/prompts:/app/chatbot/data/prompts # 프롬프트 템플릿 마운트
       - ./logs:/app/logs # 로그 저장 경로
       
       # 캐시 디렉토리 (성능 향상)
