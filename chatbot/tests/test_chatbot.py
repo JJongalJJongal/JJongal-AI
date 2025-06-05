@@ -27,9 +27,9 @@ from shared.utils.file_utils import ensure_directory
 import uvicorn
 
 # 테스트용 오디오 파일 경로
-SAMPLE_AUDIO_PATH = os.path.join(current_dir, "test_audio.wav")
+SAMPLE_AUDIO_PATH = os.path.join(project_root, "output", "temp", "test_audio.mp3")
 # 응답 저장 디렉토리
-RESPONSES_DIR = os.path.join(current_dir, "responses")
+RESPONSES_DIR = os.path.join(project_root, "output", "temp")
 
 class CCBIntegratedTest(unittest.IsolatedAsyncioTestCase):
     """
@@ -71,31 +71,50 @@ class CCBIntegratedTest(unittest.IsolatedAsyncioTestCase):
     
     @classmethod
     def _create_test_audio(cls):
-        """테스트용 오디오 파일 생성"""
-        print("📁 테스트용 오디오 파일 생성 중...")
+        """테스트용 MP3 오디오 파일 생성"""
+        print("📁 테스트용 MP3 오디오 파일 생성 중...")
         
-        # WAV 파일 헤더
-        wav_header = bytes.fromhex(
-            "52494646" + "24000000" + "57415645" + "666d7420" +
-            "10000000" + "0100" + "0100" + "44AC0000" +
-            "88580100" + "0200" + "1000" + "64617461" + "00000000"
-        )
+        try:
+            # OpenAI TTS를 사용해서 실제 테스트용 MP3 생성
+            from openai import OpenAI
+            import os
+            
+            api_key = os.getenv("OPENAI_API_KEY")
+            if api_key:
+                client = OpenAI(api_key=api_key)
+                
+                # 테스트용 간단한 음성 생성
+                response = client.audio.speech.create(
+                    model="tts-1",
+                    voice="nova",
+                    input="안녕하세요. 이것은 테스트용 음성 파일입니다.",
+                    response_format="mp3"
+                )
+                
+                # MP3 파일로 저장
+                with open(SAMPLE_AUDIO_PATH, "wb") as f:
+                    f.write(response.content)
+                    
+                print(f"   ✅ OpenAI TTS로 MP3 파일 생성: {SAMPLE_AUDIO_PATH}")
+                return
+                
+        except Exception as e:
+            print(f"   ⚠️ OpenAI TTS 생성 실패: {e}")
         
-        # 1초 무음 데이터
-        silence_data = bytes([0, 0] * 44100)
-        wav_data = bytearray(wav_header)
+        # OpenAI TTS 실패 시 최소한의 MP3 헤더로 더미 파일 생성
+        # 간단한 MP3 프레임 헤더 (실제로는 재생되지 않지만 파일 형식은 MP3)
+        mp3_header = bytes([
+            0xFF, 0xFB, 0x90, 0x00,  # MP3 sync word + header
+            0x00, 0x00, 0x00, 0x00,  # 더미 데이터
+        ])
         
-        # 파일 크기 업데이트
-        data_size = len(silence_data)
-        wav_data[40:44] = data_size.to_bytes(4, byteorder='little')
-        file_size = 36 + data_size
-        wav_data[4:8] = file_size.to_bytes(4, byteorder='little')
-        wav_data.extend(silence_data)
+        # 더미 MP3 데이터 (최소 크기)
+        dummy_mp3_data = mp3_header * 100  # 간단한 반복
         
         with open(SAMPLE_AUDIO_PATH, "wb") as f:
-            f.write(wav_data)
+            f.write(dummy_mp3_data)
         
-        print(f"   ✅ 오디오 파일 생성: {SAMPLE_AUDIO_PATH}")
+        print(f"   ✅ 더미 MP3 파일 생성: {SAMPLE_AUDIO_PATH}")
 
     @classmethod
     def _start_websocket_server(cls):
@@ -238,8 +257,8 @@ class CCBIntegratedTest(unittest.IsolatedAsyncioTestCase):
         print("🎨 2단계: 꼬기 챗봇 멀티미디어 생성 테스트")
         print("="*50)
         
-        # 출력 디렉토리 설정
-        kogi_output_dir = os.path.join(RESPONSES_DIR, "kogi_test_output")
+        # 출력 디렉토리 설정 (output/temp 사용)
+        kogi_output_dir = os.path.join(project_root, "output", "temp")
         ensure_directory(kogi_output_dir)
         
         # 꼬기 챗봇 초기화 (RAG 활성화)
@@ -408,7 +427,8 @@ class CCBIntegratedTest(unittest.IsolatedAsyncioTestCase):
                     if "audio" in response_data and response_data["audio"]:
                         try:
                             audio_decoded_data = base64.b64decode(response_data["audio"])
-                            response_audio_path = os.path.join(RESPONSES_DIR, "ai_ws_response.mp3")
+                            response_audio_path = os.path.join(project_root, "output", "temp", "ai_ws_response.mp3")
+                            ensure_directory(os.path.dirname(response_audio_path))
                             with open(response_audio_path, "wb") as audio_file_out:
                                 audio_file_out.write(audio_decoded_data)
                             print(f"     🔊 응답 오디오 저장: {response_audio_path}")
@@ -444,9 +464,10 @@ class CCBIntegratedTest(unittest.IsolatedAsyncioTestCase):
             
         chatbot = ChatBotA(vector_db_instance=vector_db)
         chatbot.initialize_chat(
-            child_name="민준",
-            age=6,
-            interests=["공룡", "우주", "로봇"],
+            child_name="민준", # 아이 이름
+            age=6, # 아이 나이
+            interests=["공룡", "우주", "로봇"], # 아이 관심사
+            chatbot_name="부기" # 챗봇 이름
         )
         
         # 테스트 대화
@@ -480,7 +501,7 @@ class CCBIntegratedTest(unittest.IsolatedAsyncioTestCase):
         # 2. 꼬기 챗봇으로 상세 이야기 생성
         print("\n🎨 꼬기 챗봇으로 상세 이야기 생성 중...")
         
-        kogi_output_dir = os.path.join(RESPONSES_DIR, "integration_test_output")
+        kogi_output_dir = os.path.join(project_root, "output", "temp")
         ensure_directory(kogi_output_dir)
 
         kogi = ChatBotB(
@@ -539,12 +560,12 @@ class CCBIntegratedTest(unittest.IsolatedAsyncioTestCase):
         audio_paths = result.get("audio_paths", [])
         
         if image_paths:
-            print(f"   🖼️ 생성된 이미지: {len(image_paths)}개")
+            print(f"   🖼️생성된 이미지: {len(image_paths)}개")
         else:
             print("   📝 텍스트만 생성됨 (이미지 없음)")
 
         if audio_paths:
-            print(f"   🔊 생성된 음성: {len(audio_paths)}개")
+            print(f"   🔊생성된 음성: {len(audio_paths)}개")
         else:
             print("   🔇 음성 생성 없음")
         
@@ -563,7 +584,7 @@ class CCBIntegratedTest(unittest.IsolatedAsyncioTestCase):
         try:
             # ChatBotB 생성 (RAG 활성화)
             kogi = ChatBotB(
-                output_dir="output",
+                output_dir=os.path.join(project_root, "output", "temp"),
                 vector_db_path="chatbot/data/vector_db/detailed",
                 collection_name="fairy_tales"
             )
@@ -721,9 +742,9 @@ async def run_live_audio_test():
                 
                 timestamp = time.strftime("%Y%m%d_%H%M%S")
                 filename = f"live_response_{timestamp}.mp3"
-                filepath = os.path.join(RESPONSES_DIR, filename)
+                filepath = os.path.join(project_root, "output", "temp", filename)
                 
-                ensure_directory(RESPONSES_DIR)
+                ensure_directory(os.path.join(project_root, "output", "temp"))
                 with open(filepath, "wb") as f:
                     f.write(audio_data)
                 

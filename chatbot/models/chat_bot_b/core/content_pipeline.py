@@ -20,6 +20,9 @@ from langchain_core.output_parsers import StrOutputParser
 from langchain_openai import ChatOpenAI
 from langchain_community.utilities.dalle_image_generator import DallEAPIWrapper
 
+# 추가: LangSmith 추적을 위한 import
+from langsmith import traceable
+
 # Project inner modules
 from chatbot.data.vector_db.core import VectorDB
 from chatbot.models.chat_bot_b.generators.text_generator import TextGenerator
@@ -133,9 +136,13 @@ class ContentPipeline():
             self.s3_client = boto3.client('s3')
             self.s3_bucket = os.getenv("S3_BUCKET_NAME", 'fairy_tales')
             
-            # 3. 임시 로컬 저장소 설정 (EC2 Disk)
-            self.temp_storage = Path('/tmp/fairy_tales')
-            self.temp_storage.mkdir(exist_ok=True)
+            # 3. 임시 로컬 저장소 설정 (프로젝트 내 통일된 구조 사용)
+            self.temp_storage = Path('output/temp')
+            self.temp_storage.mkdir(parents=True, exist_ok=True)
+            
+            # 이미지와 오디오 하위 폴더 생성
+            (self.temp_storage / "images").mkdir(exist_ok=True)
+            (self.temp_storage / "audio").mkdir(exist_ok=True)
             
             # 4. LangChain chain initialize
             # self._setup_langchain_chains() # Consider if this is still needed or if generators manage their chains
@@ -330,7 +337,7 @@ class ContentPipeline():
                     chapter
                 ) # _generate_image_locally가 DALL-E 호출 담당
                 
-                # 3. S3 upload
+                # 3. S3 upload 
                 s3_url = await self._upload_to_s3(
                     local_path = temp_image_path,
                     s3_key=f"images/{self.current_pipeline_id}/chapter_{chapter['chapter_number']}.png"
@@ -362,8 +369,9 @@ class ContentPipeline():
         Style: Warm, colorful, cartoon-like, suitable for children's books.
         """
     
+    @traceable(name="content_pipeline_image_generation")
     async def _generate_image_locally(self, prompt: str, chapter: Dict[str, Any]) -> Path:
-        """로컬에 이미지 생성"""
+        """로컬에 이미지 생성 - LangSmith 추적됨"""
         try:
             # LangChain DALL-E Wrapper 사용 시도
             if not self.image_generator: # Ensure image_generator is initialized
@@ -381,9 +389,9 @@ class ContentPipeline():
                 return await self._download_image_from_url(image_url, chapter)
                 
             except Exception as e:
-                logger.warning(f"LangChain DALL-E 실패, 직접 API 사용: {e}")
+                logger.warning(f"LangChain DALL-E 실패, 추적 가능한 직접 API 사용: {e}")
                 
-                # 직접 OpenAI API 호출
+                # 직접 OpenAI API 호출 (LangSmith에 추적됨)
                 response = await asyncio.to_thread(
                     self.openai_client.images.generate,
                     model="dall-e-3",
@@ -397,15 +405,15 @@ class ContentPipeline():
                 image_data = response.data[0].b64_json
                 image_bytes = base64.b64decode(image_data)
                 
-                # 파일 저장
+                # 파일 저장 (표준 파일명 패턴 사용)
                 chapter_number = chapter.get("chapter_number", 1)
                 image_filename = f"chapter_{chapter_number}_{self.current_pipeline_id[:8]}.png"
-                image_path = self.temp_storage / image_filename
+                image_path = self.temp_storage / "images" / image_filename
                 
                 with open(image_path, 'wb') as f:
                     f.write(image_bytes)
                 
-                logger.info(f"이미지 생성 완료: {image_path}")
+                logger.info(f"추적 가능한 직접 API 이미지 생성 완료: {image_path}")
                 return image_path
                 
         except Exception as e:
@@ -418,7 +426,7 @@ class ContentPipeline():
         
         chapter_number = chapter.get("chapter_number", 1)
         image_filename = f"chapter_{chapter_number}_{self.current_pipeline_id[:8]}.png"
-        image_path = self.temp_storage / image_filename
+        image_path = self.temp_storage / "images" / image_filename
         
         async with aiohttp.ClientSession() as session:
             async with session.get(image_url) as response:

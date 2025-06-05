@@ -129,12 +129,16 @@ class ChatBotB:
             self.image_generator = ImageGenerator( 
                 openai_client=self.openai_client,
                 model_name="dall-e-3",
-                temp_storage_path=str(self.output_dir / "temp")
+                temp_storage_path=str(self.output_dir / "temp" / "images")   
             )
             
             self.voice_generator = VoiceGenerator(
                 elevenlabs_api_key=self.elevenlabs_api_key,
-                temp_storage_path=str(self.output_dir / "temp")
+                temp_storage_path=str(self.output_dir / "temp" / "audio"),
+                voice_id="xi3rF0t7dg7uN2M0WUhr", # Yuna (기본 내레이터 음성)
+                model_id="eleven_multilingual_v2", # 기본 모델 ID (한국어 지원)
+                voice_settings=None, # 음성 설정 (stability, similarity_boost, style, use_speaker_boost)
+                max_retries=3 # 최대 재시도 횟수
             )
             
             # 2. Enhanced 생성기들 초기화 (선택적)
@@ -149,7 +153,7 @@ class ChatBotB:
                 self.enhanced_image_generator = ImageGenerator(
                     openai_client=self.openai_client,
                     model_name="dall-e-3",
-                    temp_storage_path=str(self.output_dir / "temp"),
+                    temp_storage_path=str(self.output_dir / "temp" / "images"),
                     enable_performance_tracking=self.enable_performance_tracking
                 )
                 

@@ -119,15 +119,15 @@ class AudioProcessor:
             async def tts_operation():
                 tts_result = await asyncio.to_thread(
                     self.openai_client.audio.speech.create,
-                    model="tts-1-hd",
-                    voice=voice,
-                    input=text,
-                    speed=0.9,
-                    response_format="mp3"
+                    model="tts-1-hd", # 최신 모델 사용 (tts-1-hd, tts-1, tts-1-large)
+                    voice=voice, # 음성 선택 (nova, alloy, echo, fable, onyx, nova-2, shimmer)
+                    input=text, # 텍스트 입력
+                    speed=0.9, # 속도 조절 (0.0-2.0)
+                    response_format="mp3" # 오디오 형식 (mp3, opus, aac, flac)
                 )
-                return tts_result
+                return tts_result # type: ignore
                 
-            tts_audio, error_msg, error_code = await retry_operation(tts_operation) # type: ignore
+            tts_audio, error_msg, error_code = await retry_operation(tts_operation)
             
             if tts_audio is None:
                 logger.error(f"TTS 생성 실패 후 재시도 모두 실패 : {error_msg}")
@@ -165,7 +165,7 @@ class AudioProcessor:
         """
         temp_file_path = None
         try:
-            with tempfile.NamedTemporaryFile(delete=False, suffix=".wav") as temp_file:
+            with tempfile.NamedTemporaryFile(delete=False, suffix=".mp3") as temp_file:
                 temp_file.write(audio_data)
                 temp_file_path = temp_file.name
                 

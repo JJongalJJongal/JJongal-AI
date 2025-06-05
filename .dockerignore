@@ -104,4 +104,5 @@ models/
 
 # 백업 파일
 *.bak
-*.backup 
+*.backup
+*.env

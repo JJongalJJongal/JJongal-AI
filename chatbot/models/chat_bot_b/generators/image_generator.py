@@ -22,6 +22,10 @@ from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.output_parsers import StrOutputParser
 from langchain_openai import ChatOpenAI
 from langchain_community.utilities.dalle_image_generator import DallEAPIWrapper
+from langsmith import traceable
+
+# 추가: LangSmith 추적을 위한 import
+from langsmith import traceable
 
 
 # Project imports
@@ -46,7 +50,7 @@ class ImageGenerator(BaseGenerator):
                  prompts_file_path: str = "chatbot/data/prompts/chatbot_b_prompts.json",
                  model_name: str = "dall-e-3",
                  image_size: str = "1024x1024",
-                 temp_storage_path: str = "/tmp/fairy_tales",
+                 temp_storage_path: str = "output/temp/images",
                  max_retries: int = 3,
                  enable_performance_tracking: bool = True):
         """
@@ -89,18 +93,18 @@ class ImageGenerator(BaseGenerator):
         self._initialize_components()
     
     def _initialize_components(self):
-        """구성 요소 초기화"""
+        """이미지 생성기 구성 요소 초기화"""
         try:
-            # 1. 임시 저장소 생성
+            # 1. 임시 저장소 생성 (부모 디렉토리까지 포함)
             self.temp_storage_path.mkdir(parents=True, exist_ok=True)
             
             # 2. 프롬프트 로드
             self._load_prompts()
             
-            # 3. LangChain 구성 요소 초기화
+            # 3. LangChain 구성 요소 설정
             self._setup_langchain_components()
             
-            logger.info("ImageGenerator 초기화 완료")
+            logger.info(f"ImageGenerator 초기화 완료 (임시 저장 경로: {self.temp_storage_path})")
             
         except Exception as e:
             logger.error(f"ImageGenerator 초기화 실패: {e}")
@@ -122,7 +126,16 @@ class ImageGenerator(BaseGenerator):
                 "age_8_9": dall_e_optimization.get("age_8_9_template", {})
             }
             
-            logger.info(f"프롬프트 파일 로드 완료: {self.prompts_file_path}") # 프롬프트 파일 로드 완료 로깅
+            # 추가 설정들 로드
+            self.safety_rules = dall_e_optimization.get("general_safety_rules", {})
+            self.fallback_templates = dall_e_optimization.get("fallback_templates", {})
+            self.character_extraction_config = dall_e_optimization.get("character_extraction", {})
+            self.location_keywords = dall_e_optimization.get("location_keywords", {})
+            self.action_keywords = dall_e_optimization.get("action_keywords", {})
+            self.scene_templates = dall_e_optimization.get("scene_description_templates", {})
+            self.safety_filters_config = dall_e_optimization.get("safety_filters", {})
+            
+            logger.info(f"프롬프트 파일 로드 완료: {self.prompts_file_path}")
             
         except Exception as e:
             logger.error(f"프롬프트 파일 로드 실패: {e}") # 프롬프트 파일 로드 실패 로깅
@@ -132,29 +145,39 @@ class ImageGenerator(BaseGenerator):
     
     def _set_fallback_templates(self):
         """기본 템플릿 설정 (Prompt Load 실패할 경우)"""
+        logger.warning("프롬프트 로드 실패로 기본 템플릿 사용")
         self.age_specific_templates = {
             "age_4_7": {
-                "style_specifications": {
-                    "art_style": "Adorable kawaii-style illustration with extremely soft, rounded shapes and cute characters perfect for young children",
-                    "color_palette": "Soft pastel tones: gentle mint green, cream white, warm peach, soft sky blue, light lavender, warm yellow",
-                    "composition": "Simple, clean layouts with cute focal points and large, friendly round character designs",
-                    "character_design": "Round, chubby characters with large sparkly eyes, soft features, and gentle expressions",
-                    "safety_elements": "No sharp edges, dark shadows, or potentially frightening elements - only cute and comforting imagery"
-                },
-                "prompt_template": "Create an adorable kawaii-style illustration for a Korean children's storybook. Scene: {scene_description}. Style: Soft, cute cartoon illustration with rounded shapes and gentle gradients. Character design: Extremely cute animals or characters with big round eyes, chubby cheeks, soft pastel colors. Environment: {safe_environment_description} with rolling hills, soft trees, and peaceful nature. Mood: {mood}. Technical: Smooth gradients, no harsh lines, child-friendly and heartwarming atmosphere like a gentle storybook illustration."
+                "prompt_template": self.fallback_templates.get("basic_safe_prompt", 
+                    "A gentle, child-friendly watercolor illustration with soft colors and cute characters. NO text visible.")
             },
             "age_8_9": {
-                "style_specifications": {
-                    "art_style": "Charming kawaii illustration with more detailed but still soft, appealing character designs",
-                    "color_palette": "Rich but gentle pastels with harmonious color relationships and warm undertones",
-                    "composition": "More sophisticated layouts with multiple cute elements and gentle depth layers",
-                    "character_design": "Detailed kawaii characters with expressive large eyes, soft clothing, and endearing poses",
-                    "symbolic_elements": "Age-appropriate cute symbols and gentle metaphorical visual elements"
-                },
-                "prompt_template": "Create a charming kawaii-style illustration for a Korean children's storybook (ages 8-9). Scene: {scene_description}. Style: Professional cute cartoon illustration with soft gradients and detailed kawaii elements. Character details: Adorable characters with distinctive cute clothing, gentle emotions, and round features. Environment: Rich textures with cute details, peaceful backgrounds with soft hills and friendly nature elements. Mood: {complex_mood}. Technical quality: High-quality cute illustration with soft lighting and warm, comforting atmosphere."
+                "prompt_template": self.fallback_templates.get("basic_safe_prompt", 
+                    "A detailed hand-drawn illustration for children with rich textures. NO text visible.")
             }
         }
-                
+        
+        # 기본 설정들
+        self.safety_rules = {
+            "korean_text_handling": "NO Korean text or Asian characters in image",
+            "child_safety": "100% child-safe content only"
+        }
+        self.fallback_templates = {
+            "basic_safe_prompt": "A gentle, child-friendly watercolor illustration. NO text visible.",
+            "character_extraction_failed": "friendly animal characters", 
+            "setting_extraction_failed": "in a peaceful, safe place"
+        }
+        self.character_extraction_config = {"exclude_words": [], "name_patterns": []}
+        self.location_keywords = {}
+        self.action_keywords = {}
+        self.scene_templates = {}
+        self.safety_filters_config = {
+            "unsafe_keywords": [],
+            "positive_replacements": {},
+            "max_prompt_length": 400,
+            "safety_suffix": " Child-friendly and safe."
+        }
+    
     def _setup_langchain_components(self):
         """LangChain 구성 요소 설정"""
         try:
@@ -170,9 +193,8 @@ class ImageGenerator(BaseGenerator):
                 model=self.model_name, # dall-e-3
                 size=self.image_size, # 1024x1024, 1024x1536, 1536x1024
                 quality="hd", # hd, standard
-                style="natural", # vivid, natural
-                response_format="url", # url, b64_json
-                n=1 # 1, 2, 3, 4, 5, 6, 7, 8, 9, 10
+                n=1, # 1, 2, 3, 4, 5, 6, 7, 8, 9, 10
+                model_kwargs={"response_format": "url"}  # response_format을 model_kwargs에 포함
             )
             
             # 3. 연령별 프롬프트 개선 체인 설정
@@ -268,6 +290,10 @@ class ImageGenerator(BaseGenerator):
             logger.warning(f"대상 연령({current_age})이 표준 범위를 벗어났습니다.")
             return "age_4_7" if current_age < 8 else "age_8_9"
         
+    @traceable(
+        name="image_generation_pipeline",
+        metadata={"generator": "ImageGenerator", "version": "enhanced"}
+    )
     async def generate(self, 
                       input_data: Dict[str, Any], 
                       progress_callback: Optional[Callable] = None) -> Dict[str, Any]:
@@ -479,129 +505,218 @@ class ImageGenerator(BaseGenerator):
                 return self._create_fallback_prompt(chapter, age_group) # 기본 프롬프트 생성
 
             # 프롬프트 템플릿 데이터 준비
-            characters_value = self._extract_characters(story_data)
-            setting_value = self._extract_setting(chapter)
+            characters_value = self._extract_characters_improved(story_data, chapter)
+            setting_value = self._extract_setting_improved(chapter)
+            scene_description = self._create_scene_description(chapter, characters_value, setting_value)
             
-            # 프롬프트 템플릿 데이터 치환
-            final_dalle_prompt = user_defined_dalle_template.replace("{{characters}}", characters_value)
+            logger.info(f"프롬프트 데이터 - Characters: {characters_value}, Setting: {setting_value}")
+            logger.info(f"Scene Description: {scene_description}")
+            
+            # 프롬프트 템플릿 데이터 치환 (실제 템플릿 변수에 맞춰서)
+            final_dalle_prompt = user_defined_dalle_template
+            
+            # JSON 템플릿에 맞는 변수 치환
+            final_dalle_prompt = final_dalle_prompt.replace("{{characters}}", characters_value)
             final_dalle_prompt = final_dalle_prompt.replace("{{setting}}", setting_value)
+            
+            # age_8_9 템플릿에서 사용되는 scene_description 변수도 처리
+            if "{{scene_description}}" in final_dalle_prompt:
+                final_dalle_prompt = final_dalle_prompt.replace("{{scene_description}}", scene_description)
             
             # 안전성 필터 적용 및 길이 제한
             safe_prompt = self._apply_safety_filters(final_dalle_prompt)
             
             logger.info(f"Using user-defined DALL-E template for age group {age_group}.") # 연령별 특화 프롬프트 사용
-            logger.debug(f"Formatted DALL-E prompt: {safe_prompt}") # 포맷팅된 DALL-E 프롬프트
+            logger.info(f"Final DALL-E prompt: {safe_prompt}") # 최종 DALL-E 프롬프트
             
             return safe_prompt
             
         except Exception as e:
             logger.error(f"Failed to create image prompt from user-defined template: {e}") # 프롬프트 생성 실패
             return self._create_fallback_prompt(chapter, age_group) # 기본 프롬프트 생성
-    
-    def _extract_characters(self, story_data: Dict[str, Any]) -> str:
-        """스토리에서 주요 캐릭터 추출"""
+
+    def _extract_characters_improved(self, story_data: Dict[str, Any], chapter: Dict[str, Any]) -> str:
+        """개선된 캐릭터 추출 로직 - JSON 설정 사용"""
         characters = []
         
-        # 챕터들에서 캐릭터 이름 추출
-        chapters = story_data.get("chapters", [])
-        for chapter in chapters[:2]:  # 첫 2개 챕터만 확인
-            content = chapter.get("chapter_content", "")
-            # 한국어 이름 패턴 추출 (간단한 패턴)
+        # 1. 챕터 제목에서 캐릭터 추출
+        chapter_title = chapter.get("chapter_title", "")
+        if chapter_title:
+            # JSON에서 로드한 패턴 사용
             import re
-            names = re.findall(r'[가-힣]{2,4}(?=은|는|이|가|을|를|와|과|에게|한테)', content)
-            characters.extend(names[:2])  # 최대 2개
+            for pattern in self.character_extraction_config.get("name_patterns", []):
+                names = re.findall(pattern, chapter_title)
+                characters.extend(names)
         
-        return ", ".join(list(set(characters))[:3]) if characters else "friendly characters" # 최대 3개의 캐릭터 반환
-    
-    def _extract_setting(self, chapter: Dict[str, Any]) -> str:
-        """챕터에서 배경 추출"""
+        # 2. 챕터 내용에서 주요 캐릭터 추출
+        content = chapter.get("chapter_content", "")
+        if content:
+            import re
+            for pattern in self.character_extraction_config.get("name_patterns", []):
+                names = re.findall(pattern, content)
+                characters.extend(names)
+        
+        # 3. 중복 제거 및 제외 단어 필터링
+        characters = list(set(characters))
+        
+        # JSON에서 로드한 제외 단어들 사용
+        exclude_words = set(self.character_extraction_config.get("exclude_words", []))
+        filtered_characters = [char for char in characters 
+                             if char not in exclude_words and len(char) >= 2]
+        
+        # 4. 기본값 설정
+        if not filtered_characters:
+            # 스토리 데이터에서 메인 캐릭터 정보 가져오기
+            main_characters = story_data.get("main_characters", [])
+            if main_characters:
+                if isinstance(main_characters, list):
+                    filtered_characters = main_characters[:2]
+                else:
+                    filtered_characters = [str(main_characters)]
+            else:
+                # JSON 설정에서 기본값 사용
+                default_chars = self.fallback_templates.get("character_extraction_failed", "friendly characters")
+                filtered_characters = [default_chars]
+        
+        result = ", ".join(filtered_characters[:3])  # 최대 3개
+        logger.info(f"추출된 캐릭터: {result}")
+        return result
+
+    def _extract_setting_improved(self, chapter: Dict[str, Any]) -> str:
+        """개선된 배경 추출 로직 - JSON 설정 사용""" 
         content = chapter.get("chapter_content", "") # 챕터 내용
+        title = chapter.get("chapter_title", "") # 챕터 제목
         
-        # 장소 관련 키워드 검색
-        location_keywords = ["숲", "집", "학교", "공원", "바다", "산", "마을", "도시", "방", "정원"]
-        for keyword in location_keywords:
-            if keyword in content:
-                return f"{keyword}에서" # 키워드가 있으면 키워드 반환
+        # JSON에서 로드한 장소 키워드 사용
+        found_locations = []
+        search_text = f"{title} {content}" # 챕터 제목과 내용을 검색 텍스트로 사용
         
-        return "평화로운 장소에서" # 키워드가 없으면 기본값 반환
-    
+        for category, keywords in self.location_keywords.items(): # 장소 키워드 사용
+            for keyword in keywords: # 장소 키워드 사용
+                if keyword in search_text: # 검색 텍스트에 장소 키워드가 있으면
+                    found_locations.append(keyword) # 장소 키워드 추가
+                    break  # 카테고리당 하나만
+        
+        if found_locations:
+            result = f"{found_locations[0]}에서"
+        else:
+            # JSON 설정에서 기본값 사용
+            result = self.fallback_templates.get("setting_extraction_failed", "평화로운 곳에서")
+        
+        logger.info(f"추출된 배경: {result}")
+        return result
+
+    def _create_scene_description(self, chapter: Dict[str, Any], characters: str, setting: str) -> str:
+        """장면 설명 생성 - JSON 설정 사용"""
+        chapter_title = chapter.get("chapter_title", "")
+        content = chapter.get("chapter_content", "")
+        
+        # JSON에서 로드한 행동 키워드 사용
+        found_actions = []
+        search_text = f"{chapter_title} {content[:200]}"  # 첫 200자만 검색
+        
+        for category, keywords in self.action_keywords.items():
+            for keyword in keywords:
+                if keyword in search_text:
+                    found_actions.append(category)
+                    break
+        
+        # JSON 템플릿을 사용하여 장면 설명 생성
+        if found_actions:
+            action = found_actions[0]
+            template = self.scene_templates.get(action, self.scene_templates.get("default", 
+                "{characters}가 {setting} 함께 있는 모습"))
+        else:
+            template = self.scene_templates.get("default", "{characters}가 {setting} 함께 있는 모습")
+        
+        scene_desc = template.format(characters=characters, setting=setting)
+        logger.info(f"생성된 장면 설명: {scene_desc}")
+        return scene_desc
+
     def _determine_mood(self, chapter: Dict[str, Any]) -> str:
-        """챕터의 분위기 결정"""
+        """챕터의 분위기 결정 - JSON 설정 사용"""
         content = chapter.get("chapter_content", "").lower()
         
-        # 감정 키워드 매핑
-        mood_mapping = {
-            "기쁨": ["기쁘", "즐거", "행복", "웃", "놀이"],
-            "모험": ["모험", "탐험", "여행", "발견"],
-            "평화": ["평화", "조용", "안전", "편안"],
-            "우정": ["친구", "도움", "함께", "협력"],
-            "학습": ["배우", "공부", "알아", "깨달"]
-        }
-        
-        for mood, keywords in mood_mapping.items():
+        # JSON 설정 기반 분위기 매핑
+        for mood, keywords in self.action_keywords.items():
             if any(keyword in content for keyword in keywords):
-                return mood # 키워드가 있으면 분위기 반환
+                return mood
         
-        return "따뜻하고 평화로운" # 키워드가 없으면 기본값 반환
+        # 기본값
+        return self.fallback_templates.get("mood_extraction_failed", "따뜻하고 평화로운")
     
     def _create_fallback_prompt(self, chapter: Dict[str, Any], age_group: str) -> str:
-        """기본 프롬프트 생성 (오류 시 사용)"""
-        template = self.age_specific_templates.get(age_group, {})
-        basic_template = template.get("prompt_template", "A gentle watercolor illustration for children showing {scene}. Child-friendly, warm colors, safe environment.")
+        """기본 프롬프트 생성 - JSON 설정 사용"""
+        basic_prompt = self.fallback_templates.get("basic_safe_prompt", 
+            "A gentle, child-friendly watercolor illustration. NO text visible.")
         
-        scene = chapter.get("chapter_title", "a peaceful scene")
-        return basic_template.format(scene_description=scene, mood="peaceful", safe_environment_description="safe and welcoming")
+        # 한글 텍스트 방지 규칙 추가
+        korean_rule = self.safety_rules.get("korean_text_handling", "")
+        if korean_rule:
+            basic_prompt += f" {korean_rule}"
+        
+        return basic_prompt
 
     def _apply_safety_filters(self, prompt: str) -> str:
-        """안전성 필터 적용 및 프롬프트 정리"""
+        """안전성 필터 적용 및 프롬프트 정리 - JSON 설정 사용"""
         try:
             # 1. 기본적인 정리
             safe_prompt = prompt.strip()
             
-            # 2. 부적절한 키워드 필터링 (아동용 안전성)
-            unsafe_keywords = [
-                "violence", "violent", "scary", "frightening", "dark", "evil", 
-                "weapon", "gun", "knife", "blood", "death", "kill", "hurt",
-                "폭력", "무서운", "어두운", "악한", "무기", "총", "칼", "피", "죽음", "죽이"
-            ]
-            
+            # 2. JSON에서 로드한 부적절한 키워드 필터링
+            unsafe_keywords = self.safety_filters_config.get("unsafe_keywords", [])
             for keyword in unsafe_keywords:
                 safe_prompt = safe_prompt.replace(keyword, "gentle")
             
-            # 3. 긍정적 키워드로 대체
-            replacements = {
-                "fight": "play together",
-                "attack": "approach kindly", 
-                "destroy": "transform",
-                "싸우": "함께 놀다",
-                "공격": "친근하게 다가가다",
-                "파괴": "변화시키다"
-            }
-            
+            # 3. JSON에서 로드한 긍정적 키워드로 대체
+            replacements = self.safety_filters_config.get("positive_replacements", {})
             for old, new in replacements.items():
                 safe_prompt = safe_prompt.replace(old, new)
             
-            # 4. 길이 제한 (DALL-E 3 권장사항: 400자 이하)
-            if len(safe_prompt) > 400:
-                safe_prompt = safe_prompt[:397] + "..."
+            # 4. 길이 제한 (JSON 설정에서 가져오기)
+            max_length = self.safety_filters_config.get("max_prompt_length", 400)
+            if len(safe_prompt) > max_length:
+                # 더 스마트한 자르기: 문장이나 구문 단위로 자르기
+                if ". " in safe_prompt:
+                    sentences = safe_prompt.split(". ")
+                    truncated = ""
+                    for sentence in sentences:
+                        if len(truncated + sentence + ". ") <= max_length - 3:
+                            truncated += sentence + ". "
+                        else:
+                            break
+                    safe_prompt = truncated.rstrip() + "..."
+                else:
+                    safe_prompt = safe_prompt[:max_length-3] + "..."
             
-            # 5. 아동 안전성 강조
-            if "child-friendly" not in safe_prompt.lower() and "kawaii" not in safe_prompt.lower():
-                safe_prompt += " Child-friendly and safe."
+            # 5. 아동 안전성 강조 (JSON 설정에서 가져오기)
+            safety_suffix = self.safety_filters_config.get("safety_suffix", "")
+            if safety_suffix and "child-friendly" not in safe_prompt.lower():
+                if len(safe_prompt) + len(safety_suffix) <= max_length:
+                    safe_prompt += safety_suffix
             
+            # 6. 한글 텍스트 방지 규칙 추가
+            korean_rule = self.safety_rules.get("korean_text_handling", "")
+            if korean_rule and "NO Korean" not in safe_prompt:
+                text_prevention = " NO text visible, NO Korean characters, NO Asian text."
+                if len(safe_prompt) + len(text_prevention) <= max_length:
+                    safe_prompt += text_prevention
+            
+            logger.info(f"안전성 필터 적용 완료 - 최종 길이: {len(safe_prompt)}")
             return safe_prompt
             
         except Exception as e:
             logger.warning(f"안전성 필터 적용 중 오류: {e}")
-            # 오류 시 기본 안전 프롬프트 반환
-            return "A gentle, child-friendly kawaii illustration with soft colors and cute characters."
+            # 오류 시 JSON에서 기본 안전 프롬프트 반환
+            return self.fallback_templates.get("basic_safe_prompt", 
+                "A gentle, child-friendly watercolor illustration. NO text visible.")
 
     async def _generate_single_enhanced_image(self,
                                             prompt: str,
                                             chapter_number: int,
                                             story_id: str,
                                             age_group: str) -> Dict[str, Any]:
-        """Enhanced 단일 이미지 생성"""
+        """Enhanced 단일 이미지 생성 - 항상 LangSmith에 추적됨"""
         
         start_time = time.time()
         
@@ -610,16 +725,16 @@ class ImageGenerator(BaseGenerator):
             logger.info(f"Age Group: {age_group}")
             logger.info(f"프롬프트: {prompt[:100]}...")
             
-            # LangChain DALL-E Wrapper 사용 시도
+            # 1차 시도: LangChain DALL-E Wrapper 사용
             try:
-                image_url = self.dalle_wrapper.run(prompt) # 이미지 URL 생성
+                image_url = await self._dalle_wrapper_with_tracing(prompt)
                 logger.info(f"LangChain 이미지 URL 생성 성공: {image_url[:100]}...")
                 
                 # 이미지 다운로드
                 image_path = await self._download_image_from_url( 
-                    image_url=image_url, # 이미지 URL
-                    chapter_number=chapter_number, # 챕터 번호
-                    story_id=story_id # 스토리 ID
+                    image_url=image_url,
+                    chapter_number=chapter_number,
+                    story_id=story_id
                 )
                 
                 generation_time = time.time() - start_time # 생성 시간
@@ -638,8 +753,8 @@ class ImageGenerator(BaseGenerator):
                 return result # 결과 반환
                 
             except Exception as e:
-                logger.warning(f"LangChain DALL-E 실패, 직접 API 시도: {e}") # 직접 API 시도
-                return await self._generate_with_direct_api_enhanced(prompt, chapter_number, story_id, age_group) # 직접 API 시도
+                logger.warning(f"LangChain DALL-E Wrapper 실패, 추적 가능한 직접 API 사용: {e}")
+                return await self._generate_with_traceable_api(prompt, chapter_number, story_id, age_group)
                 
         except Exception as e:
             logger.error(f"Enhanced 이미지 생성 완전 실패 (챕터 {chapter_number}): {e}")
@@ -652,46 +767,75 @@ class ImageGenerator(BaseGenerator):
                 "age_group": age_group # 연령대
             }
 
-    async def _generate_with_direct_api_enhanced(self,
-                                               prompt: str,
-                                               chapter_number: int,
-                                               story_id: str,
-                                               age_group: str) -> Dict[str, Any]:
-        """Enhanced 직접 API 이미지 생성"""
+    @traceable(
+        name="dalle_wrapper_execution",
+        metadata={"method": "langchain_wrapper", "model": "dall-e-3"}
+    )
+    async def _dalle_wrapper_with_tracing(self, prompt: str) -> str:
+        """LangSmith 추적이 가능한 DALL-E Wrapper 호출"""
+        try:
+            logger.info(f"DALL-E Wrapper 실행 시작 - 프롬프트 길이: {len(prompt)}")
+            
+            # 동기 함수를 비동기로 실행
+            image_url = await asyncio.to_thread(self.dalle_wrapper.run, prompt)
+            
+            logger.info(f"DALL-E Wrapper 성공 - URL 길이: {len(image_url)}")
+            return image_url
+        except Exception as e:
+            logger.error(f"DALL-E Wrapper 실행 실패: {e}")
+            raise
+
+    @traceable(
+        name="dalle_direct_api_call",
+        metadata={"method": "direct_api", "model": "dall-e-3", "fallback": True}
+    )
+    async def _generate_with_traceable_api(self,
+                                         prompt: str,
+                                         chapter_number: int,
+                                         story_id: str,
+                                         age_group: str) -> Dict[str, Any]:
+        """LangSmith 추적이 가능한 직접 API 이미지 생성"""
         
         try:
-            logger.info(f"Enhanced 직접 API 방식 사용 (챕터 {chapter_number})") # 직접 API 방식 사용
+            logger.info(f"추적 가능한 직접 API 방식 사용 (챕터 {chapter_number})")
+            logger.info(f"메타데이터 - Age Group: {age_group}, 프롬프트 길이: {len(prompt)}")
             
-            # OpenAI API 직접 호출
-            response = self.openai_client.images.generate(
-                model=self.model_name, # 모델 이름
-                prompt=prompt, # 이미지 프롬프트
-                size=self.image_size, # 이미지 크기
-                n=1, # 이미지 수
+            # OpenAI API 직접 호출 (LangSmith에 추적됨)
+            response = await asyncio.to_thread(
+                self.openai_client.images.generate,
+                model=self.model_name,
+                prompt=prompt,
+                size=self.image_size,
+                n=1,
                 response_format="b64_json"
             )
             
             # Base64 이미지 데이터 처리
             image_data = response.data[0].b64_json
-            image_path = self.temp_storage_path / f"enhanced_chapter_{chapter_number}_{story_id[:8]}.png" # 이미지 경로
+            image_path = self.temp_storage_path / f"chapter_{chapter_number}_{story_id[:8]}.png"
             
             # 이미지 저장
             with open(image_path, "wb") as f:
-                f.write(base64.b64decode(image_data)) # 이미지 데이터 저장
+                f.write(base64.b64decode(image_data))
             
-            logger.info(f"직접 API 이미지 생성 완료: {image_path}") # 이미지 생성 완료
+            logger.info(f"추적 가능한 직접 API 이미지 생성 완료: {image_path}")
             
-            return {
-                "chapter_number": chapter_number, # 챕터 번호
-                "image_path": str(image_path), # 이미지 경로
-                "image_prompt": prompt, # 이미지 프롬프트
-                "method": "direct_api_enhanced", # 메서드
-                "status": "success", # 상태
-                "age_group": age_group # 연령대
+            # LangSmith에 추가 메타데이터 기록
+            result = {
+                "chapter_number": chapter_number,
+                "image_path": str(image_path),
+                "image_prompt": prompt,
+                "method": "traceable_direct_api",
+                "status": "success",
+                "age_group": age_group,
+                "image_size": self.image_size,
+                "model_used": self.model_name
             }
             
+            return result
+            
         except Exception as e:
-            logger.error(f"직접 API 실패 (챕터 {chapter_number}): {e}") # 직접 API 실패
+            logger.error(f"추적 가능한 직접 API 실패 (챕터 {chapter_number}): {e}")
             raise
 
     async def _download_image_from_url(self,
@@ -700,7 +844,7 @@ class ImageGenerator(BaseGenerator):
                                      story_id: str) -> Path:
         """URL에서 이미지 다운로드 (Enhanced)"""
         
-        image_path = self.temp_storage_path / f"enhanced_chapter_{chapter_number}_{story_id[:8]}.png" # 이미지 경로
+        image_path = self.temp_storage_path / f"chapter_{chapter_number}_{story_id[:8]}.png" # 이미지 경로
         
         try:
             # SSL 컨텍스트 설정
@@ -731,7 +875,7 @@ class ImageGenerator(BaseGenerator):
         if not self.enable_performance_tracking: # 성능 추적 비활성화 시
             return # 성능 추적 비활성화 시
             
-        if success:
+        if success: # 성공 시
             self.performance_metrics["generation_times"].append(generation_time) # 생성 시간 추가
             
             # 연령대별 사용량 추적
@@ -742,7 +886,7 @@ class ImageGenerator(BaseGenerator):
             # 성공률 계산
             total_attempts = len(self.performance_metrics["generation_times"]) + self.performance_metrics["error_count"]
             self.performance_metrics["success_rate"] = len(self.performance_metrics["generation_times"]) / total_attempts
-        else:
+        else: # 실패 시
             self.performance_metrics["error_count"] += 1 # 에러 발생 시 에러 카운트 증가
 
     def get_performance_metrics(self) -> Dict[str, Any]: # 성능 메트릭 조회
@@ -793,5 +937,6 @@ class ImageGenerator(BaseGenerator):
         
         total_time = (base_time_per_image * chapter_count) + (wait_time_between * max(0, chapter_count - 1))
         return total_time 
+    
     
     

@@ -5,7 +5,6 @@ ElevenLabs API를 사용한 챕터별 음성 생성
 WebSocket 실시간 스트리밍 지원
 """
 
-from shared.utils.logging_utils import get_module_logger
 import uuid
 import asyncio
 import json
@@ -17,6 +16,7 @@ import aiohttp
 
 # Project imports
 from .base_generator import BaseGenerator
+from shared.utils.logging_utils import get_module_logger
 
 logger = get_module_logger(__name__)
 
@@ -25,12 +25,12 @@ class VoiceGenerator(BaseGenerator):
     
     def __init__(self, 
                  elevenlabs_api_key: str = None,
-                 voice_id: str = "21m00Tcm4TlvDq8ikWAM",  # Rachel (기본 내레이터 음성)
-                 model_id: str = "eleven_multilingual_v2",
-                 voice_settings: Dict[str, float] = None,
-                 temp_storage_path: str = "/tmp/fairy_tales",
-                 max_retries: int = 3,
-                 character_voice_mapping: Dict[str, str] = None):
+                 voice_id: str = "AW5wrnG1jVizOYY7R1Oo",  # Jiyoung (기본 내레이터 음성)
+                 model_id: str = "eleven_multilingual_v2", # 기본 모델 ID (한국어 지원)
+                 voice_settings: Dict[str, float] = None, # 음성 설정 (stability, similarity_boost, style, use_speaker_boost)
+                 temp_storage_path: str = "output/temp/audio", # 임시 저장 경로
+                 max_retries: int = 3, # 최대 재시도 횟수
+                 character_voice_mapping: Dict[str, str] = None): # 캐릭터별 음성 ID 매핑
         """
         Args:
             elevenlabs_api_key: ElevenLabs API 키
@@ -44,7 +44,7 @@ class VoiceGenerator(BaseGenerator):
         super().__init__(max_retries=max_retries, timeout=120.0)
         
         self.api_key = elevenlabs_api_key
-        self.narrator_voice_id = voice_id  # 내레이터 음성
+        self.narrator_voice_id = voice_id  # 내레이터 음성 ID
         self.model_id = model_id
         self.temp_storage_path = Path(temp_storage_path)
         
@@ -61,51 +61,58 @@ class VoiceGenerator(BaseGenerator):
         
         # 기본 캐릭터 타입별 음성 설정
         self.default_character_voices = {
-            "narrator": voice_id,  # 내레이터
-            "child": "EXAVITQu4vr4xnSDxMaL",  # Bella (아이 목소리)
-            "adult_male": "VR6AewLTigWG4xSOukaG",  # Arnold (어른 남성)
+            "narrator": voice_id,  # 내레이터 # 기본 내레이터 음성 ID (Jiyoung)
+            "child": "UvkXHIJzOBYWOI51BDKp",  # Jeong-Ah (아이 목소리) 
+            "adult_male": "Ir7oQcBXWiq4oFGROCfj",  # Taemin (어른 남성)
             "adult_female": "21m00Tcm4TlvDq8ikWAM",  # Rachel (어른 여성)
-            "fantasy": "pNInz6obpgDQGcFmaJgB",  # Adam (판타지 캐릭터)
+            "grandpa" : "IAETYMYM3nJvjnlkVTKI", # Grandpa (할아버지) - Deok su
+            "fantasy": "xi3rF0t7dg7uN2M0WUhr",  # Yuna (판타지 캐릭터)
         }
         
         # 캐릭터 타입별 음성 설정
         self.character_voice_settings = {
             "narrator": {
-                "stability": 0.6,
-                "similarity_boost": 0.8,
-                "style": 0.1,
-                "use_speaker_boost": True
+                "stability": 0.6, # 안정성 (0.0-1.0)
+                "similarity_boost": 0.8, # 유사성 증가 (0.0-1.0)
+                "style": 0.1, # 스타일 (0.0-1.0)
+                "use_speaker_boost": True # 스피커 부스트 (True/False)
             },
             "child": {
-                "stability": 0.4,
-                "similarity_boost": 0.7,
-                "style": 0.3,
-                "use_speaker_boost": True
+                "stability": 0.4, # 안정성 (0.0-1.0)
+                "similarity_boost": 0.7, # 유사성 증가 (0.0-1.0)
+                "style": 0.3, # 스타일 (0.0-1.0)
+                "use_speaker_boost": True # 스피커 부스트 (True/False)
             },
             "adult_male": {
-                "stability": 0.7,
-                "similarity_boost": 0.8,
-                "style": 0.0,
-                "use_speaker_boost": True
+                "stability": 0.7, # 안정성 (0.0-1.0)
+                "similarity_boost": 0.8, # 유사성 증가 (0.0-1.0)
+                "style": 0.0, # 스타일 (0.0-1.0)
+                "use_speaker_boost": True # 스피커 부스트 (True/False)
             },
             "adult_female": {
-                "stability": 0.6,
-                "similarity_boost": 0.8,
-                "style": 0.1,
-                "use_speaker_boost": True
+                "stability": 0.6, # 안정성 (0.0-1.0)
+                "similarity_boost": 0.8, # 유사성 증가 (0.0-1.0)
+                "style": 0.1, # 스타일 (0.0-1.0)
+                "use_speaker_boost": True # 스피커 부스트 (True/False)
             },
             "fantasy": {
-                "stability": 0.3,
-                "similarity_boost": 0.6,
-                "style": 0.5,
-                "use_speaker_boost": True
+                "stability": 0.3, # 안정성 (0.0-1.0)
+                "similarity_boost": 0.6, # 유사성 증가 (0.0-1.0)
+                "style": 0.5, # 스타일 (0.0-1.0)
+                "use_speaker_boost": True # 스피커 부스트 (True/False)
+            },
+            "grandma": {
+                "stability": 0.7, # 안정성 (0.0-1.0)
+                "similarity_boost": 0.8, # 유사성 증가 (0.0-1.0)
+                "style": 0.0, # 스타일 (0.0-1.0)
+                "use_speaker_boost": True # 스피커 부스트 (True/False)
             }
         }
         
         # ElevenLabs API 설정
         self.base_url = "https://api.elevenlabs.io/v1"
         self.headers = {
-            "Accept": "audio/mpeg",
+            "Accept": "audio/mp3",
             "Content-Type": "application/json",
             "xi-api-key": self.api_key
         }
@@ -116,7 +123,7 @@ class VoiceGenerator(BaseGenerator):
     def _initialize_components(self):
         """구성 요소 초기화"""
         try:
-            # 1. 임시 저장소 생성
+            # 1. 임시 저장소 생성 (부모 디렉토리까지 포함)
             self.temp_storage_path.mkdir(parents=True, exist_ok=True)
             
             # 2. API 키 확인
@@ -125,7 +132,7 @@ class VoiceGenerator(BaseGenerator):
             else:
                 logger.info(f"ElevenLabs API 키 설정 완료")
             
-            logger.info("VoiceGenerator 초기화 완료 (등장인물별 음성 지원)")
+            logger.info(f"VoiceGenerator 초기화 완료 (임시 저장 경로: {self.temp_storage_path})")
             
         except Exception as e:
             logger.error(f"VoiceGenerator 초기화 실패: {e}")
@@ -149,13 +156,15 @@ class VoiceGenerator(BaseGenerator):
         
         # 3. 캐릭터명으로 타입 추정
         character_lower = character_name.lower()
-        if any(keyword in character_lower for keyword in ["아이", "어린이", "꼬마", "소년", "소녀"]):
+        if any(keyword in character_lower for keyword in ["아이", "어린이", "꼬마", "소년", "소녀"]): # 아이, 어린이, 꼬마, 소년, 소녀
             return self.default_character_voices["child"]
-        elif any(keyword in character_lower for keyword in ["아빠", "엄마", "할아버지", "할머니", "선생님"]):
-            if any(keyword in character_lower for keyword in ["아빠", "할아버지"]):
+        elif any(keyword in character_lower for keyword in ["아빠", "엄마", "선생님"]): # 아빠, 엄마, 선생님
+            if any(keyword in character_lower for keyword in ["아빠", "할아버지"]): # 아빠, 할아버지
                 return self.default_character_voices["adult_male"]
-            else:
+            else: # 엄마
                 return self.default_character_voices["adult_female"]
+        elif any(keyword in character_lower for keyword in ["할아버지"]): # 할아버지
+            return self.default_character_voices["grandpa"]
         elif any(keyword in character_lower for keyword in ["동물", "요정", "마법사", "용", "공주"]):
             return self.default_character_voices["fantasy"]
         
@@ -649,7 +658,8 @@ class VoiceGenerator(BaseGenerator):
                 "주인공": "EXAVITQu4vr4xnSDxMaL",  # 아이 목소리
                 "엄마": "21m00Tcm4TlvDq8ikWAM",     # 여성 목소리
                 "아빠": "VR6AewLTigWG4xSOukaG",     # 남성 목소리
-                "요정": "pNInz6obpgDQGcFmaJgB"      # 판타지 목소리
+                "요정": "pNInz6obpgDQGcFmaJgB",      # 판타지 목소리
+                "내레이션": "xi3rF0t7dg7uN2M0WUhr"    # Yuna (기본 내레이터 음성)
             },
             "character_types": {
                 "child": "아이 캐릭터",

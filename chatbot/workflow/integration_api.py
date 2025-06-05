@@ -7,47 +7,63 @@ CCB_AI Integration API
 
 import asyncio
 import logging
-from typing import Dict, List, Any, Optional, TYPE_CHECKING
+from typing import Dict, List, Any, Optional
 from datetime import datetime
 from enum import Enum
-from dataclasses import dataclass
-import json
+import uuid
+from contextlib import asynccontextmanager
 
 try:
-    from fastapi import FastAPI, HTTPException, BackgroundTasks
-    from fastapi.responses import JSONResponse
-    from pydantic import BaseModel, Field
+    from fastapi import FastAPI, HTTPException, Depends, Request
+    from fastapi.middleware.cors import CORSMiddleware
+    from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
+    from pydantic import BaseModel, Field, validator
+    from slowapi import Limiter, _rate_limit_exceeded_handler
+    from slowapi.util import get_remote_address
+    from slowapi.errors import RateLimitExceeded
     FASTAPI_AVAILABLE = True
 except ImportError:
     FASTAPI_AVAILABLE = False
     logging.warning("FastAPI not available. API endpoints will not be functional.")
 
-from .story_schema import StoryDataSchema, ChildProfile, AgeGroup, ElementType
-
-# TYPE_CHECKING을 사용하여 순환 임포트 해결
-if TYPE_CHECKING:
-    from .orchestrator import WorkflowOrchestrator
+from .story_schema import ChildProfile, AgeGroup
 
 class APIEndpoints(Enum):
-    """API 엔드포인트"""
-    CREATE_STORY = "/api/v1/stories"
-    GET_STORY = "/api/v1/stories/{story_id}"
-    GET_STORY_STATUS = "/api/v1/stories/{story_id}/status"
-    LIST_STORIES = "/api/v1/stories"
-    CANCEL_STORY = "/api/v1/stories/{story_id}/cancel"
-    RESUME_STORY = "/api/v1/stories/{story_id}/resume"
-    HEALTH_CHECK = "/api/v1/health"
-    STATISTICS = "/api/v1/statistics"
+    """API Endpoints"""
+    CREATE_STORY = "/api/v1/stories" # 이야기 생성
+    GET_STORY = "/api/v1/stories/{story_id}" # 이야기 조회
+    GET_STORY_STATUS = "/api/v1/stories/{story_id}/status" # 이야기 상태 조회
+    LIST_STORIES = "/api/v1/stories" # 이야기 목록 조회
+    CANCEL_STORY = "/api/v1/stories/{story_id}/cancel" # 이야기 생성 취소
+    RESUME_STORY = "/api/v1/stories/{story_id}/resume" # 이야기 재개
+    HEALTH_CHECK = "/api/v1/health" # 헬스체크
+    STATISTICS = "/api/v1/statistics" # 통계
+
+# Rate limiting 설정
+if FASTAPI_AVAILABLE:
+    limiter = Limiter(key_func=get_remote_address)
+else:
+    limiter = None
+
+# 보안 설정
+security = HTTPBearer(auto_error=False) if FASTAPI_AVAILABLE else None
 
 # Pydantic 모델들 (FastAPI가 사용 가능한 경우에만)
 if FASTAPI_AVAILABLE:
     class ChildProfileRequest(BaseModel):
         """아이 프로필 요청 모델"""
-        name: str = Field(..., description="아이 이름")
+        name: str = Field(..., min_length=1, max_length=50, description="아이 이름")
         age: int = Field(..., ge=3, le=12, description="아이 나이 (3-12세)")
-        interests: List[str] = Field(default=[], description="관심사 목록")
-        language_level: str = Field(default="basic", description="언어 수준")
-        special_needs: List[str] = Field(default=[], description="특별한 요구사항")
+        interests: List[str] = Field(default=[], max_items=10, description="관심사 목록")
+        language_level: str = Field(default="basic", regex="^(basic|intermediate|advanced)$", description="언어 수준")
+        special_needs: List[str] = Field(default=[], max_items=5, description="특별한 요구사항")
+        
+        @validator('interests')
+        def validate_interests(cls, v):
+            for interest in v:
+                if len(interest) > 30:
+                    raise ValueError('각 관심사는 30자를 초과할 수 없습니다')
+            return v
     
     class StoryCreationRequest(BaseModel):
         """이야기 생성 요청 모델"""
@@ -55,31 +71,53 @@ if FASTAPI_AVAILABLE:
         conversation_data: Optional[Dict[str, Any]] = Field(None, description="기존 대화 데이터")
         story_preferences: Optional[Dict[str, Any]] = Field(None, description="이야기 선호도")
         enable_multimedia: bool = Field(True, description="멀티미디어 생성 활성화")
+        
+        class Config:
+            max_anystr_length = 10000  # 전체 요청 크기 제한
     
-    class StoryResponse(BaseModel):
+    class StandardResponse(BaseModel):
+        """표준 응답 모델"""
+        success: bool = Field(..., description="성공 여부")
+        message: str = Field(..., description="응답 메시지")
+        data: Optional[Dict[str, Any]] = Field(None, description="응답 데이터")
+        error_code: Optional[str] = Field(None, description="에러 코드")
+    
+    class StoryResponse(StandardResponse):
         """이야기 응답 모델"""
-        story_id: str
-        status: str
-        message: str
-        data: Optional[Dict[str, Any]] = None
+        story_id: Optional[str] = Field(None, description="이야기 ID")
     
     class StatusResponse(BaseModel):
         """상태 응답 모델"""
         story_id: str
         current_stage: str
         workflow_state: str
-        progress_percentage: float
-        error_count: int
+        progress_percentage: float = Field(..., ge=0, le=100)
+        error_count: int = Field(..., ge=0)
         created_at: str
         updated_at: str
+        errors: Optional[List[str]] = Field(default=[], description="발생한 오류들")
     
     class HealthResponse(BaseModel):
         """헬스체크 응답 모델"""
+        # 헬스체크란 서비스의 상태 확인 의미.
         status: str
         timestamp: str
         version: str
         active_stories: int
         total_stories: int
+
+# 인증 검증 함수
+async def verify_auth(credentials: Optional[HTTPAuthorizationCredentials] = Depends(security)):
+    """API 인증 검증"""  # 사용자의 정보 검증
+    if not credentials:
+        # 개발 환경에서는 인증 스킵
+        return {"user_id": "development_user"}
+    
+    # 실제 토큰 검증 로직 
+    if credentials.credentials == "development_token":
+        return {"user_id": "development_user"}
+    
+    raise HTTPException(status_code=401, detail="유효하지 않은 인증 토큰입니다")
 
 class IntegrationAPI:
     """
@@ -88,7 +126,7 @@ class IntegrationAPI:
     워크플로우 오케스트레이터와 외부 시스템 간의 통신을 담당합니다.
     """
     
-    def __init__(self, orchestrator: Optional["WorkflowOrchestrator"] = None):
+    def __init__(self, orchestrator: Optional[Any] = None):
         """
         통합 API 초기화
         
@@ -97,20 +135,45 @@ class IntegrationAPI:
         """
         self.orchestrator = orchestrator
         self.logger = logging.getLogger(__name__)
+        self.story_states: Dict[str, Dict[str, Any]] = {}  # 스토리 상태 캐시
         
         # FastAPI 앱 (사용 가능한 경우)
         if FASTAPI_AVAILABLE:
+            @asynccontextmanager
+            async def lifespan(app: FastAPI):
+                # 시작 시 초기화
+                self.logger.info("Integration API 시작")
+                yield
+                # 종료 시 정리
+                self.logger.info("Integration API 종료")
+                
             self.app = FastAPI(
                 title="CCB_AI Integration API",
                 description="부기와 꼬기 통합 이야기 생성 API",
-                version="1.0.0"
+                version="1.0.0",
+                lifespan=lifespan
             )
+            
+            # CORS 설정
+            self.app.add_middleware(
+                CORSMiddleware,
+                allow_origins=["*"],  # 실제 운영에서는 특정 도메인으로 제한
+                allow_credentials=True,
+                allow_methods=["*"],
+                allow_headers=["*"],
+            )
+            
+            # Rate limiting 설정
+            if limiter:
+                self.app.state.limiter = limiter
+                self.app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+            
             self._setup_routes()
         else:
             self.app = None
             self.logger.warning("FastAPI를 사용할 수 없어 API 엔드포인트가 비활성화됩니다.")
     
-    def set_orchestrator(self, orchestrator: "WorkflowOrchestrator"):
+    def set_orchestrator(self, orchestrator: Any):
         """오케스트레이터 설정"""
         self.orchestrator = orchestrator
     
@@ -120,73 +183,93 @@ class IntegrationAPI:
             return
         
         @self.app.post(APIEndpoints.CREATE_STORY.value, response_model=StoryResponse)
-        async def create_story(request: StoryCreationRequest, background_tasks: BackgroundTasks):
+        @limiter.limit("5/minute") if limiter else lambda x: x
+        async def create_story(
+            request: Request,
+            story_request: StoryCreationRequest, 
+            auth: dict = Depends(verify_auth)
+        ):
             """새 이야기 생성"""
             try:
                 if not self.orchestrator:
-                    raise HTTPException(status_code=500, detail="오케스트레이터가 초기화되지 않았습니다")
+                    return StoryResponse(
+                        success=False,
+                        message="오케스트레이터가 초기화되지 않았습니다",
+                        error_code="ORCHESTRATOR_NOT_INITIALIZED"
+                    )
                 
                 # 아이 프로필 변환
-                age_group = self._determine_age_group(request.child_profile.age)
+                age_group = self._determine_age_group(story_request.child_profile.age)
                 child_profile = ChildProfile(
-                    name=request.child_profile.name,
-                    age=request.child_profile.age,
+                    name=story_request.child_profile.name,
+                    age=story_request.child_profile.age,
                     age_group=age_group,
-                    interests=request.child_profile.interests,
-                    language_level=request.child_profile.language_level,
-                    special_needs=request.child_profile.special_needs
+                    interests=story_request.child_profile.interests,
+                    language_level=story_request.child_profile.language_level,
+                    special_needs=story_request.child_profile.special_needs
                 )
                 
-                # 백그라운드에서 이야기 생성 시작
-                background_tasks.add_task(
-                    self._create_story_background,
+                # 오케스트레이터에서 story_id 먼저 생성
+                story_id = await self._create_story_with_id(
                     child_profile,
-                    request.conversation_data,
-                    request.story_preferences
+                    story_request.conversation_data,
+                    story_request.story_preferences
                 )
-                
-                # 임시 스토리 ID 생성 (실제로는 오케스트레이터에서 생성됨)
-                import uuid
-                story_id = str(uuid.uuid4())
                 
                 return StoryResponse(
+                    success=True,
                     story_id=story_id,
-                    status="started",
                     message="이야기 생성이 시작되었습니다",
-                    data={"child_name": child_profile.name}
+                    data={
+                        "child_name": child_profile.name,
+                        "estimated_completion_time": "3-5분"
+                    }
                 )
                 
             except Exception as e:
-                self.logger.error(f"이야기 생성 요청 실패: {e}")
-                raise HTTPException(status_code=500, detail=str(e))
+                self.logger.error(f"이야기 생성 요청 실패: {e}", exc_info=True)
+                return StoryResponse(
+                    success=False,
+                    message=f"이야기 생성 중 오류가 발생했습니다: {str(e)}",
+                    error_code="STORY_CREATION_FAILED"
+                )
         
-        @self.app.get(APIEndpoints.GET_STORY.value.replace("{story_id}", "{story_id}"), response_model=StoryResponse)
-        async def get_story(story_id: str):
+        @self.app.get(APIEndpoints.GET_STORY.value.replace("{story_id}", "{story_id}"), response_model=StandardResponse)
+        async def get_story(story_id: str, auth: dict = Depends(verify_auth)):
             """이야기 조회"""
             try:
                 if not self.orchestrator:
-                    raise HTTPException(status_code=500, detail="오케스트레이터가 초기화되지 않았습니다")
+                    return StandardResponse(
+                        success=False,
+                        message="오케스트레이터가 초기화되지 않았습니다",
+                        error_code="ORCHESTRATOR_NOT_INITIALIZED"
+                    )
                 
                 # 이야기 상태 로드
                 story_schema = await self.orchestrator.state_manager.load_story_state(story_id)
                 if not story_schema:
-                    raise HTTPException(status_code=404, detail="이야기를 찾을 수 없습니다")
+                    return StandardResponse(
+                        success=False,
+                        message="이야기를 찾을 수 없습니다",
+                        error_code="STORY_NOT_FOUND"
+                    )
                 
-                return StoryResponse(
-                    story_id=story_id,
-                    status="found",
+                return StandardResponse(
+                    success=True,
                     message="이야기 조회 성공",
                     data=story_schema.to_dict()
                 )
                 
-            except HTTPException:
-                raise
             except Exception as e:
-                self.logger.error(f"이야기 조회 실패: {e}")
-                raise HTTPException(status_code=500, detail=str(e))
+                self.logger.error(f"이야기 조회 실패: {e}", exc_info=True)
+                return StandardResponse(
+                    success=False,
+                    message=f"이야기 조회 중 오류가 발생했습니다: {str(e)}",
+                    error_code="STORY_RETRIEVAL_FAILED"
+                )
         
         @self.app.get(APIEndpoints.GET_STORY_STATUS.value.replace("{story_id}", "{story_id}"), response_model=StatusResponse)
-        async def get_story_status(story_id: str):
+        async def get_story_status(story_id: str, auth: dict = Depends(verify_auth)):
             """이야기 상태 조회"""
             try:
                 if not self.orchestrator:
@@ -196,66 +279,108 @@ class IntegrationAPI:
                 if not status:
                     raise HTTPException(status_code=404, detail="이야기를 찾을 수 없습니다")
                 
+                # 타입 안전성을 위한 검증
+                required_fields = ['story_id', 'current_stage', 'workflow_state', 'progress_percentage', 'error_count', 'created_at', 'updated_at']
+                for field in required_fields:
+                    if field not in status:
+                        status[field] = "unknown" if field in ['current_stage', 'workflow_state'] else 0
+                
                 return StatusResponse(**status)
                 
             except HTTPException:
                 raise
             except Exception as e:
-                self.logger.error(f"이야기 상태 조회 실패: {e}")
-                raise HTTPException(status_code=500, detail=str(e))
+                self.logger.error(f"이야기 상태 조회 실패: {e}", exc_info=True)
+                raise HTTPException(status_code=500, detail=f"상태 조회 중 오류가 발생했습니다: {str(e)}")
         
-        @self.app.get(APIEndpoints.LIST_STORIES.value)
-        async def list_stories(active_only: bool = False):
+        @self.app.get(APIEndpoints.LIST_STORIES.value, response_model=StandardResponse)
+        async def list_stories(active_only: bool = False, auth: dict = Depends(verify_auth)):
             """이야기 목록 조회"""
             try:
                 if not self.orchestrator:
-                    raise HTTPException(status_code=500, detail="오케스트레이터가 초기화되지 않았습니다")
+                    return StandardResponse(
+                        success=False,
+                        message="오케스트레이터가 초기화되지 않았습니다",
+                        error_code="ORCHESTRATOR_NOT_INITIALIZED"
+                    )
                 
                 if active_only:
                     stories = await self.orchestrator.state_manager.list_active_stories()
                 else:
                     stories = await self.orchestrator.state_manager.list_all_stories()
                 
-                return {
-                    "stories": stories,
-                    "count": len(stories),
-                    "active_only": active_only
-                }
+                return StandardResponse(
+                    success=True,
+                    message="이야기 목록 조회 성공",
+                    data={
+                        "stories": stories,
+                        "count": len(stories),
+                        "active_only": active_only
+                    }
+                )
                 
             except Exception as e:
-                self.logger.error(f"이야기 목록 조회 실패: {e}")
-                raise HTTPException(status_code=500, detail=str(e))
+                self.logger.error(f"이야기 목록 조회 실패: {e}", exc_info=True)
+                return StandardResponse(
+                    success=False,
+                    message=f"목록 조회 중 오류가 발생했습니다: {str(e)}",
+                    error_code="LIST_RETRIEVAL_FAILED"
+                )
         
-        @self.app.post(APIEndpoints.CANCEL_STORY.value.replace("{story_id}", "{story_id}"))
-        async def cancel_story(story_id: str):
+        @self.app.post(APIEndpoints.CANCEL_STORY.value.replace("{story_id}", "{story_id}"), response_model=StandardResponse)
+        async def cancel_story(story_id: str, auth: dict = Depends(verify_auth)):
             """이야기 생성 취소"""
             try:
                 if not self.orchestrator:
-                    raise HTTPException(status_code=500, detail="오케스트레이터가 초기화되지 않았습니다")
+                    return StandardResponse(
+                        success=False,
+                        message="오케스트레이터가 초기화되지 않았습니다",
+                        error_code="ORCHESTRATOR_NOT_INITIALIZED"
+                    )
                 
                 await self.orchestrator.cancel_story(story_id)
                 
-                return {"message": f"이야기 생성이 취소되었습니다: {story_id}"}
+                return StandardResponse(
+                    success=True,
+                    message=f"이야기 생성이 취소되었습니다",
+                    data={"story_id": story_id}
+                )
                 
             except Exception as e:
-                self.logger.error(f"이야기 취소 실패: {e}")
-                raise HTTPException(status_code=500, detail=str(e))
+                self.logger.error(f"이야기 취소 실패: {e}", exc_info=True)
+                return StandardResponse(
+                    success=False,
+                    message=f"취소 중 오류가 발생했습니다: {str(e)}",
+                    error_code="CANCELLATION_FAILED"
+                )
         
-        @self.app.post(APIEndpoints.RESUME_STORY.value.replace("{story_id}", "{story_id}"))
-        async def resume_story(story_id: str, background_tasks: BackgroundTasks):
+        @self.app.post(APIEndpoints.RESUME_STORY.value.replace("{story_id}", "{story_id}"), response_model=StandardResponse)
+        async def resume_story(story_id: str, auth: dict = Depends(verify_auth)):
             """중단된 이야기 재개"""
             try:
                 if not self.orchestrator:
-                    raise HTTPException(status_code=500, detail="오케스트레이터가 초기화되지 않았습니다")
+                    return StandardResponse(
+                        success=False,
+                        message="오케스트레이터가 초기화되지 않았습니다",
+                        error_code="ORCHESTRATOR_NOT_INITIALIZED"
+                    )
                 
-                # 백그라운드에서 이야기 재개
-                background_tasks.add_task(self._resume_story_background, story_id)
+                # 동기적으로 재개 상태만 확인하고 비동기로 실행
+                resume_task = asyncio.create_task(self.orchestrator.resume_story(story_id))
                 
-                return {"message": f"이야기 재개가 시작되었습니다: {story_id}"}
+                return StandardResponse(
+                    success=True,
+                    message=f"이야기 재개가 시작되었습니다",
+                    data={"story_id": story_id}
+                )
                 
             except Exception as e:
-                self.logger.error(f"이야기 재개 실패: {e}")
-                raise HTTPException(status_code=500, detail=str(e))
+                self.logger.error(f"이야기 재개 실패: {e}", exc_info=True)
+                return StandardResponse(
+                    success=False,
+                    message=f"재개 중 오류가 발생했습니다: {str(e)}",
+                    error_code="RESUME_FAILED"
+                )
         
         @self.app.get(APIEndpoints.HEALTH_CHECK.value, response_model=HealthResponse)
         async def health_check():
@@ -278,7 +403,7 @@ class IntegrationAPI:
                 )
                 
             except Exception as e:
-                self.logger.error(f"헬스체크 실패: {e}")
+                self.logger.error(f"헬스체크 실패: {e}", exc_info=True)
                 return HealthResponse(
                     status="unhealthy",
                     timestamp=datetime.now().isoformat(),
@@ -287,138 +412,103 @@ class IntegrationAPI:
                     total_stories=0
                 )
         
-        @self.app.get(APIEndpoints.STATISTICS.value)
-        async def get_statistics():
+        @self.app.get(APIEndpoints.STATISTICS.value, response_model=StandardResponse)
+        async def get_statistics(auth: dict = Depends(verify_auth)):
             """통계 정보 조회"""
             try:
                 if not self.orchestrator:
-                    raise HTTPException(status_code=500, detail="오케스트레이터가 초기화되지 않았습니다")
+                    return StandardResponse(
+                        success=False,
+                        message="오케스트레이터가 초기화되지 않았습니다",
+                        error_code="ORCHESTRATOR_NOT_INITIALIZED"
+                    )
                 
                 stats = await self.orchestrator.state_manager.get_workflow_statistics()
-                return stats
+                return StandardResponse(
+                    success=True,
+                    message="통계 조회 성공",
+                    data=stats
+                )
                 
             except Exception as e:
-                self.logger.error(f"통계 조회 실패: {e}")
-                raise HTTPException(status_code=500, detail=str(e))
+                self.logger.error(f"통계 조회 실패: {e}", exc_info=True)
+                return StandardResponse(
+                    success=False,
+                    message=f"통계 조회 중 오류가 발생했습니다: {str(e)}",
+                    error_code="STATISTICS_FAILED"
+                )
+    
+    async def _create_story_with_id(
+        self,
+        child_profile: ChildProfile,
+        conversation_data: Optional[Dict[str, Any]],
+        story_preferences: Optional[Dict[str, Any]]
+    ) -> str:
+        """Story ID를 먼저 생성하고 백그라운드에서 실행"""
+        try:
+            # Story ID 먼저 생성
+            story_id = str(uuid.uuid4())
+            
+            # 상태 초기화
+            self.story_states[story_id] = {
+                "status": "initializing",
+                "created_at": datetime.now().isoformat(),
+                "child_profile": child_profile.to_dict() if hasattr(child_profile, 'to_dict') else child_profile.__dict__
+            }
+            
+            # 백그라운드에서 실제 생성 시작
+            asyncio.create_task(self._create_story_background(
+                story_id,
+                child_profile,
+                conversation_data,
+                story_preferences
+            ))
+            
+            return story_id
+            
+        except Exception as e:
+            self.logger.error(f"Story ID 생성 실패: {e}", exc_info=True)
+            raise
     
     async def _create_story_background(
         self,
+        story_id: str,
         child_profile: ChildProfile,
         conversation_data: Optional[Dict[str, Any]],
         story_preferences: Optional[Dict[str, Any]]
     ):
         """백그라운드에서 이야기 생성"""
         try:
+            # 상태 업데이트
+            self.story_states[story_id]["status"] = "in_progress"
+            
             if self.orchestrator:
-                await self.orchestrator.create_story(
+                # 실제 이야기 생성
+                story_schema = await self.orchestrator.create_story(
                     child_profile=child_profile,
                     conversation_data=conversation_data,
                     story_preferences=story_preferences
                 )
+                
+                # 성공 상태 업데이트
+                self.story_states[story_id].update({
+                    "status": "completed",
+                    "completed_at": datetime.now().isoformat(),
+                    "story_data": story_schema.to_dict() if story_schema else None
+                })
+                
         except Exception as e:
-            self.logger.error(f"백그라운드 이야기 생성 실패: {e}")
-    
-    async def _resume_story_background(self, story_id: str):
-        """백그라운드에서 이야기 재개"""
-        try:
-            if self.orchestrator:
-                await self.orchestrator.resume_story(story_id)
-        except Exception as e:
-            self.logger.error(f"백그라운드 이야기 재개 실패: {e}")
+            self.logger.error(f"백그라운드 이야기 생성 실패 (ID: {story_id}): {e}", exc_info=True)
+            # 실패 상태 업데이트
+            self.story_states[story_id].update({
+                "status": "failed",
+                "error": str(e),
+                "failed_at": datetime.now().isoformat()
+            })
     
     def _determine_age_group(self, age: int) -> AgeGroup:
         """나이에 따른 연령대 결정"""
         if age <= 7:
             return AgeGroup.YOUNG_CHILDREN
         else:
-            return AgeGroup.ELEMENTARY
-    
-    # 비-FastAPI 메서드들 (직접 호출용)
-    async def create_story_direct(
-        self,
-        child_profile: ChildProfile,
-        conversation_data: Optional[Dict[str, Any]] = None,
-        story_preferences: Optional[Dict[str, Any]] = None
-    ) -> Dict[str, Any]:
-        """직접 이야기 생성 (FastAPI 없이)"""
-        try:
-            if not self.orchestrator:
-                raise ValueError("오케스트레이터가 초기화되지 않았습니다")
-            
-            story_schema = await self.orchestrator.create_story(
-                child_profile=child_profile,
-                conversation_data=conversation_data,
-                story_preferences=story_preferences
-            )
-            
-            return {
-                "success": True,
-                "story_id": story_schema.metadata.story_id,
-                "data": story_schema.to_dict()
-            }
-            
-        except Exception as e:
-            self.logger.error(f"직접 이야기 생성 실패: {e}")
-            return {
-                "success": False,
-                "error": str(e)
-            }
-    
-    async def get_story_direct(self, story_id: str) -> Dict[str, Any]:
-        """직접 이야기 조회 (FastAPI 없이)"""
-        try:
-            if not self.orchestrator:
-                raise ValueError("오케스트레이터가 초기화되지 않았습니다")
-            
-            story_schema = await self.orchestrator.state_manager.load_story_state(story_id)
-            if not story_schema:
-                return {
-                    "success": False,
-                    "error": "이야기를 찾을 수 없습니다"
-                }
-            
-            return {
-                "success": True,
-                "story_id": story_id,
-                "data": story_schema.to_dict()
-            }
-            
-        except Exception as e:
-            self.logger.error(f"직접 이야기 조회 실패: {e}")
-            return {
-                "success": False,
-                "error": str(e)
-            }
-    
-    async def get_status_direct(self, story_id: str) -> Dict[str, Any]:
-        """직접 상태 조회 (FastAPI 없이)"""
-        try:
-            if not self.orchestrator:
-                raise ValueError("오케스트레이터가 초기화되지 않았습니다")
-            
-            status = await self.orchestrator.get_story_status(story_id)
-            if not status:
-                return {
-                    "success": False,
-                    "error": "이야기를 찾을 수 없습니다"
-                }
-            
-            return {
-                "success": True,
-                "status": status
-            }
-            
-        except Exception as e:
-            self.logger.error(f"직접 상태 조회 실패: {e}")
-            return {
-                "success": False,
-                "error": str(e)
-            }
-    
-    def get_app(self):
-        """FastAPI 앱 인스턴스 반환"""
-        return self.app
-    
-    def is_api_available(self) -> bool:
-        """API 사용 가능 여부 확인"""
-        return FASTAPI_AVAILABLE and self.app is not None 
+            return AgeGroup.ELEMENTARY 

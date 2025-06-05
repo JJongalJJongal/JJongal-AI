@@ -5,6 +5,7 @@ import os
 import logging
 import asyncio
 import traceback
+from pathlib import Path
 from typing import Tuple, Optional, Any, Dict
 from elevenlabs.client import ElevenLabs
 from elevenlabs import play, stream, save
@@ -12,6 +13,19 @@ from elevenlabs import play, stream, save
 from ..configs.app_config import get_env_vars
 
 logger = logging.getLogger(__name__)
+
+
+def ensure_audio_directory() -> Path:
+    """
+    /output/temp/audio 디렉토리가 존재하는지 확인하고 생성
+    
+    Returns:
+        Path: 오디오 저장 디렉토리 경로
+    """
+    audio_dir = Path("output/temp/audio")
+    audio_dir.mkdir(parents=True, exist_ok=True)
+    logger.info(f"오디오 저장 디렉토리 준비 완료: {audio_dir}")
+    return audio_dir
 
 
 def initialize_elevenlabs() -> Optional[ElevenLabs]:
@@ -125,6 +139,11 @@ async def generate_speech(
         
         # 파일로 저장 (필요한 경우)
         if output_path:
+            # output_path가 상대 경로인 경우 /output/temp/audio 기준으로 처리
+            if not os.path.isabs(output_path):
+                audio_dir = ensure_audio_directory()
+                output_path = str(audio_dir / output_path)
+            
             with open(output_path, "wb") as f:
                 f.write(audio)
             logger.info(f"음성 파일 저장 완료: {output_path}")

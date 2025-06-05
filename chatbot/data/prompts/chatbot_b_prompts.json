@@ -238,6 +238,69 @@
   },
   "image_generation": {
     "dall_e_3_optimization": {
+      "general_safety_rules": {
+        "korean_text_handling": "NO Korean text, Chinese text, Japanese text, or any Asian characters should appear in the image. Pure visual storytelling only. 한글, 중국어, 일본어 등 아시아 문자 금지. 순수 시각적 스토리텔링만.",
+        "child_safety": "100% child-safe content only. No violence, scary elements, sharp objects, dark themes.",
+        "cultural_sensitivity": "Respectful representation of all cultures and characters."
+      },
+      "safety_filters": {
+        "unsafe_keywords": [
+          "violence", "violent", "scary", "frightening", "dark", "evil", 
+          "weapon", "gun", "knife", "blood", "death", "kill", "hurt",
+          "폭력", "무서운", "어두운", "악한", "무기", "총", "칼", "피", "죽음", "죽이"
+        ],
+        "positive_replacements": {
+          "fight": "play together",
+          "attack": "approach kindly", 
+          "destroy": "transform",
+          "싸우": "함께 놀다",
+          "공격": "친근하게 다가가다",
+          "파괴": "변화시키다"
+        },
+        "max_prompt_length": 400,
+        "safety_suffix": " Child-friendly and safe."
+      },
+      "fallback_templates": {
+        "basic_safe_prompt": "A gentle, child-friendly watercolor illustration with soft colors and cute characters in a peaceful setting. Hand-drawn style, pastel colors, no text visible.",
+        "character_extraction_failed": "friendly animal characters",
+        "setting_extraction_failed": "in a peaceful, safe place",
+        "mood_extraction_failed": "happy and warm"
+      },
+      "character_extraction": {
+        "exclude_words": [
+          "놀다", "먹다", "가다", "오다", "보다", "듣다", "말하다", "생각하다",
+          "좋다", "나쁘다", "크다", "작다", "예쁘다", "무섭다",
+          "사람", "아이", "엄마", "아빠", "선생님", "친구",
+          "오늘", "어제", "내일", "지금", "여기", "저기"
+        ],
+        "name_patterns": [
+          "([가-힣]{2,4})(?=이|가|은|는|을|를|와|과|에게|한테|께서|에서|으로|로)",
+          "([가-힣]{2,4})(?=라고|라는|라며)",
+          "\"([가-힣]{2,4})\"",
+          "'([가-힣]{2,4})'"
+        ]
+      },
+      "location_keywords": {
+        "자연": ["숲", "나무", "꽃밭", "정원", "들판", "바다", "호수", "강", "산", "언덕"],
+        "건물": ["집", "학교", "도서관", "병원", "상점", "카페", "식당"],
+        "지역": ["마을", "도시", "동네", "거리", "공원", "놀이터"],
+        "특별": ["궁전", "성", "동굴", "섬", "하늘", "구름"]
+      },
+      "action_keywords": {
+        "놀이": ["놀다", "뛰다", "달리다", "웃다", "춤추다"],
+        "학습": ["배우다", "읽다", "쓰다", "공부하다", "탐구하다"],
+        "모험": ["탐험하다", "발견하다", "찾다", "여행하다", "모험하다"],
+        "도움": ["돕다", "함께하다", "협력하다", "친구되다", "나누다"],
+        "성장": ["성장하다", "변화하다", "깨닫다", "이해하다", "극복하다"]
+      },
+      "scene_description_templates": {
+        "놀이": "{characters}가 {setting} 즐겁게 놀고 있는 모습",
+        "학습": "{characters}가 {setting} 새로운 것을 배우는 모습",
+        "모험": "{characters}가 {setting} 흥미로운 모험을 하는 모습",
+        "도움": "{characters}가 {setting} 서로 도우며 함께 하는 모습",
+        "성장": "{characters}가 {setting} 성장하고 배우는 모습",
+        "default": "{characters}가 {setting} 행복하게 지내는 모습"
+      },
       "age_4_7_template": {
         "role": "As a professional fairy tale illustrator for 4-7 year olds, I create warm, lovely, hand-drawn illustrations in a gentle, classic children's storybook style, using colored pencil and light watercolor effects.",
         "style_specifications": {
@@ -253,9 +316,9 @@
         },
         "technical_parameters": {
           "aspect_ratio": "16:9 (landscape for storybook pages)",
-          "negative_prompt_suggestions": "no digital artifacts, no sharp vector lines, no CGI, no photorealism, no airbrushed gloss, no overly saturated colors, no harsh shadows, no uncanny valley, no generic digital look, no perfectly smooth gradients, no overly polished surfaces, no 3D rendered appearance, no hard digital outlines, no cel-shading, no sterile perfection, no computer-generated feel."
+          "negative_prompt_suggestions": "no digital artifacts, no sharp vector lines, no CGI, no photorealism, no airbrushed gloss, no overly saturated colors, no harsh shadows, no uncanny valley, no generic digital look, no perfectly smooth gradients, no overly polished surfaces, no 3D rendered appearance, no hard digital outlines, no cel-shading, no sterile perfection, no computer-generated feel, no Korean text, no Chinese text, no Japanese text, no Asian characters, no text visible."
         },
-        "prompt_template": "한국 아이용 부드러운 수채화 스타일로 손으로 그린 부드러운 연필 스케치 느낌, 파스텔 색감. A charming, hand-drawn watercolor illustration of {{characters}} in {{setting}}. Negative: no digital artifacts, no CGI, no photorealism, no airbrushed gloss, no overly polished look."
+        "prompt_template": "한국 아이용 부드러운 수채화 스타일로 손으로 그린 부드러운 연필 스케치 느낌, 파스텔 색감. A charming, hand-drawn watercolor illustration of {{characters}} in {{setting}}. NO text visible, NO Korean characters, NO Asian text. Negative: no digital artifacts, no CGI, no photorealism, no airbrushed gloss, no overly polished look, no text, no Korean text, no Asian characters."
       },
       "age_8_9_template": {
         "role": "An expert illustrator creating high-end, hand-drawn illustrations for 8-9-year-olds, specializing in a warm, delicate, and detailed classic storybook style using colored pencil, ink, and light watercolor.",
@@ -273,9 +336,9 @@
         },
         "technical_parameters": {
           "aspect_ratio": "16:9 with option for panoramic views",
-          "negative_prompt_suggestions": "no digital artifacts, no sharp vector lines, no CGI, no photorealism, no airbrushed gloss, no overly clean digital look, avoid plastic-like textures, no generic anime style unless specifically requested as 'sketchbook anime', no harsh outlines unless stylistically intended as ink lines, no perfectly smooth gradients, no overly polished surfaces, no 3D rendered appearance, no sterile perfection, no computer-generated feel."
+          "negative_prompt_suggestions": "no digital artifacts, no sharp vector lines, no CGI, no photorealism, no airbrushed gloss, no overly clean digital look, avoid plastic-like textures, no generic anime style unless specifically requested as 'sketchbook anime', no harsh outlines unless stylistically intended as ink lines, no perfectly smooth gradients, no overly polished surfaces, no 3D rendered appearance, no sterile perfection, no computer-generated feel, no Korean text, no Chinese text, no Japanese text, no Asian characters, no text visible."
         },
-        "prompt_template": "한국 아이용 정교한 손그림 수채화+펜 스케치 스타일, 풍부한 질감과 파스텔 톤. A sophisticated, detailed hand-drawn colored pencil, ink, and light watercolor illustration of {{characters}} in {{scene_description}}. Negative: no digital artifacts, no CGI, no photorealism, no airbrushed gloss, no overly clean digital look, no generic anime style."
+        "prompt_template": "한국 아이용 정교한 손그림 수채화+펜 스케치 스타일, 풍부한 질감과 파스텔 톤. A sophisticated, detailed hand-drawn colored pencil, ink, and light watercolor illustration of {{characters}} in {{scene_description}}. NO text visible, NO Korean characters, NO Asian text. Negative: no digital artifacts, no CGI, no photorealism, no airbrushed gloss, no overly clean digital look, no generic anime style, no text, no Korean text, no Asian characters."
       }
     }
   },

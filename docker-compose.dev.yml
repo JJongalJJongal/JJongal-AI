@@ -1,3 +1,5 @@
+# 개발 환경에서 사용하는 docker-compose.yml 파일 (Local 개발)
+# 코드 변경이 많을 때 (hot reload 필요)
 version: '3.8'
 
 services:
@@ -10,8 +12,8 @@ services:
     environment:
       - APP_ENV=development
       - PYTHONPATH=/app
-    # 개발 모드로 실행 (--reload 옵션 추가)
-    command: ["uvicorn", "chatbot.models.voice_ws.app:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]
+    # 개발 모드로 실행 (--reload 옵션 추가) - 올바른 경로로 수정
+    command: ["uvicorn", "chatbot.workflow.integration_api:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]
     
   # 개발 환경에서는 Nginx 제외
   nginx:

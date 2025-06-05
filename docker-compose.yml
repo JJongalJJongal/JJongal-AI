@@ -1,7 +1,5 @@
-version: '3.8'
-
 services:
-  # 꼬꼬북 메인 애플리케이션
+  # 꼬꼬북 메인 애플리케이션 (통합 서버)
   ccb-ai:
     build:
       context: .
@@ -9,77 +7,106 @@ services:
     image: ccb-ai:latest
     container_name: ccb-ai-app
     ports:
-      - "8000:8000"
+      - "8000:8000" # 포트 포워딩 (Host:Container)
     environment:
       # 환경 변수는 .env 파일에서 로드
-      - PYTHONPATH=/app
-      - APP_ENV=production
+      - PYTHONPATH=/app # 파이썬 Module 검색 경로
+      - APP_ENV=production # Application (OS)
+      
       # API 키들은 .env 파일에서 설정
-      - OPENAI_API_KEY=${OPENAI_API_KEY}
-      - ELEVENLABS_API_KEY=${ELEVENLABS_API_KEY}
-      # 데이터베이스 설정
-      - CHROMA_DB_PATH=/app/data/vector_db
+      - OPENAI_API_KEY=${OPENAI_API_KEY} # OpenAI API Key
+      - ELEVENLABS_API_KEY=${ELEVENLABS_API_KEY} # ElevenLabs API Key
+      - WS_AUTH_TOKEN=${WS_AUTH_TOKEN:-secure_default_token} # WebSocket 인증 토큰
+      
+      # 통합 서버 모드 설정
+      - INTEGRATED_MODE=true # 모든 기능을 하나의 서버에서 실행
+      - CHROMA_DB_PATH=/app/chatbot/data/vector_db # ChromaDB 저장 경로
+
+      # 성능 최적화 설정
+      - TORCH_NUM_THREADS=4 # PyTorch thread 수
+      - OMP_NUM_THREADS=4 # OpenMP thread 수
+      - TOKENIZERS_PARALLELISM=true # Tokenizer 병렬 처리 여부
+      
+      # 로깅 설정
+      - LOG_LEVEL=${LOG_LEVEL:-INFO} # 로깅 레벨 (기본 : Info)
+      - LOG_FORMAT=json # JSON 형태로 로그 출력
+      
     volumes:
       # 출력 파일들을 호스트에 저장
-      - ./output:/app/output
-      - ./chatbot/data:/app/chatbot/data
-      # 로그 파일 저장
-      - ./logs:/app/logs
-      # 환경 설정 파일 (선택적)
-      - ./.env:/app/.env:ro
+      - ./output:/app/output  # 생성된 출력 파일들 저장 (Image, Audio)
+      - ./chatbot/data:/app/chatbot/data # 데이터 저장 경로
+      - ./logs:/app/logs # 로그 저장 경로
+      
+      # 캐시 디렉토리 (성능 향상)
+      - ai_cache:/root/.cache # 캐시 데이터 저장 경로
+      
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 60s
-    restart: unless-stopped
-    depends_on:
-      - redis
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"] # 상태 확인 명령어
+      interval: 30s # 상태 확인 간격
+      timeout: 10s # 상태 확인 시간 초과
+      retries: 3 # 상태 확인 실패 시 재시도 횟수
+      start_period: 90s # AI 모델 로딩 시간 고려
+    restart: unless-stopped # 컨테이너 재시작 설정
     networks:
-      - ccb-network
+      - ccb-network # Network 연결
+    
+    # 통합 서버 메모리 설정 (AI + VectorDB)
+    deploy: # 배포 설정
+      resources: # 리소스 설정
+        limits: # 제한 설정
+          memory: 8G  # 메모리 사용량 최적화
+        reservations: # 예약 설정
+          memory: 4G # 예약 메모리
+    
+    # 로그 제한 (디스크 공간 절약)
+    logging: # 로깅 설정
+      driver: "json-file" # JSON 형태로 로그 출력
+      options: # 옵션 설정
+        max-size: "100m" # 로그 파일 최대 크기
+        max-file: "3" # 로그 파일 최대 개수
 
-  # Redis (캐싱 및 세션 관리용)
-  redis:
-    image: redis:7-alpine
-    container_name: ccb-redis
-    ports:
-      - "6379:6379"
-    volumes:
-      - redis_data:/data
-    healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
-      interval: 10s
-      timeout: 5s
-      retries: 3
-    restart: unless-stopped
-    networks:
-      - ccb-network
-
-  # Nginx (리버스 프록시 및 로드 밸런싱)
+  # Nginx (리버스 프록시)
   nginx:
     image: nginx:alpine
     container_name: ccb-nginx
     ports:
       - "80:80"
-      - "443:443"
+      # HTTPS는 필요시 활성화
+      # - "443:443"
     volumes:
       - ./nginx.conf:/etc/nginx/nginx.conf:ro
-      - ./ssl:/etc/nginx/ssl:ro
+      # SSL 설정은 인증서 준비 후 활성화
+      # - ./ssl:/etc/nginx/ssl:ro
     depends_on:
-      - ccb-ai
+      ccb-ai:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "nginx", "-t"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
     restart: unless-stopped
     networks:
       - ccb-network
+    
+    deploy:
+      resources:
+        limits:
+          memory: 256M  # Nginx 메모리 최적화
+        reservations:
+          memory: 128M
+    
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "50m"
+        max-file: "2"
 
 # 볼륨 정의
 volumes:
-  redis_data:
+  ai_cache:
     driver: local
-  vector_db_data:
-    driver: local
-  output_data:
-    driver: local
+    # 캐시 데이터는 임시로 저장
 
 # 네트워크 정의
 networks:

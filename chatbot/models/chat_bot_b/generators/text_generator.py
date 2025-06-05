@@ -23,7 +23,7 @@ from langchain_openai import ChatOpenAI
 # Project imports
 from .base_generator import BaseGenerator
 from chatbot.data.vector_db.core import VectorDB
-from chatbot.data.vector_db.query import query_vector_db, get_similar_stories
+from chatbot.data.vector_db.query import get_similar_stories
 
 # logging 설정
 logger = get_module_logger(__name__)
@@ -48,7 +48,8 @@ class TextGenerator(BaseGenerator):
                  max_retries: int = 3,
                  model_name: str = "gpt-4o",
                  temperature: float = 0.7,
-                 enable_performance_tracking: bool = True):
+                 enable_performance_tracking: bool = True,
+                 model_kwargs: Dict[str, Any] = None):
         """
         Args:
             openai_client: OpenAI 클라이언트
@@ -59,16 +60,18 @@ class TextGenerator(BaseGenerator):
             model_name: 사용할 LLM 모델명
             temperature: 생성 온도
             enable_performance_tracking: 성능 추적 활성화
+            model_kwargs: LLM 모델 키워드 인수 (ex: {"max_tokens": 1000})
         """
         super().__init__(max_retries=max_retries, timeout=180.0)
         
-        self.openai_client = openai_client
-        self.vector_db_path = vector_db_path
-        self.collection_name = collection_name
-        self.prompts_file_path = prompts_file_path
-        self.model_name = model_name
-        self.temperature = temperature
-        self.enable_performance_tracking = enable_performance_tracking
+        self.openai_client = openai_client # OpenAI 클라이언트
+        self.vector_db_path = vector_db_path # ChromaDB 경로
+        self.collection_name = collection_name # ChromaDB 컬렉션 이름
+        self.prompts_file_path = prompts_file_path # 개선된 프롬프트 파일 경로
+        self.model_name = model_name # 사용할 LLM 모델명
+        self.temperature = temperature # 생성 온도
+        self.enable_performance_tracking = enable_performance_tracking # 성능 추적 활성화
+        self.model_kwargs = model_kwargs or {} # LLM 모델 키워드 인수 (ex: {"max_tokens": 1000})
         
         # Enhanced LangChain 구성
         self.vector_store = None

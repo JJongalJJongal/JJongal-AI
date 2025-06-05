@@ -5,19 +5,30 @@ FastAPI 앱 설정 모듈 (모듈화된 구조)
 모듈화된 core, processors, handlers를 사용합니다.
 """
 import asyncio
+import os
+import sys
 from contextlib import asynccontextmanager
 from typing import Optional
-from fastapi import FastAPI, WebSocket, HTTPException, Response, status, Query
+from fastapi import FastAPI, WebSocket, HTTPException, Response, Query, status
 from fastapi.middleware.cors import CORSMiddleware
+from dotenv import load_dotenv
+
+# 경로 설정
+current_dir = os.path.dirname(os.path.abspath(__file__)) # 현재 모듈 경로 : chatbot/models/voice_ws/app.py
+project_root = os.path.abspath(os.path.join(current_dir, '..', '..', '..')) # 프로젝트 루트 경로 : CCB_AI
+sys.path.append(project_root) # Python 경로에 프로젝트 루트 추가
+load_dotenv(os.path.join(project_root, '.env')) # .env 파일 로드
 
 # 모듈화된 컴포넌트 임포트
 from shared.utils.logging_utils import get_module_logger 
-from .core.connection_engine import ConnectionEngine
-from .processors.auth_processor import AuthProcessor
-from .processors.audio_processor import AudioProcessor 
-from .handlers.audio_handler import handle_audio_websocket
-from .handlers.story_handler import handle_story_generation_websocket
+from chatbot.models.voice_ws.core.connection_engine import ConnectionEngine
+from chatbot.models.voice_ws.processors.auth_processor import AuthProcessor
+from chatbot.models.voice_ws.processors.audio_processor import AudioProcessor 
+from chatbot.models.voice_ws.handlers.audio_handler import handle_audio_websocket
+from chatbot.models.voice_ws.handlers.story_handler import handle_story_generation_websocket
 from chatbot.data.vector_db.core import VectorDB # VectorDB 임포트 추가
+
+
 
 logger = get_module_logger(__name__) # 로거 설정
 
@@ -57,9 +68,9 @@ app = FastAPI(
 # CORS 설정 추가
 app.add_middleware(
     CORSMiddleware, # CORS 설정
-    allow_origins=["*"],  # 모든 출처 허용
+    allow_origins=["http://localhost:3000", "http://localhost:8080"],  # 프로덕션에서는 특정 도메인만 허용
     allow_credentials=True, # 자격 증명 허용
-    allow_methods=["*"], # 모든 메서드 허용
+    allow_methods=["GET", "POST", "PUT", "DELETE"], # 필요한 메서드만 허용
     allow_headers=["*"], # 모든 헤더 허용
 )
 
