@@ -102,12 +102,19 @@ chatbot/tests/*.mp3
 *.safetensors
 models/
 
-# 대용량 원본 데이터 (VectorDB는 포함하지 않았음.)
+# 대용량 원본 데이터 (VectorDB만 필요)
 chatbot/data/raw/
 chatbot/data/processed/
 chatbot/data/results/
 chatbot/data/*.ipynb
 chatbot/data/analyze_story_data.py
+
+# 기타 불필요한 대용량 파일들
+*.wav
+*.mp3
+*.mp4
+*.avi
+*.mov
 
 # 백업 파일
 *.bak
