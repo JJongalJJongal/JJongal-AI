@@ -195,6 +195,11 @@ class IntegrationAPI:
         ):
             """새 이야기 생성"""
             try:
+                # Try to initialize orchestrator if not already done
+                global orchestrator_initialized
+                if not self.orchestrator and not orchestrator_initialized:
+                    orchestrator_initialized = init_orchestrator()
+                
                 if not self.orchestrator:
                     return StoryResponse(
                         success=False,
@@ -452,6 +457,7 @@ class IntegrationAPI:
         try:
             # Story ID 먼저 생성
             story_id = str(uuid.uuid4())
+            self.logger.info(f"새 스토리 ID 생성: {story_id}")
             
             # 상태 초기화
             self.story_states[story_id] = {
@@ -459,14 +465,17 @@ class IntegrationAPI:
                 "created_at": datetime.now().isoformat(),
                 "child_profile": child_profile.to_dict() if hasattr(child_profile, 'to_dict') else child_profile.__dict__
             }
+            self.logger.info(f"스토리 상태 초기화 완료: {story_id}")
             
             # 백그라운드에서 실제 생성 시작
-            asyncio.create_task(self._create_story_background(
+            self.logger.info(f"백그라운드 태스크 생성 시작: {story_id}")
+            task = asyncio.create_task(self._create_story_background(
                 story_id,
                 child_profile,
                 conversation_data,
                 story_preferences
             ))
+            self.logger.info(f"백그라운드 태스크 생성 완료: {story_id}, task: {task}")
             
             return story_id
             
@@ -481,18 +490,29 @@ class IntegrationAPI:
         conversation_data: Optional[Dict[str, Any]],
         story_preferences: Optional[Dict[str, Any]]
     ):
-        """백그라운드에서 이야기 생성"""
+        """Background에서 이야기 생성"""
+        self.logger.info(f"Background 이야기 생성 시작 (ID: {story_id})")
+        
         try:
             # 상태 업데이트
-            self.story_states[story_id]["status"] = "in_progress"
+            if story_id in self.story_states:
+                self.story_states[story_id]["status"] = "in_progress"
+                self.logger.info(f"상태 업데이트 완료: {story_id} -> in_progress")
+            else:
+                self.logger.warning(f"Story state not found for {story_id}")
+            
+            self.logger.info(f"Orchestrator 상태: {self.orchestrator is not None}")
             
             if self.orchestrator:
+                self.logger.info(f"이야기 생성 호출 시작 (ID: {story_id})")
                 # 실제 이야기 생성
                 story_schema = await self.orchestrator.create_story(
                     child_profile=child_profile,
                     conversation_data=conversation_data,
                     story_preferences=story_preferences
                 )
+                
+                self.logger.info(f"이야기 생성 완료 (ID: {story_id})")
                 
                 # 성공 상태 업데이트
                 self.story_states[story_id].update({
@@ -501,14 +521,21 @@ class IntegrationAPI:
                     "story_data": story_schema.to_dict() if story_schema else None
                 })
                 
+                self.logger.info(f"Background 이야기 생성 성공 (ID: {story_id})")
+            else:
+                self.logger.error(f"Orchestrator가 초기화되지 않음 (ID: {story_id})")
+                
         except Exception as e:
-            self.logger.error(f"백그라운드 이야기 생성 실패 (ID: {story_id}): {e}", exc_info=True)
+            self.logger.error(f"Background 이야기 생성 실패 (ID: {story_id}): {e}", exc_info=True)
             # 실패 상태 업데이트
-            self.story_states[story_id].update({
-                "status": "failed",
-                "error": str(e),
-                "failed_at": datetime.now().isoformat()
-            })
+            if story_id in self.story_states:
+                self.story_states[story_id].update({
+                    "status": "failed",
+                    "error": str(e),
+                    "failed_at": datetime.now().isoformat()
+                })
+            else:
+                self.logger.error(f"스토리 상태 업데이트 실패 - story_id {story_id}")
     
     def _determine_age_group(self, age: int) -> AgeGroup:
         """나이에 따른 연령대 결정"""
@@ -517,17 +544,57 @@ class IntegrationAPI:
         else:
             return AgeGroup.ELEMENTARY
 
-# Global app instance for uvicorn
-# This is what uvicorn will look for when starting the server
+# 전역 변수 설정 -> 지연 Import (겹치는 Import 방지)
+# uvicorn 시작 시 찾을 변수
+# 오케스트레이터 초기화 여부 확인
 if FASTAPI_AVAILABLE:
-    # Create the integration API instance
+    # Import orchestrator
+    try:
+        from .orchestrator import WorkflowOrchestrator
+        ORCHESTRATOR_AVAILABLE = True
+    except ImportError as e:
+        logging.warning(f"WorkflowOrchestrator를 가져올 수 없습니다: {e}")
+        ORCHESTRATOR_AVAILABLE = False
+    
+    # 통합 API 인스턴스 생성
     integration_api = IntegrationAPI()
     
-    # Export the app instance for uvicorn
-    app = integration_api.app
+    # Orchestrator 초기화 함수
+    def init_orchestrator():
+        if ORCHESTRATOR_AVAILABLE:
+            try:
+                orchestrator = WorkflowOrchestrator(
+                    output_dir="/app/output", # 출력 디렉토리 경로
+                    enable_multimedia=True,
+                    enable_voice=False
+                )
+                # 챗봇 초기화
+                orchestrator.initialize_chatbots()
+                
+                # 통합 API에 오케스트레이터 설정
+                integration_api.set_orchestrator(orchestrator)
+                logging.info("WorkflowOrchestrator 초기화 및 연결 완료") # 로그 출력
+                return True
+            except Exception as e:
+                logging.warning(f"WorkflowOrchestrator 초기화 실패: {e}")
+                logging.info("API는 오케스트레이터 없이 실행됩니다") # 로그 출력
+                return False
+        return False
     
-    # Note: The orchestrator will be set later when the system initializes
+    # 첫 번째 API 호출 시 Orchestrator 초기화
+    orchestrator_initialized = False
+    
+    # uvicorn 시작 시 찾을 변수
+    app = integration_api.app
 else:
-    # Fallback for when FastAPI is not available
+    # FastAPI 사용 불가 시 대체해야 할 변수
     app = None
-    integration_api = None 
+    integration_api = None
+
+# 로그 레벨 설정 (애플리케이션 레벨에서 설정해야 함 - uvicorn은 자체 로거만 설정)
+logging.getLogger().setLevel(logging.INFO)
+logging.basicConfig(
+    level=logging.INFO, 
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    force=True  # 기존 설정을 덮어쓰기
+) 

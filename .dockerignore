@@ -120,3 +120,6 @@ chatbot/data/analyze_story_data.py
 *.bak
 *.backup
 *.env
+
+# md 파일
+*.md

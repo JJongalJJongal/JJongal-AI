@@ -39,6 +39,7 @@ class ChatBotA:
     def __init__(self, 
                  vector_db_instance: VectorDB,
                  token_limit: int = 10000, 
+                 use_langchain: bool = True,
                  legacy_compatibility: bool = True,
                  enhanced_mode: bool = True,
                  enable_performance_tracking: bool = True):
@@ -48,6 +49,7 @@ class ChatBotA:
         Args:
             vector_db_instance: 미리 초기화된 VectorDB 인스턴스
             token_limit: 대화 토큰 제한
+            use_langchain: LangChain 사용 여부
             legacy_compatibility: 레거시 호환성 유지 여부
             enhanced_mode: Enhanced 모드 사용 여부
             enable_performance_tracking: 성능 추적 활성화
@@ -57,6 +59,7 @@ class ChatBotA:
         self.legacy_compatibility = legacy_compatibility
         self.enhanced_mode = enhanced_mode
         self.enable_performance_tracking = enable_performance_tracking
+        self.use_langchain = use_langchain
         
         # 프롬프트 버전 설정
         self.prompt_version = "Enhanced v2.0" if enhanced_mode else "Standard v1.0"

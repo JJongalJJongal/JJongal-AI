@@ -135,6 +135,6 @@ def get_default_chatbot_b_prompts() -> Dict[str, Any]:
                 "아이들이 쉽게 이해할 수 있는 언어를 사용하고, 이야기의 흐름을 자연스럽게 이어가야 해."
             ]
         },
-        "image_generation_prompt_template": "아이들을 위한 동화책 일러스트레이션. 테마: {theme}, 등장인물: {characters}, 배경: {setting}, 스타일: {style}. 아기자기하고 밝은 색감, 단순하고 깔끔한 선, 친근한 캐릭터 디자인. 텍스트 없음.",
+        "image_generation_prompt_template": "Gentle children's book illustration. 테마: {theme}, 등장인물: {characters}, 배경: {setting}. Hand-sketched with colored pencils and soft watercolor, like a beloved worn storybook. Visible pencil lines, slightly uneven coloring, warm paper texture. Muted pastels - faded pinks, sage greens, butter yellows. Cozy and nostalgic, imperfect but charming.",
         "narration_generation_prompt_template": "다음 동화 장면에 대한 내레이션을 작성해 주세요. 이 내레이션은 {age}세 아이가 듣기에 적합해야 합니다. 간결하고 생생한 표현을 사용하세요. 정서적으로 풍부하고 아이의 상상력을 자극할 수 있는 내용이어야 합니다.\n\n장면 설명: {scene_description}"
     } 

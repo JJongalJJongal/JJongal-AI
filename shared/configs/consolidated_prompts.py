@@ -145,35 +145,29 @@ class ConsolidatedPrompts:
     
     # 이미지 생성 프롬프트
     IMAGE_GENERATION_PROMPTS = {
-        AgeGroup.YOUNG_CHILDREN: """Create a heartwarming Japanese anime children's storybook illustration: {scene_description}
+        AgeGroup.YOUNG_CHILDREN: """Cozy children's storybook illustration: {scene_description}
 
 주제: {theme}
-캐릭터: {characters}
+캐릭터: {characters}  
 배경: {setting}
 
-Style: Studio Ghibli watercolor style with incredibly detailed pastoral countryside elements
-Characters: Ultra kawaii characters with huge sparkling diamond eyes, baby-soft features, rosy button cheeks
-Composition: Cozy detailed environment with wooden cottages, scattered flowers, baskets, garden tools
-Colors: Warm pastel palette - gentle mint greens, cream whites, soft peach tones, sky blues
-Atmosphere: Golden hour lighting, peaceful countryside morning with soft warm sunbeams
-Details: Include tiny environmental details like scattered carrots, wooden ladders, wicker baskets, small flowers
-Mood: Incredibly warm, safe, nurturing atmosphere that feels like a gentle hug
-Art style: Studio Ghibli masterpiece quality with rich environmental storytelling""",
+Hand-sketched with colored pencils and soft watercolor, like a beloved worn picture book found in grandmother's attic. Gentle pencil lines still visible, slightly uneven coloring that shows the loving human touch. Warm cream paper texture, soft rounded edges, delightfully imperfect. 
+
+Colors are muted pastels like faded photographs - dusty pinks, sage greens, butter yellows, powder blues. The kind of gentle tones that feel safe and sleepy.
+
+Simple composition that doesn't overwhelm little eyes, with the main character clearly the hero of their own small adventure. Cozy details like scattered flower petals, wooden toys, or soft fabric textures.""",
         
-        AgeGroup.ELEMENTARY: """Create a detailed Japanese anime children's storybook illustration: {scene_description}
+        AgeGroup.ELEMENTARY: """Beautiful detailed storybook illustration: {scene_description}
 
 주제: {theme}
 캐릭터: {characters}
 배경: {setting}
 
-Style: Sophisticated Studio Ghibli watercolor with intricate countryside details
-Characters: Expressive kawaii characters with sparkling eyes, detailed expressions, gentle interactions
-Composition: Rich environmental storytelling with cozy buildings, natural elements, activity details
-Colors: Harmonious pastel palette with golden hour warmth and natural countryside tones
-Atmosphere: Emotionally rich, detailed world that invites exploration and wonder
-Details: Include story-enhancing environmental elements, tools, nature details, cozy home elements
-Mood: Deeply comforting yet adventurous, like stepping into a beloved storybook world
-Art style: Studio Ghibli professional quality with masterful attention to environmental details"""
+Hand-drawn like a treasured children's book from a cozy library corner. Colored pencil sketches with delicate watercolor washes, showing the artist's gentle touch in every stroke. Visible paper grain and subtle artistic imperfections that make it feel real and loved.
+
+Rich but muted earth tones - warm ochre, dusty rose, faded sage, cream whites, soft browns. The colors of autumn leaves and old quilts, nostalgic and timeless.
+
+Detailed enough to reward close looking, with hidden treasures tucked into corners - tiny flowers, sleeping cats, forgotten books. The kind of illustration that has been lovingly pored over by generations of children, each discovering something new."""
     }
     
     # 내레이션 생성 프롬프트

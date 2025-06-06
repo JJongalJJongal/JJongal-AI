@@ -13,14 +13,22 @@ services:
       - PYTHONPATH=/app # 파이썬 Module 검색 경로
       - APP_ENV=production # Application (OS)
       
-      # API 키들은 .env 파일에서 설정
-      - OPENAI_API_KEY=${OPENAI_API_KEY} # OpenAI API Key
-      - ELEVENLABS_API_KEY=${ELEVENLABS_API_KEY} # ElevenLabs API Key
+      # API 키들 (.env 파일 또는 환경변수에서 설정)
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-} # OpenAI API Key (필요시 설정)
+      - ELEVENLABS_API_KEY=${ELEVENLABS_API_KEY:-} # ElevenLabs API Key (필요시 설정)
       - WS_AUTH_TOKEN=${WS_AUTH_TOKEN:-secure_default_token} # WebSocket 인증 토큰
+      - JWT_SECRET_KEY=${JWT_SECRET_KEY:-ccb_ai_default_secret_key_2024} # JWT 시크릿 키
       
       # 통합 서버 모드 설정
       - INTEGRATED_MODE=true # 모든 기능을 하나의 서버에서 실행
       - CHROMA_DB_PATH=/app/chatbot/data/vector_db # ChromaDB 저장 경로
+      - VECTOR_DB_PATH=/app/chatbot/data/vector_db/main # VectorDB 실제 데이터 경로
+      
+      # 멀티미디어 생성 설정
+      - MULTIMEDIA_OUTPUT_DIR=/app/output # 멀티미디어 파일 출력 디렉토리
+      - ENABLE_MULTIMEDIA=true # 멀티미디어 생성 활성화
+      - MAX_IMAGES_PER_STORY=5 # 스토리당 최대 이미지 수
+      - AUDIO_FORMAT=mp3 # 오디오 파일 형식
 
       # 성능 최적화 설정
       - TORCH_NUM_THREADS=4 # PyTorch thread 수

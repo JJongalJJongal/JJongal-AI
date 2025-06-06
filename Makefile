@@ -42,7 +42,7 @@ clean:
 # 시연 준비 (환경 변수 체크 + 빌드 + 실행)
 .PHONY: demo-setup
 demo-setup:
-	@echo "🚀 꼬꼬북 AI 시연 준비 중..."
+	@echo "꼬꼬북 AI 시연 준비 중..."
 	@if [ ! -f .env ]; then \
 		echo ".env 파일이 없습니다. env.example을 참고하여 생성하세요."; \
 		exit 1; \
@@ -92,13 +92,13 @@ demo-test:
 	@echo "1️⃣ API 헬스체크:"
 	@curl -s http://localhost:8000/api/v1/health || echo "실패"
 	@echo ""
-	@echo "2️⃣ WebSocket 연결 테스트:"
-	@curl -s "http://localhost:8000/ws/test" || echo "WebSocket 테스트 실패"
+	@echo "2️⃣ API 엔드포인트 목록 확인:"
+	@curl -s "http://localhost:8000/docs" > /dev/null && echo "✅ API 문서 접근 가능" || echo "❌ API 문서 접근 실패"
 	@echo ""
 	@echo "3️⃣ 스토리 생성 API 테스트:"
 	@curl -s -X POST "http://localhost:8000/api/v1/stories" \
 		-H "Content-Type: application/json" \
-		-d '{"user_input": "용감한 토끼", "age_group": "5-7"}' || echo "스토리 API 테스트 실패"
+		-d '{"child_profile": {"name": "테스트아이", "age": 5, "interests": ["동물", "모험"], "language_level": "basic"}, "enable_multimedia": true}' | jq '.' || echo "스토리 API 테스트 실패"
 
 # 시연 정리
 .PHONY: demo-clean

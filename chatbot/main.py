@@ -264,7 +264,13 @@ def main():
         suite = unittest.TestLoader().loadTestsFromTestCase(TestChatBotIntegration)
         unittest.TextTestRunner(verbosity=2).run(suite)
     else: # 실제 챗봇 테스트 실행
-        fairy_tail = WorkflowOrchestrator() # 워크플로우 오케스트레이터 인스턴스 생성
+        # 출력 디렉토리 설정 (app.py와 일관성 유지)
+        output_dir = os.getenv("MULTIMEDIA_OUTPUT_DIR", "output")
+        
+        fairy_tail = WorkflowOrchestrator(
+            output_dir=output_dir,
+            enable_multimedia=os.getenv("ENABLE_MULTIMEDIA", "true").lower() == "true"
+        ) # 워크플로우 오케스트레이터 인스턴스 생성 (app.py와 동일한 파라미터)
         fairy_tail.run()
 
 if __name__ == "__main__":

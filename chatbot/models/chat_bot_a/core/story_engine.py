@@ -7,9 +7,11 @@ ChatBot A 통합 이야기 엔진
 from typing import Dict, List, Any, Optional, Set
 import random
 import json
+import os
 
 from shared.utils.logging_utils import get_module_logger
 from shared.utils.openai_utils import generate_chat_completion
+from .rag_engine import RAGEngine
 
 logger = get_module_logger(__name__)
 
@@ -55,9 +57,30 @@ class StoryEngine:
         
         # === 분석 및 생성 ===
         self.openai_client = openai_client
-        self.rag_system = rag_system
         self.conversation_manager = conversation_manager
         self.story_outline = None  # 생성된 이야기 개요
+        
+        # RAG 시스템 설정 - VectorDB 인스턴스를 RAGEngine으로 변환
+        self.rag_system = None
+        if rag_system:
+            try:
+                # VectorDB 인스턴스에서 경로 추출
+                if hasattr(rag_system, 'persist_directory') and rag_system.persist_directory:
+                    vector_db_path = str(rag_system.persist_directory)
+                else:
+                    # 환경변수에서 경로 가져오기
+                    vector_db_path = os.getenv("VECTOR_DB_PATH", "/app/chatbot/data/vector_db")
+                
+                # RAGEngine 생성
+                self.rag_system = RAGEngine(
+                    openai_client=openai_client,
+                    vector_db_path=vector_db_path,
+                    collection_name="fairy_tales"
+                )
+                logger.info(f"StoryEngine: RAGEngine 생성 완료 (경로: {vector_db_path})")
+            except Exception as e:
+                logger.warning(f"StoryEngine: RAGEngine 생성 실패: {e}")
+                self.rag_system = rag_system  # 기존 시스템 사용
         
         # === 수집 통계 ===
         self.total_interactions = 0

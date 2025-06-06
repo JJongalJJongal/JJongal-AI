@@ -90,7 +90,7 @@ async def handle_audio_websocket(
             interests=interests_list, # 관심사 목록
             chatbot_name="부기" # 챗봇 이름
         ) 
-        greeting_audio_b64, tts_status, tts_error, tts_code = await audio_processor.synthesize_tts(greeting) # 인사말 음성 생성
+        greeting_audio_b64, tts_status, tts_error, tts_code = await audio_processor.synthesize_tts(greeting) # ElevenLabs로 인사말 음성 생성
         
         greeting_packet = {
             "type": "ai_response", "text": greeting, "audio": greeting_audio_b64, # 인사말 텍스트 및 음성 전송
@@ -199,7 +199,7 @@ async def handle_audio_websocket(
                     step7_start = time.time()
                     logger.info(f"[AUDIO_PROCESS] 7단계: TTS 처리 시작 - 텍스트: '{response[:50]}...'")
                     try:
-                        bot_audio_b64, bot_tts_status, bot_tts_error, bot_tts_code = await audio_processor.synthesize_tts(response) # 챗봇 응답 음성 생성
+                        bot_audio_b64, bot_tts_status, bot_tts_error, bot_tts_code = await audio_processor.synthesize_tts(response) # ElevenLabs로 챗봇 응답 음성 생성
                         step7_time = time.time() - step7_start
                         logger.info(f"[AUDIO_PROCESS] 7단계 완료: {step7_time:.2f}초 소요, 오디오크기: {len(bot_audio_b64) if bot_audio_b64 else 0}자")
                     except Exception as e:

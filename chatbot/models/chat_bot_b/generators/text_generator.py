@@ -129,23 +129,45 @@ class TextGenerator(BaseGenerator):
     
     def _initialize_vector_db(self):
         """ChromaDB 초기화"""
+        logger.info(f"VectorDB 초기화 시작 - 경로: {self.vector_db_path}")
+        
         if not self.vector_db_path:
             logger.warning("ChromaDB 경로가 설정되지 않음. RAG 기능 비활성화")
             return
         
+        # 경로 존재 확인
+        import os
+        if not os.path.exists(self.vector_db_path):
+            logger.error(f"VectorDB 경로가 존재하지 않음: {self.vector_db_path}")
+            self.vector_store = None
+            return
+            
+        logger.info(f"VectorDB 경로 확인됨: {self.vector_db_path}")
+        
         try:
             self.vector_store = VectorDB(persist_directory=self.vector_db_path)
+            logger.info(f"VectorDB 객체 생성 완료")
             
             # 컬렉션 존재 확인
             try:
                 collection = self.vector_store.get_collection(self.collection_name)
                 logger.info(f"ChromaDB 컬렉션 '{self.collection_name}' 연결 완료")
+                
+                # 컬렉션 데이터 개수 확인
+                try:
+                    count = collection.count()
+                    logger.info(f"컬렉션 '{self.collection_name}' 데이터 개수: {count}")
+                except Exception as count_e:
+                    logger.warning(f"컬렉션 데이터 개수 확인 실패: {count_e}")
+                    
             except Exception as e:
                 logger.warning(f"컬렉션 '{self.collection_name}' 연결 실패: {e}")
+                logger.warning("RAG 기능은 사용할 수 없지만 기본 생성은 가능합니다")
         
         except Exception as e:
             logger.error(f"ChromaDB 초기화 실패: {e}")
-            raise
+            self.vector_store = None
+            logger.warning("VectorDB 없이 기본 생성 모드로 진행")
     
     def _setup_enhanced_chains(self):
         """Enhanced LangChain 체인 설정 (연령별)"""
@@ -296,9 +318,15 @@ class TextGenerator(BaseGenerator):
         self.current_task_id = story_id
         
         try:
+            # OpenAI 클라이언트 상태 확인
+            logger.info(f"🔥 OpenAI 클라이언트 상태: {self.openai_client is not None}")
+            logger.info(f"🔥 VectorDB 상태: {self.vector_store is not None}")
+            logger.info(f"🔥 Text chains 상태: {len(self.text_chains) if self.text_chains else 0}개")
+            
             # 연령대 결정
             target_age = input_data.get("target_age", input_data.get("age_group", 7))
             age_group_key = self._determine_age_group(target_age)
+            logger.info(f"🔥 결정된 연령대: {target_age} -> {age_group_key}")
             
             # 진행 상황 업데이트
             if progress_callback:
@@ -340,10 +368,18 @@ class TextGenerator(BaseGenerator):
                 })
             
             # 4. 텍스트 생성 with 체인 오브 소트
+            logger.info(f"🔥 텍스트 생성 시작 - Chain: {age_group_key}")
+            logger.info(f"🔥 Prompt 데이터 keys: {list(prompt_data.keys())}")
+            
             generated_text = await chain.ainvoke(prompt_data)
+            
+            logger.info(f"🔥 생성된 텍스트 길이: {len(generated_text) if generated_text else 0}")
+            logger.info(f"🔥 생성된 텍스트 미리보기: {generated_text[:200] if generated_text else 'None'}...")
             
             # 5. Enhanced 파싱
             story_data = self._parse_enhanced_story(generated_text)
+            logger.info(f"🔥 파싱된 스토리 데이터 keys: {list(story_data.keys()) if story_data else 'None'}")
+            logger.info(f"🔥 파싱된 chapters 개수: {len(story_data.get('chapters', [])) if story_data else 0}")
             
             # 6. 성능 메트릭 수집
             generation_time = time.time() - start_time

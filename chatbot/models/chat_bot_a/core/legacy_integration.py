@@ -268,9 +268,17 @@ class LegacyStoryAnalyzerAdapter:
         if rag_system:
             try:
                 # 기존 RAG 시스템의 설정을 사용하여 새로운 RAG 엔진 생성
-                rag_engine = RAGEngine(
+                vector_db_path = None
+                if hasattr(rag_system, 'persist_directory') and rag_system.persist_directory: # VectorDB 경로 존재 여부 확인
+                    vector_db_path = str(rag_system.persist_directory) # VectorDB 경로
+                else:
+                    # 환경변수에서 경로 가져오기
+                    import os
+                    vector_db_path = os.getenv("VECTOR_DB_PATH", "/app/chatbot/data/vector_db") # VectorDB 경로
+                
+                rag_engine = RAGEngine( # RAG 엔진 생성
                     openai_client=openai_client,
-                    vector_db_path=str(rag_system.persist_directory) if hasattr(rag_system, 'persist_directory') else None
+                    vector_db_path=vector_db_path # VectorDB 경로
                 )
             except Exception as e:
                 logger.warning(f"RAG 엔진 변환 실패: {e}")
@@ -325,28 +333,38 @@ class LegacyIntegrationManager:
         self.rag_engine = None
         if rag_system:
             try:
-                self.rag_engine = RAGEngine(
+                # VectorDB 인스턴스에서 경로 추출
+                vector_db_path = None
+                if hasattr(rag_system, 'persist_directory') and rag_system.persist_directory: # VectorDB 경로 존재 여부 확인
+                    vector_db_path = str(rag_system.persist_directory) # VectorDB 경로
+                else:
+                    # 환경변수에서 경로 가져오기
+                    import os
+                    vector_db_path = os.getenv("VECTOR_DB_PATH", "/app/chatbot/data/vector_db") # VectorDB 경로
+                
+                self.rag_engine = RAGEngine( # RAG 엔진 생성    
                     openai_client=openai_client,
-                    vector_db_path=str(rag_system.persist_directory) if hasattr(rag_system, 'persist_directory') else None
+                    vector_db_path=vector_db_path # VectorDB 경로
                 )
+                logger.info(f"RAG 엔진 생성 완료: {vector_db_path}") # 로그 출력
             except Exception as e:
                 logger.warning(f"RAG 엔진 생성 실패: {e}")
         
         # 어댑터들 초기화
         self.conversation = LegacyConversationManagerAdapter(
-            token_limit, use_langchain, openai_client, self.rag_engine
+            token_limit, use_langchain, openai_client, self.rag_engine # RAG 엔진 전달
         )
         
         self.formatter = LegacyMessageFormatterAdapter(
-            prompts or {}, None, None, None, "부기"
+            prompts or {}, None, None, None, "부기" # 프롬프트 딕셔너리 전달
         )
         
         self.collector = LegacyStoryCollectorAdapter(
-            openai_client, self.rag_engine
+            openai_client, self.rag_engine # RAG 엔진 전달
         )
         
         self.analyzer = LegacyStoryAnalyzerAdapter(
-            openai_client, rag_system
+            openai_client, rag_system # RAG 시스템 전달
         )
         
         logger.info(f"레거시 통합 매니저 초기화 완료 (LangChain: {use_langchain})")

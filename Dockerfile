@@ -105,17 +105,17 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=90s --retries=3 \
 RUN echo '#!/bin/bash\n\
 set -e\n\
 \n\
-echo "🚀 꼬꼬북 AI 시스템 시작 중..."\n\
-echo "📁 작업 디렉토리: $(pwd)"\n\
-echo "🐍 Python 버전: $(python --version)"\n\
-echo "📦 설치된 패키지 확인..."\n\
+echo "꼬꼬북 AI 시스템 시작 중..."\n\
+echo "작업 디렉토리: $(pwd)"\n\
+echo "Python 버전: $(python --version)"\n\
+echo "설치된 패키지 확인..."\n\
 \n\
 # 필요한 디렉토리 확인 및 생성\n\
 mkdir -p /app/output /app/logs /app/chatbot/data\n\
 \n\
 # FastAPI 서버 시작 (통합 API) - 올바른 경로로 수정\n\
-echo "🌐 FastAPI 서버 시작 중... (포트: 8000)"\n\
-exec uvicorn chatbot.workflow.integration_api:app \\\n\
+echo "FastAPI 서버 시작 중... (포트: 8000)"\n\
+exec uvicorn chatbot.app:app \\\n\
     --host 0.0.0.0 \\\n\
     --port 8000 \\\n\
     --workers 1 \\\n\
@@ -128,4 +128,4 @@ exec uvicorn chatbot.workflow.integration_api:app \\\n\
 CMD ["/app/start.sh"]
 
 # 개발 모드용 오버라이드 (docker-compose.dev.yml에서 사용)
-# CMD ["uvicorn", "chatbot.workflow.integration_api:app", "--host", "0.0.0.0", "--port", "8000", "--reload"] 
+# CMD ["uvicorn", "chatbot.app:app", "--host", "0.0.0.0", "--port", "8000", "--reload"] 
