@@ -58,6 +58,8 @@ class ChatBotA:
         self.token_limit = token_limit
         self.legacy_compatibility = legacy_compatibility
         self.enhanced_mode = enhanced_mode
+        self.user_data = {}
+        self.story_data = {}
         self.enable_performance_tracking = enable_performance_tracking
         self.use_langchain = use_langchain
         
@@ -117,6 +119,8 @@ class ChatBotA:
         self.story_engine = StoryEngine(
             openai_client=self.openai_client,
             rag_system=self.rag_system,
+            user_data=self.user_data,
+            story_data=self.story_data,
             conversation_manager=self.conversation,
             enhanced_mode=self.enhanced_mode,
             performance_tracking=self.enable_performance_tracking

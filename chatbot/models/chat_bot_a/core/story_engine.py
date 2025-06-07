@@ -35,13 +35,14 @@ class StoryEngine:
     - 이야기 구조화 및 개요 생성
     """
     
-    def __init__(self, user_data: Dict, story_data: Optional[Dict] = None):
+    def __init__(self, user_data: Dict, story_data: Optional[Dict] = None, openai_client=None, **kwargs):
         self.user_data = user_data
         self.story_data = story_data if story_data else self._initialize_story_data()
         self.llm = ChatOpenAI(model_name="gpt-4o-mini", temperature=0.7)
         
         # RAG 시스템 초기화
         self.rag_system = self._initialize_rag_system()
+        self.openai_client = openai_client
         
         # === 이야기 수집 상태 ===
         self.story_stage = "character"  # 현재 수집 단계
