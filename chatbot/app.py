@@ -172,7 +172,7 @@ async def story_generation_endpoint(
         age,
         interests,
         token
-    )
+    )   
 
 # ===========================================
 # HTTP API 엔드포인트
@@ -236,6 +236,648 @@ def _determine_age_group(age: int) -> AgeGroup:
         return AgeGroup.YOUNG_CHILDREN
     else:
         return AgeGroup.ELEMENTARY
+
+# ===========================================
+# 대화 내역 API 엔드포인트
+# ===========================================
+
+@app.get("/api/v1/conversations")
+async def list_conversations(auth: dict = Depends(verify_auth)):
+    """대화 내역 목록 조회"""
+    try:
+        import glob
+        from datetime import datetime
+        
+        conversations_dir = "/app/output/conversations"
+        conversation_files = []
+        
+        # 대화 파일들 검색 (JSON 파일만)
+        pattern = os.path.join(conversations_dir, "**", "*.json")
+        files = glob.glob(pattern, recursive=True)
+        
+        for file_path in files:
+            try:
+                # 파일 정보 추출
+                rel_path = os.path.relpath(file_path, conversations_dir)
+                stat = os.stat(file_path)
+                
+                # 파일명에서 정보 추출 시도
+                filename = os.path.basename(file_path)
+                parts = filename.replace('.json', '').split('_')
+                
+                conversation_info = {
+                    "file_path": rel_path,
+                    "filename": filename,
+                    "size": stat.st_size,
+                    "created_at": datetime.fromtimestamp(stat.st_ctime).isoformat(),
+                    "modified_at": datetime.fromtimestamp(stat.st_mtime).isoformat()
+                }
+                
+                # 파일명에서 추가 정보 추출
+                if len(parts) >= 3:
+                    conversation_info["child_name"] = parts[0]
+                    conversation_info["timestamp"] = f"{parts[1]}_{parts[2]}"
+                    if len(parts) >= 4:
+                        conversation_info["client_id"] = parts[3]
+                
+                conversation_files.append(conversation_info)
+                
+            except Exception as e:
+                logger.warning(f"파일 정보 추출 실패: {file_path} - {e}")
+                continue
+        
+        # 수정일 기준 내림차순 정렬
+        conversation_files.sort(key=lambda x: x["modified_at"], reverse=True)
+        
+        return StandardResponse(
+            success=True,
+            message="대화 내역 목록 조회 성공",
+            data={
+                "conversations": conversation_files,
+                "count": len(conversation_files)
+            }
+        )
+        
+    except Exception as e:
+        logger.error(f"대화 내역 목록 조회 실패: {e}", exc_info=True)
+        return StandardResponse(
+            success=False,
+            message=f"대화 내역 조회 중 오류가 발생했습니다: {str(e)}",
+            error_code="CONVERSATION_LIST_FAILED"
+        )
+
+@app.get("/api/v1/conversations/{file_path:path}")
+async def get_conversation_file(file_path: str, auth: dict = Depends(verify_auth)):
+    """특정 대화 내역 파일 조회"""
+    try:
+        import json
+        
+        # 보안을 위한 경로 검증
+        if ".." in file_path or file_path.startswith("/"):
+            raise HTTPException(
+                status_code=400, 
+                detail="잘못된 파일 경로입니다"
+            )
+        
+        conversations_dir = "/app/output/conversations"
+        full_path = os.path.join(conversations_dir, file_path)
+        
+        # 파일 존재 확인
+        if not os.path.exists(full_path):
+            raise HTTPException(
+                status_code=404, 
+                detail="대화 파일을 찾을 수 없습니다"
+            )
+        
+        # JSON 파일만 허용
+        if not full_path.endswith('.json'):
+            raise HTTPException(
+                status_code=400, 
+                detail="JSON 파일만 조회할 수 있습니다"
+            )
+        
+        # 파일 읽기
+        with open(full_path, 'r', encoding='utf-8') as f:
+            conversation_data = json.load(f)
+        
+        return StandardResponse(
+            success=True,
+            message="대화 내역 조회 성공",
+            data=conversation_data
+        )
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"대화 파일 조회 실패: {e}", exc_info=True)
+        return StandardResponse(
+            success=False,
+            message=f"대화 파일 조회 중 오류가 발생했습니다: {str(e)}",
+            error_code="CONVERSATION_FILE_FAILED"
+        )
+
+# ===========================================
+# 임시 파일 API 엔드포인트
+# ===========================================
+
+@app.get("/api/v1/temp")
+async def list_temp_files(auth: dict = Depends(verify_auth)):
+    """임시 파일 목록 조회"""
+    try:
+        import glob
+        from datetime import datetime
+        
+        temp_dir = "/app/output/temp"
+        temp_files = []
+        
+        # 모든 파일 검색 (재귀적으로)
+        pattern = os.path.join(temp_dir, "**", "*")
+        all_paths = glob.glob(pattern, recursive=True)
+        
+        for file_path in all_paths:
+            try:
+                # 디렉토리는 제외
+                if os.path.isdir(file_path):
+                    continue
+                
+                # 숨김 파일 제외 (.DS_Store 등)
+                if os.path.basename(file_path).startswith('.'):
+                    continue
+                
+                # 파일 정보 추출
+                rel_path = os.path.relpath(file_path, temp_dir)
+                stat = os.stat(file_path)
+                
+                # 파일 타입 및 카테고리 결정
+                file_ext = os.path.splitext(file_path)[1].lower()
+                if file_ext in ['.mp3', '.wav', '.m4a', '.ogg']:
+                    file_type = 'audio'
+                elif file_ext in ['.png', '.jpg', '.jpeg', '.gif', '.webp']:
+                    file_type = 'image'
+                else:
+                    file_type = 'other'
+                
+                # 파일명에서 스토리 ID 추출 시도
+                filename = os.path.basename(file_path)
+                story_id_match = None
+                
+                # UUID 형태의 ID 찾기 (8자리-4자리-4자리-4자리-12자리 또는 8자리)
+                import re
+                uuid_pattern = r'[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}|[0-9a-f]{8}'
+                match = re.search(uuid_pattern, filename)
+                if match:
+                    story_id_match = match.group()
+                
+                temp_file_info = {
+                    "file_path": rel_path,
+                    "filename": filename,
+                    "size": stat.st_size,
+                    "type": file_type,
+                    "extension": file_ext,
+                    "created_at": datetime.fromtimestamp(stat.st_ctime).isoformat(),
+                    "modified_at": datetime.fromtimestamp(stat.st_mtime).isoformat()
+                }
+                
+                if story_id_match:
+                    temp_file_info["story_id"] = story_id_match
+                
+                temp_files.append(temp_file_info)
+                
+            except Exception as e:
+                logger.warning(f"파일 정보 추출 실패: {file_path} - {e}")
+                continue
+        
+        # 수정일 기준 내림차순 정렬
+        temp_files.sort(key=lambda x: x["modified_at"], reverse=True)
+        
+        # 파일 타입별 통계
+        stats = {
+            'audio': len([f for f in temp_files if f['type'] == 'audio']),
+            'image': len([f for f in temp_files if f['type'] == 'image']),
+            'other': len([f for f in temp_files if f['type'] == 'other'])
+        }
+        
+        return StandardResponse(
+            success=True,
+            message="임시 파일 목록 조회 성공",
+            data={
+                "files": temp_files,
+                "count": len(temp_files),
+                "stats": stats
+            }
+        )
+        
+    except Exception as e:
+        logger.error(f"임시 파일 목록 조회 실패: {e}", exc_info=True)
+        return StandardResponse(
+            success=False,
+            message=f"임시 파일 조회 중 오류가 발생했습니다: {str(e)}",
+            error_code="TEMP_FILE_LIST_FAILED"
+        )
+
+@app.get("/api/v1/temp/{file_path:path}")
+async def get_temp_file(file_path: str, auth: dict = Depends(verify_auth)):
+    """특정 임시 파일 다운로드"""
+    try:
+        from fastapi.responses import FileResponse
+        
+        # 보안을 위한 경로 검증
+        if ".." in file_path or file_path.startswith("/"):
+            raise HTTPException(
+                status_code=400, 
+                detail="잘못된 파일 경로입니다"
+            )
+        
+        temp_dir = "/app/output/temp"
+        full_path = os.path.join(temp_dir, file_path)
+        
+        # 파일 존재 확인
+        if not os.path.exists(full_path):
+            raise HTTPException(
+                status_code=404, 
+                detail="임시 파일을 찾을 수 없습니다"
+            )
+        
+        # 디렉토리 접근 방지
+        if os.path.isdir(full_path):
+            raise HTTPException(
+                status_code=400, 
+                detail="디렉토리는 다운로드할 수 없습니다"
+            )
+        
+        # 파일 확장자 검증 (허용된 파일 타입만)
+        allowed_extensions = ['.mp3', '.wav', '.m4a', '.ogg', '.png', '.jpg', '.jpeg', '.gif', '.webp', '.json', '.txt']
+        file_ext = os.path.splitext(full_path)[1].lower()
+        
+        if file_ext not in allowed_extensions:
+            raise HTTPException(
+                status_code=400, 
+                detail="허용되지 않은 파일 타입입니다"
+            )
+        
+        # 적절한 Content-Type 설정
+        media_type = "application/octet-stream"
+        if file_ext in ['.mp3', '.wav', '.m4a', '.ogg']:
+            media_type = f"audio/{file_ext[1:]}"
+        elif file_ext in ['.png', '.jpg', '.jpeg', '.gif', '.webp']:
+            media_type = f"image/{file_ext[1:]}" if file_ext != '.jpg' else "image/jpeg"
+        elif file_ext == '.json':
+            media_type = "application/json"
+        elif file_ext == '.txt':
+            media_type = "text/plain"
+        
+        return FileResponse(
+            path=full_path,
+            media_type=media_type,
+            filename=os.path.basename(full_path)
+        )
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"임시 파일 다운로드 실패: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=500,
+            detail=f"임시 파일 다운로드 중 오류가 발생했습니다: {str(e)}"
+        )
+
+@app.get("/api/v1/temp/by-story/{story_id}")
+async def get_temp_files_by_story(story_id: str, auth: dict = Depends(verify_auth)):
+    """특정 스토리 ID의 임시 파일들 조회"""
+    try:
+        import glob
+        from datetime import datetime
+        
+        temp_dir = "/app/output/temp"
+        story_files = []
+        
+        # 해당 스토리 ID가 포함된 파일들 검색
+        pattern = os.path.join(temp_dir, "**", f"*{story_id}*")
+        files = glob.glob(pattern, recursive=True)
+        
+        for file_path in files:
+            try:
+                # 디렉토리는 제외
+                if os.path.isdir(file_path):
+                    continue
+                
+                # 파일 정보 추출
+                rel_path = os.path.relpath(file_path, temp_dir)
+                stat = os.stat(file_path)
+                
+                # 파일 타입 결정
+                file_ext = os.path.splitext(file_path)[1].lower()
+                if file_ext in ['.mp3', '.wav', '.m4a', '.ogg']:
+                    file_type = 'audio'
+                elif file_ext in ['.png', '.jpg', '.jpeg', '.gif', '.webp']:
+                    file_type = 'image'
+                else:
+                    file_type = 'other'
+                
+                story_file_info = {
+                    "file_path": rel_path,
+                    "filename": os.path.basename(file_path),
+                    "size": stat.st_size,
+                    "type": file_type,
+                    "extension": file_ext,
+                    "created_at": datetime.fromtimestamp(stat.st_ctime).isoformat(),
+                    "modified_at": datetime.fromtimestamp(stat.st_mtime).isoformat(),
+                    "download_url": f"/api/v1/temp/{rel_path}"
+                }
+                
+                story_files.append(story_file_info)
+                
+            except Exception as e:
+                logger.warning(f"파일 정보 추출 실패: {file_path} - {e}")
+                continue
+        
+        # 파일명 기준 정렬
+        story_files.sort(key=lambda x: x["filename"])
+        
+        # 파일 타입별 분류
+        files_by_type = {
+            'audio': [f for f in story_files if f['type'] == 'audio'],
+            'image': [f for f in story_files if f['type'] == 'image'],
+            'other': [f for f in story_files if f['type'] == 'other']
+        }
+        
+        return StandardResponse(
+            success=True,
+            message=f"스토리 {story_id}의 임시 파일 조회 성공",
+            data={
+                "story_id": story_id,
+                "files": story_files,
+                "files_by_type": files_by_type,
+                "count": len(story_files)
+            }
+        )
+        
+    except Exception as e:
+        logger.error(f"스토리별 임시 파일 조회 실패: {e}", exc_info=True)
+        return StandardResponse(
+            success=False,
+            message=f"스토리별 임시 파일 조회 중 오류가 발생했습니다: {str(e)}",
+            error_code="STORY_TEMP_FILES_FAILED"
+        )
+
+# ===========================================
+# 시스템 모니터링 및 자동 백업 API
+# ===========================================
+
+@app.get("/api/v1/system/disk-usage")
+async def get_disk_usage(auth: dict = Depends(verify_auth)):
+    """디스크 사용량 확인"""
+    try:
+        from shared.utils.s3_manager import S3Manager
+        import os
+        
+        # 환경변수에서 S3 설정 가져오기
+        bucket_name = os.getenv("AWS_S3_BUCKET_NAME")
+        if not bucket_name:
+            return StandardResponse(
+                success=False,
+                message="S3 버킷 이름이 설정되지 않았습니다",
+                error_code="S3_BUCKET_NOT_CONFIGURED"
+            )
+        
+        # S3Manager 초기화
+        s3_manager = S3Manager()
+        if not s3_manager.is_healthy():
+            return StandardResponse(
+                success=False,
+                message="S3 연결에 실패했습니다",
+                error_code="S3_CONNECTION_FAILED"
+            )
+        
+        # temp 폴더 업로드
+        temp_dir = "/app/output/temp"
+        result = s3_manager.upload_temp_files_to_s3(temp_dir, bucket_name)
+        
+        if result["success"]:
+            return StandardResponse(
+                success=True,
+                message="temp 폴더 업로드 완료",
+                data=result
+            )
+        else:
+            return StandardResponse(
+                success=False,
+                message=f"업로드 실패: {result.get('error', 'Unknown error')}",
+                error_code="S3_UPLOAD_FAILED"
+            )
+            
+    except Exception as e:
+        logger.error(f"S3 업로드 실패: {e}", exc_info=True)
+        return StandardResponse(
+            success=False,
+            message=f"S3 업로드 중 오류가 발생했습니다: {str(e)}",
+            error_code="S3_UPLOAD_ERROR"
+        )
+
+@app.post("/api/v1/s3/upload-story/{story_id}")
+async def upload_story_to_s3(story_id: str, auth: dict = Depends(verify_auth)):
+    """특정 스토리의 파일들을 S3에 업로드"""
+    try:
+        from shared.utils.s3_manager import S3Manager
+        import os
+        
+        # 환경변수에서 S3 설정 가져오기
+        bucket_name = os.getenv("AWS_S3_BUCKET_NAME")
+        if not bucket_name:
+            return StandardResponse(
+                success=False,
+                message="S3 버킷 이름이 설정되지 않았습니다",
+                error_code="S3_BUCKET_NOT_CONFIGURED"
+            )
+        
+        # S3Manager 초기화
+        s3_manager = S3Manager()
+        if not s3_manager.is_healthy():
+            return StandardResponse(
+                success=False,
+                message="S3 연결에 실패했습니다",
+                error_code="S3_CONNECTION_FAILED"
+            )
+        
+        # 특정 스토리 파일들 업로드
+        temp_dir = "/app/output/temp"
+        result = s3_manager.upload_story_files_to_s3(temp_dir, bucket_name, story_id)
+        
+        if result["success"]:
+            return StandardResponse(
+                success=True,
+                message=f"스토리 {story_id} 파일 업로드 완료",
+                data=result
+            )
+        else:
+            return StandardResponse(
+                success=False,
+                message=f"업로드 실패: {result.get('error', 'Unknown error')}",
+                error_code="S3_UPLOAD_FAILED"
+            )
+            
+    except Exception as e:
+        logger.error(f"스토리 S3 업로드 실패: {e}", exc_info=True)
+        return StandardResponse(
+            success=False,
+            message=f"스토리 S3 업로드 중 오류가 발생했습니다: {str(e)}",
+            error_code="S3_STORY_UPLOAD_ERROR"
+        )
+
+@app.post("/api/v1/system/auto-backup")
+async def auto_backup_to_s3(
+    force: bool = Query(False, description="강제 백업 실행 여부"),
+    auth: dict = Depends(verify_auth)
+):
+    """디스크 사용량 기반 자동 S3 백업"""
+    try:
+        import shutil
+        import os
+        from shared.utils.s3_manager import S3Manager
+        
+        # 디스크 사용량 확인
+        total, used, free = shutil.disk_usage("/")
+        usage_percent = (used / total) * 100
+        
+        # 백업 실행 조건 확인
+        should_backup = force or usage_percent > 85
+        
+        if not should_backup:
+            return StandardResponse(
+                success=True,
+                message=f"백업 불필요 (디스크 사용량: {usage_percent:.1f}%)",
+                data={
+                    "backup_executed": False,
+                    "disk_usage_percent": round(usage_percent, 2),
+                    "threshold_percent": 85
+                }
+            )
+        
+        # S3 설정 확인
+        bucket_name = os.getenv("AWS_S3_BUCKET_NAME")
+        if not bucket_name:
+            return StandardResponse(
+                success=False,
+                message="S3 버킷이 설정되지 않아 백업할 수 없습니다",
+                error_code="S3_BUCKET_NOT_CONFIGURED"
+            )
+        
+        # S3Manager 초기화
+        s3_manager = S3Manager()
+        if not s3_manager.is_healthy():
+            return StandardResponse(
+                success=False,
+                message="S3 연결 실패로 백업할 수 없습니다",
+                error_code="S3_CONNECTION_FAILED"
+            )
+        
+        # 백업 실행 (업로드 후 로컬 파일 삭제)
+        temp_dir = "/app/output/temp"
+        result = s3_manager.sync_temp_to_s3(temp_dir, bucket_name, delete_after_upload=True)
+        
+        if result["success"]:
+            # 백업 후 디스크 사용량 재확인
+            total_after, used_after, free_after = shutil.disk_usage("/")
+            usage_percent_after = (used_after / total_after) * 100
+            
+            freed_space = used - used_after
+            
+            def format_bytes(bytes_size):
+                for unit in ['B', 'KB', 'MB', 'GB', 'TB']:
+                    if bytes_size < 1024.0:
+                        return f"{bytes_size:.2f} {unit}"
+                    bytes_size /= 1024.0
+                return f"{bytes_size:.2f} PB"
+            
+            backup_result = {
+                "backup_executed": True,
+                "uploaded_files": len(result.get("uploaded_files", [])),
+                "deleted_files": len(result.get("deleted_files", [])),
+                "freed_space": format_bytes(freed_space),
+                "disk_usage_before": round(usage_percent, 2),
+                "disk_usage_after": round(usage_percent_after, 2),
+                "space_saved_percent": round(usage_percent - usage_percent_after, 2)
+            }
+            
+            logger.info(f"자동 백업 완료: {backup_result['uploaded_files']}개 파일 업로드, "
+                       f"{backup_result['freed_space']} 공간 확보")
+            
+            return StandardResponse(
+                success=True,
+                message=f"자동 백업 완료 - {backup_result['freed_space']} 공간 확보됨",
+                data=backup_result
+            )
+        else:
+            return StandardResponse(
+                success=False,
+                message=f"백업 실패: {result.get('error', 'Unknown error')}",
+                error_code="AUTO_BACKUP_FAILED"
+            )
+            
+    except Exception as e:
+        logger.error(f"자동 백업 실패: {e}", exc_info=True)
+        return StandardResponse(
+            success=False,
+            message=f"자동 백업 중 오류가 발생했습니다: {str(e)}",
+            error_code="AUTO_BACKUP_ERROR"
+        )
+
+@app.post("/api/v1/s3/restore-file")
+async def restore_file_from_s3(
+    s3_key: str = Query(..., description="S3에서 복원할 파일의 키"),
+    local_path: Optional[str] = Query(None, description="로컬 저장 경로 (기본: temp 폴더)"),
+    auth: dict = Depends(verify_auth)
+):
+    """S3에서 파일을 로컬로 복원"""
+    try:
+        from shared.utils.s3_manager import S3Manager
+        import os
+        
+        # S3 설정 확인
+        bucket_name = os.getenv("AWS_S3_BUCKET_NAME")
+        if not bucket_name:
+            return StandardResponse(
+                success=False,
+                message="S3 버킷이 설정되지 않았습니다",
+                error_code="S3_BUCKET_NOT_CONFIGURED"
+            )
+        
+        # S3Manager 초기화
+        s3_manager = S3Manager()
+        if not s3_manager.is_healthy():
+            return StandardResponse(
+                success=False,
+                message="S3 연결에 실패했습니다",
+                error_code="S3_CONNECTION_FAILED"
+            )
+        
+        # 로컬 저장 경로 결정
+        if not local_path:
+            filename = os.path.basename(s3_key)
+            local_path = f"/app/output/temp/{filename}"
+        
+        # 디렉토리 생성
+        os.makedirs(os.path.dirname(local_path), exist_ok=True)
+        
+        # S3에서 파일 다운로드
+        try:
+            s3_manager.s3_client.download_file(bucket_name, s3_key, local_path)
+            
+            file_size = os.path.getsize(local_path)
+            
+            def format_bytes(bytes_size):
+                for unit in ['B', 'KB', 'MB', 'GB', 'TB']:
+                    if bytes_size < 1024.0:
+                        return f"{bytes_size:.2f} {unit}"
+                    bytes_size /= 1024.0
+                return f"{bytes_size:.2f} PB"
+            
+            return StandardResponse(
+                success=True,
+                message=f"파일 복원 완료: {os.path.basename(local_path)}",
+                data={
+                    "s3_key": s3_key,
+                    "local_path": local_path,
+                    "file_size": format_bytes(file_size),
+                    "file_size_bytes": file_size
+                }
+            )
+            
+        except Exception as e:
+            logger.error(f"S3 파일 다운로드 실패: {e}")
+            return StandardResponse(
+                success=False,
+                message=f"S3에서 파일 다운로드 실패: {str(e)}",
+                error_code="S3_DOWNLOAD_FAILED"
+            )
+            
+    except Exception as e:
+        logger.error(f"파일 복원 실패: {e}", exc_info=True)
+        return StandardResponse(
+            success=False,
+            message=f"파일 복원 중 오류가 발생했습니다: {str(e)}",
+            error_code="FILE_RESTORE_ERROR"
+        )
 
 # ===========================================
 # 스토리 생성 API 엔드포인트

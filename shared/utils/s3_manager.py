@@ -253,6 +253,325 @@ class S3Manager:
         except Exception:
             return False
 
+    def upload_temp_files_to_s3(
+        self,
+        temp_dir: str,
+        bucket_name: str,
+        story_id: Optional[str] = None
+    ) -> Dict[str, Any]:
+        """
+        temp 폴더의 파일들을 S3에 업로드 (타입별 폴더 분류)
+        
+        Args:
+            temp_dir: temp 폴더 경로
+            bucket_name: S3 버킷 이름
+            story_id: 특정 스토리 ID의 파일만 업로드 (선택적)
+        
+        Returns:
+            업로드 결과 딕셔너리
+        """
+        if not self._validate_upload_params(bucket_name, "temp"):
+            return {"success": False, "error": "Invalid parameters"}
+        
+        if not os.path.exists(temp_dir):
+            logger.error(f"Temp directory not found: {temp_dir}")
+            return {"success": False, "error": "Temp directory not found"}
+        
+        import glob
+        
+        # 파일 스캔
+        pattern = os.path.join(temp_dir, "**", "*")
+        all_files = glob.glob(pattern, recursive=True)
+        
+        results = {
+            "success": True,
+            "uploaded_files": [],
+            "failed_files": [],
+            "stats": {"images": 0, "audio": 0, "other": 0}
+        }
+        
+        for file_path in all_files:
+            try:
+                # 디렉토리는 건너뛰기
+                if os.path.isdir(file_path):
+                    continue
+                
+                # 숨김 파일 건너뛰기
+                if os.path.basename(file_path).startswith('.'):
+                    continue
+                
+                # 특정 스토리 ID만 처리하는 경우
+                if story_id and story_id not in os.path.basename(file_path):
+                    continue
+                
+                # 파일 타입 결정
+                file_ext = os.path.splitext(file_path)[1].lower()
+                filename = os.path.basename(file_path)
+                
+                if file_ext in ['.png', '.jpg', '.jpeg', '.gif', '.webp']:
+                    s3_folder = "images"
+                    file_type = "image"
+                elif file_ext in ['.mp3', '.wav', '.m4a', '.ogg']:
+                    s3_folder = "audio"
+                    file_type = "audio"
+                else:
+                    s3_folder = "other"
+                    file_type = "other"
+                
+                # S3 객체 키 생성
+                object_key = f"{s3_folder}/{filename}"
+                
+                # S3에 업로드
+                s3_url = self.upload_file(
+                    file_source=file_path,
+                    bucket_name=bucket_name,
+                    object_key=object_key
+                )
+                
+                if s3_url:
+                    results["uploaded_files"].append({
+                        "local_path": file_path,
+                        "s3_url": s3_url,
+                        "type": file_type,
+                        "size": os.path.getsize(file_path)
+                    })
+                    results["stats"][file_type] += 1
+                    logger.info(f"Uploaded {filename} to {s3_url}")
+                else:
+                    results["failed_files"].append({
+                        "local_path": file_path,
+                        "error": "Upload failed"
+                    })
+                    
+            except Exception as e:
+                logger.error(f"Error processing file {file_path}: {e}")
+                results["failed_files"].append({
+                    "local_path": file_path,
+                    "error": str(e)
+                })
+        
+        logger.info(f"Batch upload completed. Uploaded: {len(results['uploaded_files'])}, Failed: {len(results['failed_files'])}")
+        return results
+
+    def list_s3_files(
+        self,
+        bucket_name: str,
+        prefix: str = "",
+        max_keys: int = 1000
+    ) -> Dict[str, Any]:
+        """
+        S3 버킷의 파일 목록 조회
+        
+        Args:
+            bucket_name: S3 버킷 이름
+            prefix: 검색할 접두사 (예: "images/", "audio/")
+            max_keys: 최대 반환 파일 수
+        
+        Returns:
+            파일 목록 딕셔너리
+        """
+        if not self.s3_client:
+            return {"success": False, "error": "S3 client not initialized"}
+        
+        try:
+            response = self.s3_client.list_objects_v2(
+                Bucket=bucket_name,
+                Prefix=prefix,
+                MaxKeys=max_keys
+            )
+            
+            files = []
+            if 'Contents' in response:
+                for obj in response['Contents']:
+                    file_info = {
+                        "key": obj["Key"],
+                        "size": obj["Size"],
+                        "last_modified": obj["LastModified"].isoformat(),
+                        "etag": obj["ETag"].strip('"')
+                    }
+                    
+                    # 파일 타입 결정
+                    file_ext = os.path.splitext(obj["Key"])[1].lower()
+                    if file_ext in ['.png', '.jpg', '.jpeg', '.gif', '.webp']:
+                        file_info["type"] = "image"
+                    elif file_ext in ['.mp3', '.wav', '.m4a', '.ogg']:
+                        file_info["type"] = "audio"
+                    else:
+                        file_info["type"] = "other"
+                    
+                    files.append(file_info)
+            
+            # 타입별 통계
+            stats = {
+                "images": len([f for f in files if f["type"] == "image"]),
+                "audio": len([f for f in files if f["type"] == "audio"]),
+                "other": len([f for f in files if f["type"] == "other"])
+            }
+            
+            return {
+                "success": True,
+                "files": files,
+                "count": len(files),
+                "stats": stats,
+                "is_truncated": response.get("IsTruncated", False)
+            }
+            
+        except ClientError as e:
+            error_code = e.response.get("Error", {}).get("Code", "Unknown")
+            logger.error(f"S3 ClientError listing files: {error_code}")
+            return {"success": False, "error": f"S3 error: {error_code}"}
+        except Exception as e:
+            logger.error(f"Error listing S3 files: {e}")
+            return {"success": False, "error": str(e)}
+
+    def upload_story_files_to_s3(
+        self,
+        temp_dir: str,
+        bucket_name: str,
+        story_id: str
+    ) -> Dict[str, Any]:
+        """
+        특정 스토리의 모든 파일을 S3에 업로드
+        
+        Args:
+            temp_dir: temp 폴더 경로
+            bucket_name: S3 버킷 이름
+            story_id: 스토리 ID
+        
+        Returns:
+            업로드 결과
+        """
+        logger.info(f"Starting S3 upload for story: {story_id}")
+        
+        result = self.upload_temp_files_to_s3(
+            temp_dir=temp_dir,
+            bucket_name=bucket_name,
+            story_id=story_id
+        )
+        
+        if result["success"]:
+            # 스토리별 메타데이터 생성
+            metadata = {
+                "story_id": story_id,
+                "upload_timestamp": __import__('datetime').datetime.now().isoformat(),
+                "total_files": len(result["uploaded_files"]),
+                "stats": result["stats"]
+            }
+            
+            # 메타데이터도 S3에 업로드
+            metadata_key = f"metadata/story_{story_id}_metadata.json"
+            import json
+            from io import BytesIO
+            
+            metadata_bytes = BytesIO(json.dumps(metadata, ensure_ascii=False, indent=2).encode('utf-8'))
+            metadata_url = self.upload_file(
+                file_source=metadata_bytes,
+                bucket_name=bucket_name,
+                object_key=metadata_key,
+                content_type="application/json"
+            )
+            
+            if metadata_url:
+                result["metadata_url"] = metadata_url
+                logger.info(f"Uploaded metadata for story {story_id}: {metadata_url}")
+        
+        return result
+
+    def get_story_files_from_s3(
+        self,
+        bucket_name: str,
+        story_id: str
+    ) -> Dict[str, Any]:
+        """
+        S3에서 특정 스토리의 파일들 조회
+        
+        Args:
+            bucket_name: S3 버킷 이름
+            story_id: 스토리 ID
+        
+        Returns:
+            스토리 파일 목록
+        """
+        try:
+            # 이미지 파일들 조회
+            images_result = self.list_s3_files(bucket_name, f"images/", 1000)
+            audio_result = self.list_s3_files(bucket_name, f"audio/", 1000)
+            
+            if not images_result["success"] or not audio_result["success"]:
+                return {"success": False, "error": "Failed to list S3 files"}
+            
+            # 스토리 ID가 포함된 파일들만 필터링
+            story_images = [f for f in images_result["files"] if story_id in f["key"]]
+            story_audio = [f for f in audio_result["files"] if story_id in f["key"]]
+            
+            # presigned URL 생성
+            for file_info in story_images + story_audio:
+                file_info["download_url"] = self.get_presigned_url(
+                    bucket_name, file_info["key"], expiration=3600
+                )
+            
+            return {
+                "success": True,
+                "story_id": story_id,
+                "images": story_images,
+                "audio": story_audio,
+                "total_files": len(story_images) + len(story_audio),
+                "stats": {
+                    "images": len(story_images),
+                    "audio": len(story_audio)
+                }
+            }
+            
+        except Exception as e:
+            logger.error(f"Error getting story files from S3: {e}")
+            return {"success": False, "error": str(e)}
+
+    def sync_temp_to_s3(
+        self,
+        temp_dir: str,
+        bucket_name: str,
+        delete_after_upload: bool = False
+    ) -> Dict[str, Any]:
+        """
+        temp 폴더의 모든 파일을 S3와 동기화
+        
+        Args:
+            temp_dir: temp 폴더 경로
+            bucket_name: S3 버킷 이름
+            delete_after_upload: 업로드 후 로컬 파일 삭제 여부
+        
+        Returns:
+            동기화 결과
+        """
+        logger.info(f"Starting temp to S3 sync. Delete after upload: {delete_after_upload}")
+        
+        # 모든 파일 업로드
+        result = self.upload_temp_files_to_s3(temp_dir, bucket_name)
+        
+        if result["success"] and delete_after_upload:
+            deleted_files = []
+            delete_errors = []
+            
+            for file_info in result["uploaded_files"]:
+                try:
+                    local_path = file_info["local_path"]
+                    if os.path.exists(local_path):
+                        os.remove(local_path)
+                        deleted_files.append(local_path)
+                        logger.info(f"Deleted local file: {local_path}")
+                except Exception as e:
+                    delete_errors.append({
+                        "file": file_info["local_path"],
+                        "error": str(e)
+                    })
+                    logger.error(f"Failed to delete {file_info['local_path']}: {e}")
+            
+            result["deleted_files"] = deleted_files
+            result["delete_errors"] = delete_errors
+            result["cleanup_completed"] = len(delete_errors) == 0
+        
+        return result
+
 # Example Usage (for direct testing of this module):
 if __name__ == '__main__':
     # Ensure AWS credentials and region are configured in your environment,
