@@ -98,10 +98,21 @@ class ConnectionEngine:
             if "chatbot" in connection_info and "child_name" in connection_info:
                 chatbot = connection_info["chatbot"]
                 child_name = connection_info.get("child_name", "unknown")
-                if not hasattr(chatbot, "get_conversation_history"):
+                
+                # 상세한 디버그 로깅
+                logger.info(f"[DISCONNECT] 연결 종료 처리 시작: {client_id}")
+                logger.info(f"[DISCONNECT] chatbot 타입: {type(chatbot)}")
+                logger.info(f"[DISCONNECT] hasattr get_conversation_history: {hasattr(chatbot, 'get_conversation_history')}")
+                logger.info(f"[DISCONNECT] chatbot 메서드 목록: {[m for m in dir(chatbot) if not m.startswith('_')]}")
+                
+                if chatbot is None:
+                    logger.error(f"[DISCONNECT] chatbot이 None입니다. client_id: {client_id}")
+                elif not hasattr(chatbot, "get_conversation_history"):
                     logger.error(f"[DISCONNECT] chatbot에 get_conversation_history 없음! 타입: {type(chatbot)} client_id: {client_id}")
                 else:
+                    logger.info(f"[DISCONNECT] save_conversation 호출 시작: {client_id}")
                     await save_conversation(chatbot, child_name, client_id)
+                    logger.info(f"[DISCONNECT] save_conversation 완료: {client_id}")
             
             # 임시 파일 정리
             if "temp_files" in connection_info:

@@ -134,8 +134,15 @@ class AudioProcessor:
             tuple: (base64 인코딩된 오디오, 상태, 오류 메시지, 오류 코드)
         """
         try:
-            if not text:
+            # 텍스트 검증 강화
+            if not text or not isinstance(text, str):
+                logger.warning(f"TTS 입력이 유효하지 않음: {repr(text)}")
                 return "", "error", "TTS 입력 없음", "tts_no_input"
+            
+            text = text.strip()
+            if not text:
+                logger.warning("TTS 입력이 빈 문자열입니다")
+                return "", "error", "TTS 입력이 빈 문자열입니다", "tts_empty_input"
             
             if not self.elevenlabs_api_key:
                 return "", "error", "ElevenLabs API 키가 설정되지 않았습니다", "elevenlabs_api_key_not_set"
@@ -148,6 +155,11 @@ class AudioProcessor:
             
             # 텍스트 정리 (음성 생성에 적합하게)
             cleaned_text = self._clean_text_for_speech(text)
+            
+            # 정리된 텍스트 재검증
+            if not cleaned_text or not cleaned_text.strip():
+                logger.warning(f"텍스트 정리 후 빈 내용됨. 원본: {repr(text)}, 정리후: {repr(cleaned_text)}")
+                return "", "error", "텍스트 정리 후 빈 내용이 되었습니다", "tts_cleaned_empty"
             
             async def elevenlabs_tts_operation():
                 # ElevenLabs API 요청 데이터
@@ -231,7 +243,7 @@ class AudioProcessor:
             logger.warning(f"텍스트가 너무 깁니다 ({len(text)}자). 4900자로 자릅니다.")
             text = text[:4897] + "..."
         
-            return text.strip()
+        return text.strip()
     
     def get_voice_for_content(self, text: str) -> str:
         """텍스트 내용에 따라 적절한 음성 선택 (부기 전용)"""

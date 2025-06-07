@@ -379,7 +379,7 @@ class ChatBotA:
             # Enhanced 스토리 수집
             if self.enhanced_mode:
                 story_outline = self.story_engine.create_enhanced_story_outline(
-                    conversation_history=self.conversation.get_all_messages(),
+                    conversation_history=self.conversation.get_conversation_history(),
                     child_age=self.age_group,
                     child_interests=self.interests,
                     child_name=self.child_name
@@ -400,7 +400,7 @@ class ChatBotA:
                 "collaboration_metadata": {
                     "source": "chatbot_a",
                     "timestamp": time.time(),
-                    "conversation_length": len(self.conversation.get_all_messages())
+                    "conversation_length": len(self.conversation.get_conversation_history())
                 }
             })
             
@@ -437,7 +437,7 @@ class ChatBotA:
         """Enhanced 대화 요약"""
         if self.enhanced_mode:
             return self.story_engine.create_enhanced_summary(
-                self.conversation.get_all_messages(),
+                self.conversation.get_conversation_history(),
                 age_group=self.age_group
             )
         else:
@@ -458,7 +458,7 @@ class ChatBotA:
             "enhanced_mode": self.enhanced_mode,
             "prompt_version": self.prompt_version,
             "child_info_set": all([self.child_name, self.age_group]),
-            "conversation_active": len(self.conversation.get_all_messages()) > 0,
+            "conversation_active": len(self.conversation.get_conversation_history()) > 0,
             "performance_tracking": self.enable_performance_tracking
         }
         
@@ -507,13 +507,13 @@ class ChatBotA:
     
     def get_conversation_history(self) -> List[Dict]:
         """대화 기록 반환"""
-        return self.conversation.get_all_messages()
+        return self.conversation.get_conversation_history()
     
     def save_conversation(self, file_path: str) -> bool:
         """대화 저장 (Enhanced 메타데이터 포함)"""
         try:
             conversation_data = {
-                "messages": self.conversation.get_all_messages(),
+                "messages": self.conversation.get_conversation_history(),
                 "child_info": {
                     "name": self.child_name,
                     "age": self.age_group,

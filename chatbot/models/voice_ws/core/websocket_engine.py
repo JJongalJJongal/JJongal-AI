@@ -48,8 +48,13 @@ class WebSocketEngine:
             전송 성공 여부
         """
         try:
+            # WebSocket 연결 상태 확인
+            if websocket.client_state.value != 1:  # CONNECTED = 1
+                logger.warning(f"WebSocket 연결 상태가 유효하지 않음: {websocket.client_state}")
+                return False
+            
             # 데이터 유효성 검증
-            if not isinstance(data, dict):
+            if not isinstance(data, dict) or not data:
                 logger.error(f"잘못된 데이터 타입: {type(data)}, dict여야 함")
                 return False
             
@@ -73,6 +78,12 @@ class WebSocketEngine:
         except FastAPIWebSocketDisconnect:
             logger.warning("WebSocket 연결이 끊어져 메시지 전송 실패")
             raise WebSocketDisconnect(1000, "Connection closed")
+        except RuntimeError as e:
+            if "websocket.send" in str(e) and "websocket.close" in str(e):
+                logger.warning("이미 닫힌 WebSocket에 메시지 전송 시도")
+                return False
+            logger.error(f"WebSocket 런타임 오류: {e}")
+            return False
         except Exception as e:
             logger.error(f"JSON 메시지 전송 중 오류: {e}")
             return False
@@ -207,8 +218,16 @@ class WebSocketEngine:
             연결 상태 (True: 연결됨, False: 끊어짐)
         """
         try:
-            # ping 메시지로 연결 상태 확인
-            await self.ping(websocket)
+            # 1. 기본 연결 상태 확인
+            if websocket.client_state.value != 1:  # CONNECTED = 1
+                return False
+            
+            # 2. ping 메시지로 실제 연결 확인
+            ping_data = {
+                "type": "ping",
+                "message": "connection_check"
+            }
+            await websocket.send_json(ping_data)
             return True
         except:
             return False

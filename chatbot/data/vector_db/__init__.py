@@ -16,10 +16,21 @@ from shared.utils.file_utils import (
     load_json,
     save_json
 )
-from shared.utils.vector_db_utils import (
-    get_db_type_path,
-    check_collection_info
-)
+
+# 순환 import 방지를 위해 함수를 지연 import
+def get_db_type_path(base_directory: str, db_type: str) -> str:
+    """
+    Constructs the path for a specific DB type and ensures the directory exists.
+    """
+    from pathlib import Path
+    db_path = Path(base_directory) / db_type
+    ensure_directory(str(db_path))
+    return str(db_path)
+
+def check_collection_info(vector_db_instance, collection_name: str):
+    """컬렉션 정보 확인 함수를 지연 import로 호출"""
+    from shared.utils.vector_db_utils import check_collection_info as _check_collection_info
+    return _check_collection_info(vector_db_instance, collection_name)
 
 __all__ = [
     'VectorDB',
