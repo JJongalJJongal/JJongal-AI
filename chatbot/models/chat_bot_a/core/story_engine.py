@@ -537,7 +537,7 @@ class StoryEngine:
         Returns:
             Dict: 이야기 주제 및 구조
         """
-        if len(conversation_history) < 5:
+        if len(conversation_history) < 4:
             return self._get_default_story_structure(child_name, age_group)
         
         # RAG 시스템을 통한 주제 풍부화
@@ -695,7 +695,7 @@ class StoryEngine:
             "theme": "우정과 모험",
             "characters": [child_name, "친구들"],
             "setting": "마법의 숲",
-            "plot_summary": "아직 충분한 대화가 수집되지 않았습니다. 더 많은 이야기를 들려주세요!",
+            "plot_summary": "더 많은 이야기를 들려줘!",
             "educational_value": "우정과 협력의 중요성",
             "target_age": age_group,
             "estimated_length": "짧음",
@@ -810,7 +810,8 @@ class StoryEngine:
 
     def generate_enhanced_response(self, response_context: Dict) -> str:
         """
-        Enhanced 모드에서 사용하는 응답 생성 (ChatBot A 호환)
+        Enhanced 모드에서 사용하는 GPT-4o-mini 기반 응답 생성 (ChatBot A 호환)
+        실제 AI가 사용자 입력을 이해하고 맥락적으로 응답
         
         Args:
             response_context: 응답 생성을 위한 컨텍스트
@@ -822,47 +823,114 @@ class StoryEngine:
                 - enhanced_mode: Enhanced 모드 여부
                 
         Returns:
-            str: 생성된 응답
+            str: GPT가 생성한 자연스러운 응답
         """
         try:
             user_input = response_context.get("user_input", "")
+            analysis = response_context.get("analysis", {})
+            conversation_history = response_context.get("conversation_history", [])
             child_age = response_context.get("child_age", 5)
             child_interests = response_context.get("child_interests", [])
-            conversation_history = response_context.get("conversation_history", [])
+            child_name = response_context.get("child_name", "친구")
             
-            logger.info(f"Enhanced 응답 생성: {user_input[:50]}...")
+            logger.info(f"GPT 기반 Enhanced 응답 생성: {user_input[:50]}...")
             
-            # 기존 suggest_story_theme 메서드를 활용한 응답 생성
-            story_theme = self.suggest_story_theme(
-                conversation_history=conversation_history,
-                child_name="친구",  # 기본값
-                age_group=child_age,
-                interests=child_interests,
-                story_collection_prompt=user_input
+            # OpenAI 클라이언트가 없으면 기본 응답
+            if not self.openai_client:
+                return "재미있는 이야기야! 더 말해줄래?"
+            
+            # 분석 결과에서 정보 추출
+            stage = analysis.get("stage", self.story_stage)
+            quality_score = analysis.get("quality_score", 0.5)
+            keywords = analysis.get("keywords", [])
+            
+            # 최근 대화 히스토리 구성
+            history_text = ""
+            if conversation_history:
+                recent_messages = conversation_history[-3:]  # 최근 3개 메시지
+                for msg in recent_messages:
+                    role = "아이" if msg.get("role") == "user" else "부기"
+                    history_text += f"{role}: {msg.get('content', '')}\n"
+            
+            # 관심사 문자열 구성
+            interests_str = ", ".join(child_interests) if child_interests else "다양한 주제"
+            
+            # 수집 단계별 가이드
+            stage_guides = {
+                "character": "등장인물(주인공, 친구들, 동물 등)에 대해 더 자세히 알고 싶어",
+                "setting": "이야기가 일어나는 장소나 배경에 대해 궁금해",
+                "problem": "어떤 문제나 모험이 생기는지 알고 싶어",
+                "resolution": "문제를 어떻게 해결하는지 듣고 싶어"
+            }
+            current_guide = stage_guides.get(stage, "이야기에 대해 더 알고 싶어")
+            
+            # GPT-4o-mini에게 전달할 시스템 메시지
+            system_message = f"""당신은 {child_age}세 아이 {child_name}와 대화하는 친근한 AI 친구 '부기'입니다.
+
+역할과 목적:
+- 아이의 상상력을 격려하고 이야기 요소를 자연스럽게 수집
+- 현재 {stage} 단계에서 {current_guide}
+- 아이의 연령({child_age}세)에 맞는 쉬운 말과 재미있는 표현 사용
+
+아이 정보:
+- 이름: {child_name}
+- 나이: {child_age}세  
+- 관심사: {interests_str}
+
+대화 규칙:
+1. 따뜻하고 격려적인 태도 유지
+2. 아이의 말에 구체적으로 반응하기
+3. 호기심을 자극하는 후속 질문하기
+4. 상상력을 칭찬하고 더 이끌어내기
+5. 안전하고 긍정적인 내용만 다루기
+
+현재 상황:
+- 수집 단계: {stage}
+- 사용자 입력 품질: {quality_score:.1f}/1.0
+- 추출된 키워드: {', '.join(keywords) if keywords else '없음'}"""
+
+            # 사용자 메시지 구성
+            user_message = f"""최근 대화:
+{history_text}
+
+아이의 새로운 말: "{user_input}"
+
+위 대화를 바탕으로 아이에게 자연스럽고 격려적인 응답을 해주세요. 아이의 말에 구체적으로 반응하고, {stage} 단계와 관련된 재미있는 후속 질문을 포함해주세요."""
+
+            # GPT-4o-mini로 응답 생성
+            messages = [
+                {"role": "system", "content": system_message},
+                {"role": "user", "content": user_message}
+            ]
+            
+            response = self.openai_client.chat.completions.create(
+                model="gpt-4o-mini",
+                messages=messages,
+                max_tokens=150,
+                temperature=0.8
             )
             
-            # 응답 생성 (이야기 주제를 자연스러운 대화로 변환)
-            if story_theme and story_theme.get("plot_summary"):
-                plot = story_theme["plot_summary"]
-                
-                # 연령대별 응답 조정
-                if child_age <= 7:
-                    response = f"우와! 정말 재미있는 이야기 같아! {plot[:100]}... 더 듣고 싶어!"
-                else:
-                    response = f"멋진 아이디어야! {plot[:150]}... 이런 모험은 어때?"
-                
-                return response
-            else:
-                # 기본 격려 응답
-                return "정말 흥미로운 이야기야! 더 자세히 들려줄 수 있어?"
+            # 토큰 사용량 업데이트
+            if response.usage and self.conversation_manager:
+                self.conversation_manager.update_token_usage(
+                    prompt_tokens=response.usage.prompt_tokens,
+                    completion_tokens=response.usage.completion_tokens
+                )
+
+            generated_response = response.choices[0].message.content.strip()
+            logger.info(f"GPT 응답 생성 완료: {len(generated_response)}글자")
+            
+            return generated_response
                 
         except Exception as e:
-            logger.error(f"Enhanced 응답 생성 중 오류: {e}")
-            return "미안해, 잠깐 생각할 시간이 필요해. 다시 말해줄래?"
+            logger.error(f"GPT Enhanced 응답 생성 중 오류: {e}")
+            # 오류 시 기본 응답
+            return f"와! {child_name}의 이야기 정말 재미있어! 더 자세히 말해줄래?"
 
     def generate_contextual_response(self, user_input: str, analysis_result: Dict, conversation_history: List[Dict]) -> str:
         """
-        기본 모드에서 사용하는 맥락적 응답 생성 (ChatBot A 호환)
+        기본 모드에서 사용하는 GPT-4o-mini 기반 맥락적 응답 생성 (ChatBot A 호환)
+        실제 AI가 대화 맥락을 이해하고 적절한 응답 생성
         
         Args:
             user_input: 사용자 입력
@@ -870,59 +938,129 @@ class StoryEngine:
             conversation_history: 대화 기록
             
         Returns:
-            str: 생성된 응답
+            str: GPT가 생성한 맥락적 응답
         """
         try:
-            logger.info(f"기본 응답 생성: {user_input[:50]}...")
+            logger.info(f"GPT 기반 맥락적 응답 생성: {user_input[:50]}...")
             
-            # 기존 analyze_user_response 결과를 활용한 응답 생성
+            # OpenAI 클라이언트가 없으면 기본 응답
+            if not self.openai_client:
+                return "계속 이야기해줘! 더 듣고 싶어!"
+            
+            # 분석 결과에서 정보 추출
             keywords = analysis_result.get("keywords", [])
             quality_score = analysis_result.get("quality_score", 0.5)
-            stage = analysis_result.get("stage", "character")
+            stage = analysis_result.get("stage", self.story_stage)
             
-            # 단계별 응답 생성
-            stage_responses = {
-                "character": [
-                    "어떤 캐릭터가 나오면 좋을까?",
-                    "주인공은 누구로 할까?",
-                    "재미있는 친구들이 필요하겠어!"
-                ],
-                "setting": [
-                    "이야기가 어디서 일어나면 좋을까?",
-                    "어떤 곳에서 모험을 할까?",
-                    "배경이 중요해!"
-                ],
-                "problem": [
-                    "어떤 문제가 생기면 재미있을까?",
-                    "주인공이 해결해야 할 일이 뭘까?",
-                    "갈등이 있어야 흥미로워져!"
-                ],
-                "resolution": [
-                    "어떻게 해결하면 좋을까?",
-                    "해피엔딩으로 만들어보자!",
-                    "모든 문제가 잘 풀렸으면 좋겠어!"
-                ]
-            }
+            # 최근 대화 히스토리 구성
+            history_text = ""
+            if conversation_history:
+                recent_messages = conversation_history[-2:]  # 최근 2개 메시지
+                for msg in recent_messages:
+                    role = "아이" if msg.get("role") == "user" else "부기"
+                    history_text += f"{role}: {msg.get('content', '')}\n"
             
-            # 키워드가 있으면 활용
-            if keywords:
-                keyword_str = ", ".join(keywords[:2])
-                response = f"{keyword_str}에 대한 이야기구나! "
-            else:
-                response = "흥미로운 이야기야! "
+            # GPT-4o-mini에게 전달할 시스템 메시지
+            system_message = f"""당신은 아이와 대화하는 친근한 AI 친구 '부기'입니다.
+
+역할:
+- 아이의 이야기에 관심을 보이고 격려하기
+- 자연스럽고 친근한 반응 보이기
+- 이야기를 계속 이끌어나가기
+
+대화 원칙:
+1. 아이의 말에 구체적으로 반응
+2. 긍정적이고 격려적인 태도
+3. 호기심을 보이며 더 듣고 싶어하는 모습
+4. 간단하고 이해하기 쉬운 말 사용
+5. 2-3문장으로 간결하게 응답
+
+현재 상황:
+- 수집 단계: {stage}
+- 입력 품질: {quality_score:.1f}/1.0
+- 키워드: {', '.join(keywords) if keywords else '없음'}"""
+
+            user_message = f"""최근 대화:
+{history_text}
+
+아이의 말: "{user_input}"
+
+위 내용에 자연스럽게 반응하며, 아이가 계속 이야기하고 싶어지는 응답을 해주세요."""
+
+            # GPT-4o-mini로 응답 생성
+            messages = [
+                {"role": "system", "content": system_message},
+                {"role": "user", "content": user_message}
+            ]
             
-            # 단계별 질문 추가
-            stage_questions = stage_responses.get(stage, ["더 말해줄래?"])
-            response += random.choice(stage_questions)
+            response = self.openai_client.chat.completions.create(
+                model="gpt-4o-mini",
+                messages=messages,
+                max_tokens=100,
+                temperature=0.7
+            )
             
-            # 품질 점수에 따른 격려
-            if quality_score > 0.7:
-                response += " 정말 창의적이야!"
-            elif quality_score > 0.5:
-                response += " 좋은 아이디어네!"
+            # 토큰 사용량 업데이트
+            if response.usage and self.conversation_manager:
+                self.conversation_manager.update_token_usage(
+                    prompt_tokens=response.usage.prompt_tokens,
+                    completion_tokens=response.usage.completion_tokens
+                )
+
+            generated_response = response.choices[0].message.content.strip()
+            logger.info(f"GPT 맥락적 응답 생성 완료: {len(generated_response)}글자")
             
-            return response
-            
+            return generated_response
+                
         except Exception as e:
-            logger.error(f"기본 응답 생성 중 오류: {e}")
-            return "계속 이야기해줘! 더 듣고 싶어!"
+            logger.error(f"GPT 맥락적 응답 생성 중 오류: {e}")
+            # 오류 시 기본 응답
+            return "정말 흥미로운 이야기야! 더 말해줄래?"
+
+    def create_story_summary(self, conversation_history: List[Dict], 
+                            child_name: str = "", age_group: int = 5,
+                            interests: List[str] = None) -> Dict:
+        """
+        충분한 대화가 수집되었을 때 이야기 요약을 생성 (ChatBot B 전달용)
+        
+        Args:
+            conversation_history: 대화 기록
+            child_name: 아이 이름
+            age_group: 연령대
+            interests: 관심사 목록
+            
+        Returns:
+            Dict: 이야기 요약 데이터
+        """
+        try:
+            # 충분한 대화가 있는지 확인
+            if len(conversation_history) >= 5:
+                logger.info("충분한 대화가 수집되어 이야기 요약을 생성합니다")
+                return self.suggest_story_theme(
+                    conversation_history=conversation_history,
+                    child_name=child_name,
+                    age_group=age_group,
+                    interests=interests,
+                    story_collection_prompt="수집된 대화를 바탕으로 이야기 요약을 생성해주세요"
+                )
+            else:
+                return {
+                    "title": f"{child_name}의 이야기",
+                    "theme": "아직 수집 중",
+                    "characters": [],
+                    "setting": "",
+                    "plot_summary": "더 많은 대화가 필요합니다",
+                    "educational_value": "상상력과 창의성",
+                    "target_age": age_group,
+                    "estimated_length": "짧음",
+                    "key_scenes": [],
+                    "collection_status": "진행 중"
+                }
+        except Exception as e:
+            logger.error(f"이야기 요약 생성 중 오류: {e}")
+            return {
+                "title": "이야기 생성 오류",
+                "theme": "오류",
+                "plot_summary": "이야기 요약 생성 중 오류가 발생했습니다",
+                "collection_status": "오류"
+            }

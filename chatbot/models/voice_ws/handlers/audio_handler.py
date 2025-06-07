@@ -99,8 +99,15 @@ async def handle_audio_websocket(
         greeting_audio_b64, tts_status, tts_error, tts_code = await audio_processor.synthesize_tts(greeting) # ElevenLabs로 인사말 음성 생성
         
         greeting_packet = {
-            "type": "ai_response", "text": greeting, "audio": greeting_audio_b64, # 인사말 텍스트 및 음성 전송
-            "status": tts_status, "error_message": tts_error, "error_code": tts_code # 음성 상태 전송
+            "type": "ai_response",
+            "text": greeting,
+            "audio": greeting_audio_b64,
+            "status": tts_status,
+            "user_text": "",  # 인사말이므로 빈 값
+            "confidence": 1.0,  # 인사말은 100% 신뢰도
+            "timestamp": datetime.now().isoformat(),
+            "error_message": tts_error,
+            "error_code": tts_code
         }
         await ws_engine.send_json(websocket, greeting_packet) # 인사말 전송
         logger.info(f"인사말 전송 완료: {client_id}") # 로깅
