@@ -8,6 +8,7 @@ import os
 import sys
 from contextlib import asynccontextmanager
 from typing import Optional
+from datetime import datetime
 from fastapi import FastAPI, WebSocket, HTTPException, Response, Query, status, Depends, Request
 from fastapi.middleware.cors import CORSMiddleware
 from dotenv import load_dotenv
@@ -154,6 +155,136 @@ async def audio_endpoint(
         audio_processor=audio_processor
     )
 
+@app.websocket("/ws/test")
+async def test_endpoint(websocket: WebSocket, token: str = Query("development_token")):
+    """WebSocket 연결 테스트 엔드포인트"""
+    logger.info(f"WebSocket 테스트 연결 요청 - 토큰: {token}")
+    
+    # 간단한 토큰 검증 (개발용)
+    if token != "development_token":
+        await websocket.close(code=1008, reason="Invalid token")
+        return
+    
+    try:
+        await websocket.accept()
+        logger.info("WebSocket 테스트 연결 성공")
+        
+        # 연결 확인 메시지 전송
+        await websocket.send_json({
+            "type": "connected",
+            "message": "WebSocket 연결 성공",
+            "timestamp": datetime.now().isoformat()
+        })
+        
+        # 연결 상태 유지 및 메시지 에코
+        while True:
+            try:
+                # JSON 메시지 수신 대기 (30초 타임아웃)
+                data = await asyncio.wait_for(websocket.receive_json(), timeout=30.0)
+                logger.info(f"테스트 메시지 수신: {data}")
+                
+                # 에코 응답
+                echo_response = {
+                    "type": "echo",
+                    "original_message": data,
+                    "timestamp": datetime.now().isoformat(),
+                    "status": "received"
+                }
+                await websocket.send_json(echo_response)
+                
+            except asyncio.TimeoutError:
+                # 연결 유지를 위한 ping
+                await websocket.send_json({
+                    "type": "ping",
+                    "message": "connection_alive",
+                    "timestamp": datetime.now().isoformat()
+                })
+                continue
+                
+            except Exception as e:
+                logger.error(f"테스트 메시지 처리 오류: {e}")
+                await websocket.send_json({
+                    "type": "error",
+                    "message": str(e),
+                    "timestamp": datetime.now().isoformat()
+                })
+                break
+                
+    except Exception as e:
+        logger.error(f"WebSocket 테스트 연결 오류: {e}")
+    finally:
+        logger.info("WebSocket 테스트 연결 종료")
+
+@app.websocket("/ws/binary-test")
+async def binary_test_endpoint(websocket: WebSocket, token: str = Query("development_token")):
+    """WebSocket 바이너리 데이터 수신 테스트 엔드포인트"""
+    logger.info(f"WebSocket 바이너리 테스트 연결 요청 - 토큰: {token}")
+    
+    if token != "development_token":
+        await websocket.close(code=1008, reason="Invalid token")
+        return
+    
+    try:
+        await websocket.accept()
+        logger.info("WebSocket 바이너리 테스트 연결 성공")
+        
+        # 연결 확인 메시지 전송
+        await websocket.send_json({
+            "type": "connected",
+            "message": "바이너리 테스트 연결 성공",
+            "ready_for_binary": True,
+            "timestamp": datetime.now().isoformat()
+        })
+        
+        chunk_count = 0
+        total_bytes = 0
+        
+        while True:
+            try:
+                # 바이너리 데이터 수신
+                binary_data = await asyncio.wait_for(websocket.receive_bytes(), timeout=30.0)
+                chunk_count += 1
+                chunk_size = len(binary_data)
+                total_bytes += chunk_size
+                
+                logger.info(f"바이너리 청크 수신: #{chunk_count}, 크기: {chunk_size} bytes")
+                
+                # 바이너리 수신 확인 응답 (JSON)
+                response = {
+                    "type": "binary_received",
+                    "chunk_number": chunk_count,
+                    "chunk_size": chunk_size,
+                    "total_bytes": total_bytes,
+                    "timestamp": datetime.now().isoformat()
+                }
+                await websocket.send_json(response)
+                
+            except asyncio.TimeoutError:
+                # 연결 유지를 위한 ping
+                await websocket.send_json({
+                    "type": "ping",
+                    "message": "waiting_for_binary",
+                    "chunks_received": chunk_count,
+                    "total_bytes": total_bytes,
+                    "timestamp": datetime.now().isoformat()
+                })
+                continue
+                
+            except Exception as e:
+                logger.error(f"바이너리 데이터 수신 오류: {e}")
+                await websocket.send_json({
+                    "type": "error",
+                    "message": str(e),
+                    "chunks_received": chunk_count,
+                    "timestamp": datetime.now().isoformat()
+                })
+                break
+                
+    except Exception as e:
+        logger.error(f"WebSocket 바이너리 테스트 오류: {e}")
+    finally:
+        logger.info(f"WebSocket 바이너리 테스트 종료 - 총 {chunk_count}개 청크, {total_bytes} bytes 수신")
+
 @app.websocket("/ws/story_generation")
 async def story_generation_endpoint(
     websocket: WebSocket,
@@ -172,7 +303,7 @@ async def story_generation_endpoint(
         age,
         interests,
         token
-    )   
+    )
 
 # ===========================================
 # HTTP API 엔드포인트
