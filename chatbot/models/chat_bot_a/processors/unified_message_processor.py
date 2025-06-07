@@ -641,11 +641,11 @@ class UnifiedMessageProcessor:
         """Enhanced 연령별 특화 인사말"""
         age_specific_greetings = {
             4: f"안녕 {self.child_name or '친구'}야! 나는 {self.chatbot_name}야! 오늘 뭐 하고 놀까?",
-            5: f"안녕 {self.child_name or '친구'}! 나는 {self.chatbot_name}야. 재미있는 얘기 같이 만들어볼까?",
-            6: f"안녕 {self.child_name or '친구'}! {self.chatbot_name}라고 해! 신나는 모험 이야기 만들어보자!",
-            7: f"안녕 {self.child_name or '친구'}! 나는 {self.chatbot_name}야. 멋진 이야기를 함께 만들어보자!",
-            8: f"안녕 {self.child_name or '친구'}! {self.chatbot_name}야. 너만의 특별한 이야기를 만들어보자!",
-            9: f"안녕 {self.child_name or '친구'}! 나는 {self.chatbot_name}야. 창의적인 이야기를 함께 만들어볼까?"
+            5: f"안녕 {self.child_name or '친구'}야! 나는 {self.chatbot_name}야. 재미있는 얘기 같이 만들어볼까?",
+            6: f"안녕 {self.child_name or '친구'}야! {self.chatbot_name}라고 해! 신나는 모험 이야기 만들어보자!",
+            7: f"안녕 {self.child_name or '친구'}야! 나는 {self.chatbot_name}야. 멋진 이야기를 함께 만들어보자!",
+            8: f"안녕 {self.child_name or '친구'}야! {self.chatbot_name}야. 너만의 특별한 이야기를 만들어보자!",
+            9: f"안녕 {self.child_name or '친구'}야! 나는 {self.chatbot_name}야. 창의적인 이야기를 함께 만들어볼까?"
         }
         
         greeting = age_specific_greetings.get(age, age_specific_greetings[5])

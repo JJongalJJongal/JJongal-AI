@@ -94,13 +94,13 @@ services:
       # SSL 설정은 인증서 준비 후 활성화
       # - ./ssl:/etc/nginx/ssl:ro
     depends_on:
-      ccb-ai:
-        condition: service_healthy
+      - ccb-ai  # 단순 의존성으로 변경 (헬스체크 대기 제거)
     healthcheck:
-      test: ["CMD", "nginx", "-t"]
+      test: ["CMD", "sh", "-c", "nc -z ccb-ai 8000 && nginx -t"]
       interval: 30s
-      timeout: 5s
-      retries: 3
+      timeout: 10s
+      retries: 5
+      start_period: 120s  # ccb-ai 컨테이너 시작 대기 시간
     restart: unless-stopped
     networks:
       - ccb-network

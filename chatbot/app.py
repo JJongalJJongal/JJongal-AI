@@ -12,6 +12,7 @@ from datetime import datetime
 from fastapi import FastAPI, WebSocket, HTTPException, Response, Query, status, Depends, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.websockets import WebSocketDisconnect, WebSocketState
+from fastapi.staticfiles import StaticFiles
 from dotenv import load_dotenv
 
 # 경로 설정
@@ -59,6 +60,16 @@ async def lifespan_manager(app: FastAPI):
     logger.info("꼬꼬북 AI 시스템 시작 중...")
     logger.info(f"작업 디렉토리: {os.getcwd()}")
     logger.info(f"Python 버전: {sys.version.split()[0]}")
+    
+    # 파일 권한 설정
+    try:
+        from shared.utils.file_permissions import ensure_readable_output
+        if ensure_readable_output():
+            logger.info("출력 폴더 권한 설정 완료")
+        else:
+            logger.warning("출력 폴더 권한 설정 실패")
+    except Exception as e:
+        logger.error(f"파일 권한 설정 중 오류: {e}")
     
     # VectorDB 사전 로드
     logger.info("설치된 패키지 확인...")
@@ -117,6 +128,17 @@ app.add_middleware(
     allow_methods=["GET", "POST", "PUT", "DELETE"],
     allow_headers=["*"],
 )
+
+# 정적 파일 서빙 설정 (output 폴더)
+try:
+    output_dir = "/app/output"
+    if os.path.exists(output_dir):
+        app.mount("/output", StaticFiles(directory=output_dir), name="output")
+        logger.info(f"정적 파일 서빙 활성화: /output -> {output_dir}")
+    else:
+        logger.warning(f"출력 디렉토리가 존재하지 않음: {output_dir}")
+except Exception as e:
+    logger.error(f"정적 파일 서빙 설정 실패: {e}")
 
 # 전역 오류 처리
 @app.middleware("http")

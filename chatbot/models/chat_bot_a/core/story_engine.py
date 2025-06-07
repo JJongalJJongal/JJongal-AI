@@ -74,7 +74,8 @@ class StoryEngine:
             # return None
             
             # 이 파일의 위치를 기준으로 vector_db 폴더의 기본 경로를 계산합니다.
-            base_dir = Path(__file__).resolve().parent.parent.parent / 'data' / 'vector_db'
+            # story_engine.py -> core -> chat_bot_a -> models -> chatbot -> data/vector_db
+            base_dir = Path(__file__).resolve().parent.parent.parent.parent / 'data' / 'vector_db'
             
             # base_directory 인자를 추가하여 DB 경로를 가져옵니다.
             db_path_str = get_db_type_path(db_type="summary", base_directory=str(base_dir))
@@ -1049,7 +1050,7 @@ class StoryEngine:
                     "theme": "아직 수집 중",
                     "characters": [],
                     "setting": "",
-                    "plot_summary": "더 많은 대화가 필요합니다",
+                    "plot_summary": "더 많은 대화가 필요해!",
                     "educational_value": "상상력과 창의성",
                     "target_age": age_group,
                     "estimated_length": "짧음",
