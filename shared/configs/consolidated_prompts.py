@@ -147,7 +147,6 @@ class ConsolidatedPrompts:
     IMAGE_GENERATION_PROMPTS = {
         AgeGroup.YOUNG_CHILDREN: """Cozy children's storybook illustration: {scene_description}
 
-주제: {theme}
 캐릭터: {characters}  
 배경: {setting}
 
@@ -159,7 +158,6 @@ Simple composition that doesn't overwhelm little eyes, with the main character c
         
         AgeGroup.ELEMENTARY: """Beautiful detailed storybook illustration: {scene_description}
 
-주제: {theme}
 캐릭터: {characters}
 배경: {setting}
 

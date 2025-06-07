@@ -11,8 +11,8 @@
 
 from .conversation_engine import ConversationEngine
 from .langchain_conversation_engine import LangChainConversationEngine
-from .story_collection_engine import StoryCollectionEngine
-from .rag_engine import RAGEngine
+from .story_engine import StoryEngine
+from .rag_engine import RAGSystem
 from .legacy_integration import (
     LegacyIntegrationManager,
     LegacyConversationManagerAdapter,
@@ -24,8 +24,8 @@ from .legacy_integration import (
 __all__ = [
     "ConversationEngine",
     "LangChainConversationEngine",
-    "StoryCollectionEngine",
-    "RAGEngine",
+    "StoryEngine",
+    "RAGSystem",
     "LegacyIntegrationManager",
     "LegacyConversationManagerAdapter",
     "LegacyMessageFormatterAdapter",

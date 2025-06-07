@@ -97,7 +97,7 @@ class StoryGenerationEngine:
             }
         """
         try:
-            logger.info(f"동화 생성 시작 : {story_outline.get('theme', '제목 없음')}")
+            logger.info(f"동화 생성 시작 : {story_outline.get('title', '제목 없음')}")
             
             # 1. 스토리 ID 생성 및 설정
             import uuid

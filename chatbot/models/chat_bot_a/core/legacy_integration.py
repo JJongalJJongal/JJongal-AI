@@ -5,6 +5,7 @@
 기존 코드의 완전한 호환성을 보장하면서 새로운 LangChain 기능을 제공
 """
 from typing import Dict, List, Any, Optional
+import asyncio
 
 # Legacy imports
 from ..conversation_manager import ConversationManager
@@ -12,8 +13,8 @@ from ..conversation_manager import ConversationManager
 # New modular imports
 from .conversation_engine import ConversationEngine
 from .langchain_conversation_engine import LangChainConversationEngine
-from .story_collection_engine import StoryCollectionEngine
-from .rag_engine import RAGEngine
+from .story_engine import StoryEngine
+from .rag_engine import RAGSystem
 from ..processors import MessageProcessor, LanguageProcessor
 
 from shared.utils.logging_utils import get_module_logger
@@ -210,7 +211,7 @@ class LegacyStoryCollectorAdapter:
             openai_client: OpenAI 클라이언트
             rag_engine: RAG 엔진
         """
-        self.engine = StoryCollectionEngine(openai_client, rag_engine)
+        self.engine = StoryEngine(openai_client, rag_engine)
         
         # 레거시 호환성을 위한 속성들
         self.story_stage = "character"
@@ -276,14 +277,14 @@ class LegacyStoryAnalyzerAdapter:
                     import os
                     vector_db_path = os.getenv("VECTOR_DB_PATH", "/app/chatbot/data/vector_db") # VectorDB 경로
                 
-                rag_engine = RAGEngine( # RAG 엔진 생성
+                rag_engine = RAGSystem( # RAG 엔진 생성
                     openai_client=openai_client,
                     vector_db_path=vector_db_path # VectorDB 경로
                 )
             except Exception as e:
                 logger.warning(f"RAG 엔진 변환 실패: {e}")
         
-        self.engine = StoryCollectionEngine(openai_client, rag_engine)
+        self.engine = StoryEngine(openai_client, rag_engine)
         
         # 레거시 호환성을 위한 속성들
         self.openai_client = openai_client
@@ -295,16 +296,20 @@ class LegacyStoryAnalyzerAdapter:
         """레거시 메서드: 대화 요약"""
         return self.engine.get_conversation_summary(conversation_history, child_name, age_group)
     
-    def suggest_story_theme(self, conversation_history: List[Dict], 
-                          child_name: str = "", age_group: int = 5,
-                          interests: List[str] = None, 
-                          story_collection_prompt: str = "") -> Dict:
-        """레거시 메서드: 이야기 주제 제안"""
-        result = self.engine.suggest_story_theme(
-            conversation_history, child_name, age_group, interests, story_collection_prompt
-        )
-        self.story_outline = result  # 레거시 속성 동기화
-        return result
+    def suggest_story_idea(self, conversation_history: List[Dict]) -> Dict:
+        """
+        스토리 아이디어 제안
+        """
+        logger.info("통합 모듈을 통해 스토리 아이디어 제안 시작")
+        try:
+            # StoryEngine의 비동기 함수를 동기적으로 실행
+            # 실제 운영 환경에서는 비동기 I/O를 직접 처리해야 함
+            result = asyncio.run(self.engine.suggest_story_idea(conversation_history))
+            logger.info(f"스토리 아이디어 제안 완료: {result.get('title')}")
+            return result
+        except Exception as e:
+            logger.error(f"스토리 아이디어 제안 중 오류 발생: {e}", exc_info=True)
+            return {"error": "아이디어 생성에 실패했습니다."}
     
     def get_story_outline(self) -> Optional[Dict]:
         """레거시 메서드: 이야기 개요 반환"""
@@ -342,7 +347,7 @@ class LegacyIntegrationManager:
                     import os
                     vector_db_path = os.getenv("VECTOR_DB_PATH", "/app/chatbot/data/vector_db") # VectorDB 경로
                 
-                self.rag_engine = RAGEngine( # RAG 엔진 생성    
+                self.rag_engine = RAGSystem( # RAG 엔진 생성    
                     openai_client=openai_client,
                     vector_db_path=vector_db_path # VectorDB 경로
                 )

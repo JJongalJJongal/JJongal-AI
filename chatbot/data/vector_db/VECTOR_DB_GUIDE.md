@@ -90,7 +90,6 @@ python -m chatbot.data.vector_db.populate_vector_db [options]
 *   `--db-dir-type <type>`: 데이터를 임포트할 DB의 유형을 지정합니다. 선택 가능: `main`, `detailed`, `summary`. (기본값: `main`)
 *   `--collection <name>`: 데이터를 저장할 컬렉션의 이름을 지정합니다. (기본값: `fairy_tales`)
 *   `--filter-age <age>`: 지정된 연령 태그와 관련된 스토리만 필터링하여 임포트합니다. (예: `5`는 '5-6세' 관련)
-*   `--filter-theme <theme>`: 지정된 테마와 관련된 스토리만 필터링하여 임포트합니다. (예: "우정")
 *   `--import-all`: 모든 스토리를 필터링 없이 기본 설정('main' DB, 'fairy_tales' 컬렉션)으로 임포트합니다. 이 옵션 사용 시 다른 필터 옵션은 무시됩니다.
 *   `--verbose`: 데이터 임포트 과정에 대한 상세 로그를 출력합니다.
 
@@ -104,9 +103,9 @@ python -m chatbot.data.vector_db.populate_vector_db [options]
     ```bash
     python -m chatbot.data.vector_db.populate_vector_db --db-dir-type summary --collection story_summaries --filter-age 5
     ```
-*   'detailed' DB에 "모험" 테마의 이야기만 임포트 (상세 로그 출력):
+*   'detailed' DB에 이야기만 임포트 (상세 로그 출력):
     ```bash
-    python -m chatbot.data.vector_db.populate_vector_db --db-dir-type detailed --filter-theme "모험" --verbose
+    python -m chatbot.data.vector_db.populate_vector_db --db-dir-type detailed --verbose
     ```
 
 ## 4. 데이터베이스 구조 및 주요 메타데이터
@@ -117,23 +116,21 @@ ChromaDB에 문서를 저장할 때, 텍스트 내용과 함께 다양한 메타
 
 *   **Main DB**:
     *   텍스트: 이야기의 요약(summary)과 전체 내용(content)을 결합한 텍스트.
-    *   주요 메타데이터: `story_id`, `title`, `age_min`, `age_max`, `tags`, `keywords`, `theme`, `type: "main"`.
+    *   주요 메타데이터: `story_id`, `title`, `age_group`, `tags`, `keywords`, `type: "main"`.
 *   **Detailed DB**:
     *   텍스트: 이야기의 전체 내용(content). (챕터별 `narration`이 합쳐진 형태일 수 있음)
-    *   주요 메타데이터: `story_id`, `title`, `age_min`, `age_max`, `characters` (등장인물 목록), `tags`, `theme`, `type: "detailed"`.
+    *   주요 메타데이터: `story_id`, `title`, `age_group`, `characters` (등장인물 목록), `tags`, `type: "detailed"`.
 *   **Summary DB**:
     *   텍스트: 이야기의 요약(summary).
-    *   주요 메타데이터: `story_id`, `title`, `age_min`, `age_max`, `keywords`, `tags`, `theme`, `type: "summary"`.
+    *   주요 메타데이터: `story_id`, `title`, `age_group`, `keywords`, `tags`, `type: "summary"`.
 
 ### 4.2. 주요 메타데이터 필드
 
 *   `story_id` (str): 각 이야기를 고유하게 식별하는 ID.
 *   `title` (str): 이야기의 제목.
-*   `age_min` (int, Optional): 대상 독자의 최소 연령. (RAG 검색 시 연령 필터링에 사용)
-*   `age_max` (int, Optional): 대상 독자의 최대 연령. (RAG 검색 시 연령 필터링에 사용)
+*   `age_group` (str, Optional): 대상 독자의 연령 그룹. 예: "5-7세", "6세".
 *   `tags` (str, Optional): 이야기에 관련된 태그들 (쉼표로 구분된 문자열 또는 리스트). 예: "5-6세", "교훈적", "동물".
 *   `keywords` (str, Optional): 이야기의 핵심 키워드들 (쉼표로 구분된 문자열 또는 리스트).
-*   `theme` (str, Optional): 이야기의 주제. 예: "우정", "용기", "가족".
 *   `characters` (str, Optional): 주요 등장인물 목록 (쉼표로 구분된 문자열, 주로 detailed DB에서 사용).
 *   `educational_value` (str, Optional): 교육적 가치.
 *   `type` (str): 해당 문서가 어떤 DB 유형의 컨텍스트를 위해 생성되었는지 나타냅니다 (`main`, `detailed`, `summary`). RAG 시스템이 특정 유형의 컨텍스트를 필터링하는 데 사용됩니다.
@@ -156,9 +153,10 @@ collection_name = "fairy_tales" # populate_vector_db.py로 생성한 컬렉션
 # 3. 유사 스토리 검색
 query = "용감한 토끼 이야기"
 metadata_조건 = {
-    "age_min": {"$lte": 5}, # 5세 이하
-    "age_max": {"$gte": 5}, # 5세 이상 (즉, 5세 대상)
-    "theme": "용기"
+    "$and": [
+        {"age_group": "5세"},
+        {"tags": {"$like": "%용기%"}}
+    ]
 }
 
 # get_similar_stories는 내부적으로 query_vector_db를 호출하며, 

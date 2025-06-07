@@ -35,6 +35,42 @@ def parse_age_range(age_input: Any) -> Dict[str, Optional[int]]:
         age_max = age_input
     return {"age_min": age_min, "age_max": age_max}
 
+def create_age_group_string(age_min: Optional[int], age_max: Optional[int]) -> Optional[str]:
+    """
+    age_min과 age_max를 기반으로 표준화된 'age_group' 문자열을 생성합니다.
+    예: '3-5세', '6세', '7세 이상'
+    """
+    if age_min is None:
+        return None
+    
+    # '6세 이상'과 같은 특수 케이스 처리 (예시)
+    if age_max is not None and age_max >= 99: # 99나 특정 큰 수를 '이상'으로 가정
+        return f"{age_min}세 이상"
+    
+    if age_max is None or age_min == age_max:
+        return f"{age_min}세"
+    
+    if age_min > age_max: # 혹시 모를 데이터 오류 방지
+        return f"{age_min}세"
+
+    return f"{age_min}-{age_max}세"
+
+def extract_age_group_from_tags(tags: List[str]) -> Optional[str]:
+    """
+    태그 리스트에서 'X-Y세' 또는 'X세' 형식의 나이 그룹 문자열을 추출합니다.
+    """
+    if not isinstance(tags, list):
+        return None
+        
+    # '7-9세', '5세', '6세 이상' 등 다양한 형식을 포괄하는 정규표현식
+    age_pattern = re.compile(r'(\d+-\d+\s*세|\d+\s*세|\d+\s*세\s*이상)')
+    for tag in tags:
+        match = age_pattern.search(tag)
+        if match:
+            # 일치하는 부분을 공백 제거 후 반환
+            return match.group(0).strip()
+    return None
+
 def process_story_data(story_data: Dict[str, Any]) -> Dict[str, Any]:
     """
     스토리 데이터 전처리 및 정규화. 
@@ -47,7 +83,7 @@ def process_story_data(story_data: Dict[str, Any]) -> Dict[str, Any]:
         Dict: 처리 및 표준화된 스토리 데이터. 
               포함 필드 예시: title, summary, content, characters (list of names),
               setting, theme, educational_value, keywords (list), tags (list), 
-              age_min (int), age_max (int), story_id (original or derived).
+              age_group (str, from tags).
     """
     processed_data = {}
 
@@ -56,7 +92,6 @@ def process_story_data(story_data: Dict[str, Any]) -> Dict[str, Any]:
     processed_data["story_id"] = story_data.get("story_id", processed_data["title"].replace(" ", "_"))
     processed_data["summary"] = story_data.get("summary", story_data.get("plot_summary", ""))
     processed_data["setting"] = story_data.get("setting", "")
-    processed_data["theme"] = story_data.get("theme", "")
     processed_data["educational_value"] = story_data.get("educational_value", "")
     
     # 캐릭터 정보 (이름 리스트로 단순화)
@@ -66,38 +101,22 @@ def process_story_data(story_data: Dict[str, Any]) -> Dict[str, Any]:
     else:
         processed_data["characters"] = []
 
-    # 키워드 및 태그
+    # 키워드
     processed_data["keywords"] = story_data.get("keywords", []) 
     if isinstance(processed_data["keywords"], str): # 문자열이면 리스트로 변환 시도
         processed_data["keywords"] = [k.strip() for k in processed_data["keywords"].split(',') if k.strip()]
     
-    processed_data["tags"] = story_data.get("tags", [])
-    if isinstance(processed_data["tags"], str):
-        processed_data["tags"] = [t.strip() for t in processed_data["tags"].split(',') if t.strip()]
+    # 태그 처리 및 age_group 추출
+    tags_input = story_data.get("tags", [])
+    tags_list = []
+    if isinstance(tags_input, str):
+        tags_list = [t.strip() for t in tags_input.split(',') if t.strip()]
+    elif isinstance(tags_input, list):
+        tags_list = tags_input
     
-    # 연령 정보 처리 (age_min, age_max)
-    age_info = {"age_min": None, "age_max": None}
-    raw_metadata = story_data.get("metadata", {})
-    if isinstance(raw_metadata, dict):
-        if raw_metadata.get("age_min") is not None and raw_metadata.get("age_max") is not None:
-            try:
-                age_info["age_min"] = int(raw_metadata["age_min"])
-                age_info["age_max"] = int(raw_metadata["age_max"])
-            except ValueError:
-                logger.warning(f"Story ID {processed_data.get('story_id', 'N/A')}: Invalid age_min/age_max in metadata: {raw_metadata}")
-                age_info = {"age_min": None, "age_max": None} # 유효하지 않으면 초기화
+    processed_data["tags"] = tags_list
+    processed_data["age_group"] = extract_age_group_from_tags(tags_list)
     
-    if age_info["age_min"] is None: # 메타데이터에 없거나 유효하지 않으면 age_group 또는 target_age 시도
-        age_input = story_data.get("age_group", story_data.get("target_age"))
-        if age_input is not None:
-            parsed_ages = parse_age_range(age_input)
-            if parsed_ages["age_min"] is not None:
-                age_info = parsed_ages
-            else:
-                 logger.warning(f"Story ID {processed_data.get('story_id', 'N/A')}: Could not parse age_group/target_age: {age_input}")
-    
-    processed_data.update(age_info)
-
     # 콘텐츠 집계 (챕터 내용 포함)
     main_content = story_data.get("content", "")
     if not main_content and "chapters" in story_data and isinstance(story_data["chapters"], list):

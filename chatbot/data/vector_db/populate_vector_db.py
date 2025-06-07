@@ -49,12 +49,8 @@ def filter_stories(stories_data: List[Dict[str, Any]], filter_criteria: Dict[str
         matches_all_criteria = True
         for key, value in filter_criteria.items():
             story_value = story.get(key)
-            if key == "age" and "tags" in story: # 'age'는 'tags' 필드의 일부로 처리 가능성
-                age_tag = f"{value}-{value+1}세"
-                if age_tag not in story.get("tags", []):
-                    matches_all_criteria = False
-                    break
-            elif isinstance(story_value, str) and isinstance(value, str):
+            # age 필터링은 현재 로직에서 제거됨. 필요 시 재구현.
+            if isinstance(story_value, str) and isinstance(value, str):
                 if value.lower() not in story_value.lower():
                     matches_all_criteria = False
                     break
@@ -79,7 +75,6 @@ def main():
     parser.add_argument('--collection', type=str, default='fairy_tales',
                        help='ChromaDB 컬렉션 이름. --import-all 시 fairy_tales로 고정.')
     parser.add_argument('--filter-age', type=int, help='연령대로 필터링 (예: 5는 5-6세 관련 태그 검색)')
-    parser.add_argument('--filter-theme', type=str, help='테마로 필터링 (예: "우주", "모험")')
     parser.add_argument('--import-all', action='store_true', 
                        help='모든 스토리를 기본 설정(main DB, fairy_tales 컬렉션)으로 필터 없이 임포트합니다.')
     parser.add_argument('--verbose', action='store_true', help='상세 정보 출력')
@@ -98,8 +93,6 @@ def main():
     else:
         if args.filter_age:
             filter_criteria['age'] = args.filter_age # filter_stories 함수와 키 일치
-        if args.filter_theme:
-            filter_criteria['theme'] = args.filter_theme
     
     stories_dir = project_root / 'chatbot' / 'data' / 'processed' / 'story_data'
     
@@ -207,15 +200,13 @@ def main():
         tags_list = processed_s_data.get('tags', [])
         common_metadata['tags'] = ", ".join(tags_list) if tags_list else ""
         common_metadata.update({
-            'age_min': processed_s_data.get('age_min'), 
-            'age_max': processed_s_data.get('age_max'),
-            'theme': processed_s_data.get('theme'), 
+            'age_group': processed_s_data.get('age_group'), # age_group 추가
             'educational_value': processed_s_data.get('educational_value'), 
             'type': db_type_to_use, 
             **doc_specific_metadata
         })        
         
-        final_metadata = {k: v for k, v in common_metadata.items()} 
+        final_metadata = {k: v for k, v in common_metadata.items() if v is not None} 
 
         docs_to_add_final.append(doc_text_content)
         metadatas_to_add_final.append(final_metadata)

@@ -40,7 +40,7 @@ from chatbot.workflow.integration_api import (
 )
 
 logger = get_module_logger(__name__)
-logger.info("=== 🚀 CHATBOT.APP.PY 모듈이 로드되었습니다! ===")
+logger.info("=== CHATBOT.APP.PY Module Loaded ===")
 
 # 전역 컴포넌트
 connection_engine = ConnectionEngine()
@@ -248,15 +248,15 @@ async def create_story(
     auth: dict = Depends(verify_auth)
 ):
     """새 이야기 생성"""
-    print("🔥🔥🔥 PRINT: CREATE_STORY 함수 호출됨!!! 🔥🔥🔥")
-    logger.info("🔥🔥🔥 LOGGER: CREATE_STORY 함수 호출됨!!! 🔥🔥🔥")
+    print("PRINT: CREATE_STORY Function Called")
+    logger.info("LOGGER: CREATE_STORY Function Called")
     logger.info("=== 스토리 생성 API 호출됨 ===")
     logger.info(f"요청 데이터: 아이 이름={story_request.child_profile.name}, 나이={story_request.child_profile.age}")
     
     try:
         logger.info("오케스트레이터 상태 확인 중...")
         if not orchestrator:
-            logger.error("오케스트레이터가 None입니다!")
+            logger.error("오케스트레이터가 None입니다")
             return StoryResponse(
                 success=False,
                 message="오케스트레이터가 초기화되지 않았습니다",

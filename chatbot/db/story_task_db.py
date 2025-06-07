@@ -177,7 +177,7 @@ if __name__ == '__main__':
 
     # # Example Usage (uncomment to test)
     # test_story_id = "test_story_123"
-    # test_outline = {"child_name": "Test Child", "age": 5, "story_theme_summary": "A brave little star"}
+    # test_outline = {"child_name": "Test Child", "age": 5, "story_summary": "A brave little star"}
     #
     # # Create
     # print(f"Creating task {test_story_id}...")

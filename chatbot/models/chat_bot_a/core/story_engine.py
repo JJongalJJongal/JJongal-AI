@@ -4,14 +4,20 @@ ChatBot A 통합 이야기 엔진
 이야기 수집, 분석, 구조화를 담당하는 통합 엔진
 기존 StoryCollector, StoryAnalyzer, StoryCollectionEngine의 기능을 하나로 통합
 """
-from typing import Dict, List, Any, Optional, Set
+from typing import Dict, List, Any, Optional, Set, Tuple
 import random
 import json
 import os
+import re
 
 from shared.utils.logging_utils import get_module_logger
-from shared.utils.openai_utils import generate_chat_completion
-from .rag_engine import RAGEngine
+from shared.utils.vector_db_utils import get_db_type_path
+from chatbot.data.vector_db.core import VectorDB
+from langchain_community.chat_models import ChatOpenAI
+from langchain.schema import HumanMessage, SystemMessage
+from langchain_core.prompts import ChatPromptTemplate
+
+from .rag_engine import RAGSystem
 
 logger = get_module_logger(__name__)
 
@@ -29,21 +35,13 @@ class StoryEngine:
     - 이야기 구조화 및 개요 생성
     """
     
-    def __init__(self, openai_client=None, rag_system=None, conversation_manager=None, 
-                 enhanced_mode=False, performance_tracking=False):
-        """
-        이야기 엔진 초기화
+    def __init__(self, user_data: Dict, story_data: Optional[Dict] = None):
+        self.user_data = user_data
+        self.story_data = story_data if story_data else self._initialize_story_data()
+        self.llm = ChatOpenAI(model_name="gpt-4o-mini", temperature=0.7)
         
-        Args:
-            openai_client: OpenAI API 클라이언트
-            rag_system: RAG 시스템 인스턴스
-            conversation_manager: ConversationManager 인스턴스
-            enhanced_mode: Enhanced 모드 사용 여부
-            performance_tracking: 성능 추적 활성화 여부
-        """
-        # === Enhanced 모드 설정 ===
-        self.enhanced_mode = enhanced_mode
-        self.performance_tracking = performance_tracking
+        # RAG 시스템 초기화
+        self.rag_system = self._initialize_rag_system()
         
         # === 이야기 수집 상태 ===
         self.story_stage = "character"  # 현재 수집 단계
@@ -56,38 +54,184 @@ class StoryEngine:
         self.last_stage_transition = 0  # 마지막 단계 전환 턴
         
         # === 분석 및 생성 ===
-        self.openai_client = openai_client
-        self.conversation_manager = conversation_manager
+        self.openai_client = None
+        self.conversation_manager = None
         self.story_outline = None  # 생성된 이야기 개요
-        
-        # RAG 시스템 설정 - VectorDB 인스턴스를 RAGEngine으로 변환
-        self.rag_system = None
-        if rag_system:
-            try:
-                # VectorDB 인스턴스에서 경로 추출
-                if hasattr(rag_system, 'persist_directory') and rag_system.persist_directory:
-                    vector_db_path = str(rag_system.persist_directory)
-                else:
-                    # 환경변수에서 경로 가져오기
-                    vector_db_path = os.getenv("VECTOR_DB_PATH", "/app/chatbot/data/vector_db")
-                
-                # RAGEngine 생성
-                self.rag_system = RAGEngine(
-                    openai_client=openai_client,
-                    vector_db_path=vector_db_path,
-                    collection_name="fairy_tales"
-                )
-                logger.info(f"StoryEngine: RAGEngine 생성 완료 (경로: {vector_db_path})")
-            except Exception as e:
-                logger.warning(f"StoryEngine: RAGEngine 생성 실패: {e}")
-                self.rag_system = rag_system  # 기존 시스템 사용
         
         # === 수집 통계 ===
         self.total_interactions = 0
         self.quality_scores = []
         
-        logger.info(f"통합 이야기 엔진 초기화 완료 - Enhanced: {enhanced_mode}, Performance Tracking: {performance_tracking}")
+        logger.info("통합 이야기 엔진 초기화 완료")
     
+    def _initialize_rag_system(self) -> Optional[RAGSystem]:
+        """RAG 시스템을 초기화하고 인스턴스를 반환합니다."""
+        try:
+            db_path = get_db_type_path(db_type="summary")
+            if not db_path.exists():
+                logger.warning(f"RAG를 위한 VectorDB 경로를 찾을 수 없습니다: {db_path}")
+                return None
+            
+            vector_db = VectorDB(persist_directory=str(db_path))
+            vector_db.get_collection("fairy_tales")
+            
+            prompts = {
+                "rag_templates": {
+                    "story_enrichment": "다음 아이디어를 바탕으로 {age_group}세 아이에게 맞는 동화 아이디어를 더 풍부하게 만들어주세요.\n\n기본 아이디어: {query_text}\n\n참고 자료:\n{context}",
+                    "rag_story_generation": "아래 정보를 바탕으로 {age_group}세 어린이를 위한 짧은 동화의 시작 부분을 만들어주세요.\n\n[컨텍스트]\n{context}\n\n[요청사항]\n{user_request}"
+                }
+            }
+            return RAGSystem(vector_db, prompts)
+        except Exception as e:
+            logger.error(f"RAG 시스템 초기화 실패: {e}", exc_info=True)
+            return None
+
+    def _initialize_story_data(self) -> Dict:
+        story_data = {
+            "title": "",
+            "summary": "",
+            "characters": [],
+            "setting": {},
+            "content": "",
+            "chapters": []
+        }
+        logger.info(f"스토리 데이터 초기화 완료: {story_data}")
+        return story_data
+
+    async def suggest_story_idea(self, conversation_history: List[Dict]) -> Dict:
+        """
+        대화 기록을 바탕으로 RAG를 활용하여 동화 아이디어를 제안합니다.
+        """
+        if not self.rag_system:
+            logger.warning("RAG 시스템이 없어 기본 아이디어를 반환합니다.")
+            return {"title": "모험과 우정", "summary": "동물 친구들의 신나는 모험 이야기"}
+
+        try:
+            age_group, interests = self._extract_user_info_from_conversation(conversation_history)
+            base_idea = f"{interests[0]}에 대한 이야기" if interests else "친구들과의 신나는 모험"
+            
+            enhanced_idea = await self.rag_system.enhance_story_context(base_idea, age_group)
+
+            prompt_template = ChatPromptTemplate.from_template(
+                "다음 아이디어를 바탕으로 {age_group}세 아이가 좋아할 만한 동화의 제목과 줄거리를 만들어줘.\\n\\n아이디어: {enhanced_idea}\\n\\n출력 형식:\\n제목: [여기에 제목]\\n줄거리: [여기에 한두 문단 요약]"
+            )
+            chain = prompt_template | self.llm
+            response = await chain.ainvoke({
+                "enhanced_idea": enhanced_idea,
+                "age_group": age_group
+            })
+            
+            parsed_idea = self._parse_llm_response_for_story_idea(response.content)
+            return parsed_idea
+        except Exception as e:
+            logger.error(f"동화 아이디어 제안 중 오류 발생: {e}", exc_info=True)
+            return {"title": "오류", "summary": "아이디어를 생성하는 데 문제가 발생했습니다."}
+            
+    def _parse_llm_response_for_story_idea(self, response_text: str) -> Dict:
+        """LLM의 응답에서 제목과 줄거리를 추출하는 함수"""
+        try:
+            title_match = re.search(r"제목:\\s*(.*)", response_text)
+            summary_match = re.search(r"줄거리:\\s*(.*)", response_text, re.DOTALL)
+
+            title = title_match.group(1).strip() if title_match else "알 수 없는 제목"
+            summary = summary_match.group(1).strip() if summary_match else "줄거리를 생성하지 못했습니다."
+            
+            return {"title": title, "summary": summary}
+        except Exception as e:
+            logger.error(f"LLM 응답 파싱 실패: {e}\n원본 응답: {response_text}")
+            return {"title": "파싱 오류", "summary": response_text}
+
+    def _extract_user_info_from_conversation(self, conversation_history: List[Dict]) -> Tuple[int, List[str]]:
+        """대화 기록에서 사용자 정보(나이, 관심사) 추출"""
+        age_group = self.user_data.get("age_group", 5) 
+        interests = self.user_data.get("interests", [])
+
+        for message in conversation_history:
+            if message.get("role") == "user":
+                text = message.get("content", "").lower()
+                if "공룡" in text and "공룡" not in interests:
+                    interests.append("공룡")
+                if "우주" in text and "우주" not in interests:
+                    interests.append("우주")
+        
+        return age_group, interests
+
+    def update_story_element(self, element_type: str, new_value: Any) -> Dict:
+        if element_type in self.story_data:
+            self.story_data[element_type] = new_value
+            logger.info(f"스토리 요소 업데이트: {element_type} = {new_value}")
+        else:
+            logger.warning(f"알 수 없는 스토리 요소 타입: {element_type}")
+        return self.story_data
+
+    async def generate_full_story(self, initial_idea: Dict) -> Dict:
+        """초기 아이디어를 바탕으로 전체 동화 줄거리를 생성합니다."""
+        logger.info(f"전체 동화 생성 시작: {initial_idea}")
+        self.story_data.update(initial_idea)
+        
+        prompt_template = ChatPromptTemplate.from_template(
+            """
+            다음 정보를 바탕으로 {age_group}세 아이를 위한 완전한 동화 줄거리를 생성해 주세요.
+
+            제목: {title}
+            기본 아이디어: {summary}
+
+            생성할 내용:
+            - 주요 등장인물 (2-3명)
+            - 이야기의 배경 설정
+            - 기-승-전-결 구조의 전체 줄거리
+
+            출력 형식:
+            등장인물: [이름1], [이름2], ...
+            배경: [배경 설명]
+            줄거리: [전체 줄거리]
+            """
+        )
+        
+        chain = prompt_template | self.llm
+        
+        try:
+            response = await chain.ainvoke({
+                "age_group": self.user_data.get("age_group", 5),
+                "title": self.story_data.get("title"),
+                "summary": self.story_data.get("summary")
+            })
+            parsed_story = self._parse_full_story_response(response.content)
+            self.story_data.update(parsed_story)
+            logger.info("전체 동화 생성 완료.")
+            return self.story_data
+        except Exception as e:
+            logger.error(f"전체 동화 생성 중 오류 발생: {e}", exc_info=True)
+            return {"error": str(e)}
+
+    def _parse_full_story_response(self, response_text: str) -> Dict:
+        """LLM의 전체 줄거리 응답을 파싱하여 구조화된 데이터로 변환합니다."""
+        parsed_data = {}
+        try:
+            characters_match = re.search(r"등장인물:\\s*(.*)", response_text, re.DOTALL)
+            if characters_match:
+                parsed_data["characters"] = [{"name": c.strip()} for c in characters_match.group(1).split(',')]
+
+            setting_match = re.search(r"배경:\\s*(.*)", response_text, re.DOTALL)
+            if setting_match:
+                parsed_data["setting"] = {"description": setting_match.group(1).strip()}
+
+            parsed_data["content"] = response_text 
+            logger.info("전체 스토리 응답 파싱 완료.")
+        except Exception as e:
+            logger.error(f"전체 스토리 응답 파싱 실패: {e}", exc_info=True)
+            parsed_data["error"] = "Failed to parse the story structure."
+            parsed_data["content"] = response_text
+            
+        return parsed_data
+        
+    def get_story_data(self) -> Dict:
+        return self.story_data
+
+    def reset_story(self):
+        self.story_data = self._initialize_story_data()
+        logger.info("스토리 데이터가 초기화되었습니다.")
+
     # ==========================================
     # 이야기 수집 관련 메서드
     # ==========================================
@@ -650,378 +794,3 @@ class StoryEngine:
         else:
             # 기본 분석 방식 사용
             return self.analyze_user_response(user_input)
-    
-    def _analyze_input_enhanced(self, user_input: str, age_group: int) -> Dict[str, Any]:
-        """Enhanced 모드 사용자 입력 분석"""
-        analysis_result = {
-            "keywords": [],
-            "quality_score": 0.5,
-            "stage": self.story_stage,
-            "suggestions": [],
-            "age_appropriateness": True,
-            "creativity_level": "medium"
-        }
-        
-        if not self.openai_client:
-            return analysis_result
-        
-        try:
-            system_message = f"""
-            당신은 {age_group}세 아이의 응답을 분석하는 전문가입니다.
-            현재 이야기 수집 단계: {self.story_stage}
-            
-            다음을 분석하여 JSON으로 응답하세요:
-            1. 주요 키워드 추출
-            2. 창의성 점수 (0-1)
-            3. 연령 적절성 평가
-            4. 다음 질문 제안사항
-            
-            JSON 형식:
-            {{
-                "keywords": ["키워드1", "키워드2"],
-                "quality_score": 0.8,
-                "age_appropriateness": true,
-                "creativity_level": "high",
-                "suggestions": ["제안1", "제안2"]
-            }}
-            """
-            
-            messages = [
-                {"role": "system", "content": system_message},
-                {"role": "user", "content": f"분석할 응답: '{user_input}'"}
-            ]
-            
-            response = self.openai_client.chat.completions.create(
-                model="gpt-4o-mini",
-                messages=messages,
-                max_tokens=300,
-                temperature=0.3
-            )
-            
-            response_text = response.choices[0].message.content
-            try:
-                parsed_result = json.loads(response_text)
-                analysis_result.update(parsed_result)
-            except json.JSONDecodeError:
-                keywords = self._extract_keywords_fallback(response_text)
-                analysis_result["keywords"] = keywords
-            
-            # 현재 단계에 결과 반영
-            if analysis_result["keywords"]:
-                self.story_elements[self.story_stage]["topics"].update(analysis_result["keywords"])
-                self.story_elements[self.story_stage]["count"] += 1
-                
-        except Exception as e:
-            logger.error(f"Enhanced 입력 분석 중 오류: {e}")
-        
-        return analysis_result
-    
-    def generate_enhanced_response(self, response_context: Dict) -> str:
-        """Enhanced 응답 생성"""
-        if not self.openai_client:
-            return "죄송해요, 지금은 응답을 생성할 수 없어요."
-        
-        try:
-            user_input = response_context.get("user_input", "")
-            child_age = response_context.get("child_age", 5)
-            child_interests = response_context.get("child_interests", [])
-            analysis = response_context.get("analysis", {})
-            
-            system_message = f"""
-            당신은 {child_age}세 아이와 대화하는 친근한 AI 부기입니다.
-            현재 이야기 수집 단계: {self.story_stage}
-            
-            아이의 관심사: {', '.join(child_interests) if child_interests else '다양한 주제'}
-            
-            Enhanced 모드로 연령에 맞는 친근하고 격려적인 응답을 해주세요.
-            이야기 요소를 자연스럽게 수집하면서 아이의 상상력을 자극해주세요.
-            """
-            
-            messages = [
-                {"role": "system", "content": system_message},
-                {"role": "user", "content": f"아이의 말: '{user_input}'"}
-            ]
-            
-            response = self.openai_client.chat.completions.create(
-                model="gpt-4o-mini",
-                messages=messages,
-                max_tokens=200,
-                temperature=0.8
-            )
-            
-            return response.choices[0].message.content
-            
-        except Exception as e:
-            logger.error(f"Enhanced 응답 생성 중 오류: {e}")
-            return "와! 정말 재미있는 이야기네요. 더 들려주세요!"
-    
-    def generate_contextual_response(self, user_input: str, analysis_result: Dict, conversation_history: List[Dict]) -> str:
-        """맥락적 응답 생성"""
-        if not self.openai_client:
-            return "그래요! 더 재미있는 이야기를 들려주세요!"
-        
-        try:
-            # 최근 대화 맥락 추출
-            recent_context = ""
-            if conversation_history:
-                recent_messages = conversation_history[-4:]
-                for msg in recent_messages:
-                    role = "아이" if msg["role"] == "user" else "부기"
-                    recent_context += f"{role}: {msg['content']}\n"
-            
-            system_message = f"""
-            당신은 아이와 이야기를 만들어가는 친근한 AI 부기입니다.
-            현재 단계: {self.story_stage}
-            
-            최근 대화:
-            {recent_context}
-            
-            자연스럽고 격려적인 응답으로 이야기를 이어가세요.
-            """
-            
-            messages = [
-                {"role": "system", "content": system_message},
-                {"role": "user", "content": user_input}
-            ]
-            
-            response = self.openai_client.chat.completions.create(
-                model="gpt-4o-mini",
-                messages=messages,
-                max_tokens=150,
-                temperature=0.7
-            )
-            
-            return response.choices[0].message.content
-            
-        except Exception as e:
-            logger.error(f"맥락적 응답 생성 중 오류: {e}")
-            return "정말 흥미로운 이야기예요! 계속 들려주세요."
-    
-    def suggest_enhanced_theme(self, age_group: int, interests: List[str]) -> Dict:
-        """Enhanced 테마 제안"""
-        base_themes = {
-            4: ["동물 친구들의 모험", "마법의 숲 탐험", "용감한 꼬마 영웅"],
-            5: ["우주 여행", "바닷속 모험", "로봇 친구와의 하루"],
-            6: ["시간 여행", "비밀 정원 발견", "마법사 수련"],
-            7: ["드래곤과의 우정", "잃어버린 보물 찾기", "신비한 섬 모험"],
-            8: ["미래 도시 탐험", "고대 문명 발견", "마법 학교 이야기"],
-            9: ["차원 이동 모험", "신화 속 영웅 이야기", "과학자가 되는 꿈"]
-        }
-        
-        age_themes = base_themes.get(age_group, base_themes[5])
-        
-        # 관심사 기반 테마 조합
-        if interests:
-            interest_based_themes = []
-            for interest in interests[:2]:  # 최대 2개 관심사
-                for theme in age_themes:
-                    interest_based_themes.append(f"{interest}를 좋아하는 {theme}")
-            
-            if interest_based_themes:
-                age_themes.extend(interest_based_themes)
-        
-        selected_theme = random.choice(age_themes)
-        
-        # 관심사 기반 캐릭터 및 설정 생성
-        main_interest = interests[0] if interests else "모험"
-        characters = ["주인공"]
-        if "공룡" in interests:
-            characters.extend(["티라노사우루스 친구", "트리케라톱스"])
-        elif "우주" in interests:
-            characters.extend(["외계인 친구", "로봇 조종사"])
-        elif "로봇" in interests:
-            characters.extend(["도우미 로봇", "메카닉 친구"])
-        else:
-            characters.extend(["동물 친구", "마법사"])
-        
-        # Enhanced 줄거리 생성
-        plot_summary = f"{age_group}세 주인공이 {main_interest}와 관련된 모험을 떠나는 이야기입니다. "
-        plot_summary += f"용감한 주인공은 친구들과 함께 어려움을 극복하고 소중한 것을 배우게 됩니다."
-        
-        return {
-            # 기존 suggest_story_theme 호환 필드들
-            "title": f"{main_interest} 모험 이야기",
-            "theme": selected_theme,
-            "characters": characters,
-            "setting": f"{main_interest}가 펼쳐지는 신비한 세계",
-            "plot_summary": plot_summary,
-            "educational_value": "용기와 우정, 협력의 중요성",
-            "target_age": age_group,
-            "estimated_length": "중간",
-            "key_scenes": [
-                "모험의 시작",
-                f"{main_interest}와의 만남",
-                "어려움 극복",
-                "성공과 성장"
-            ],
-            # Enhanced 전용 필드들
-            "suggested_theme": selected_theme,
-            "age_group": age_group,
-            "interests_used": interests[:2] if interests else [],
-            "alternative_themes": random.sample(age_themes, min(3, len(age_themes)))
-        }
-    
-    def create_enhanced_story_outline(self, conversation_history: List[Dict], child_age: int, child_interests: List[str], child_name: str) -> Dict:
-        """Enhanced 스토리 개요 생성"""
-        try:
-            # 대화에서 수집된 요소들 분석
-            elements_info = self._get_detailed_elements_info()
-            conversation_summary = self.get_conversation_summary(conversation_history, child_name, child_age)
-            
-            # Enhanced 프롬프트로 구조화된 스토리 생성
-            story_prompt = f"""
-            {child_age}세 {child_name}와의 대화를 바탕으로 완전한 동화를 구성해주세요.
-            
-            아이 정보:
-            - 이름: {child_name}
-            - 나이: {child_age}세  
-            - 관심사: {', '.join(child_interests) if child_interests else '다양한 주제'}
-            
-            수집된 이야기 요소: {elements_info}
-            대화 요약: {conversation_summary}
-            
-            다음 JSON 구조로 응답해주세요:
-            {{
-                "title": "동화 제목",
-                "main_character": "주인공",
-                "setting": "배경",
-                "problem": "해결할 문제",
-                "solution": "해결 방법",
-                "message": "전달하고자 하는 메시지",
-                "scenes": ["장면1", "장면2", "장면3"],
-                "enhanced_features": {{
-                    "age_appropriate_language": true,
-                    "educational_value": "배울 수 있는 점",
-                    "emotional_elements": ["감정 요소들"]
-                }}
-            }}
-            """
-            
-            if self.openai_client:
-                messages = [
-                    {"role": "system", "content": "당신은 아동 문학 전문가입니다."},
-                    {"role": "user", "content": story_prompt}
-                ]
-                
-                response = self.openai_client.chat.completions.create(
-                    model="gpt-4o-mini",
-                    messages=messages,
-                    max_tokens=1500,
-                    temperature=0.7
-                )
-                
-                response_text = response.choices[0].message.content
-                try:
-                    story_outline = json.loads(response_text)
-                    self.story_outline = story_outline
-                    return story_outline
-                except json.JSONDecodeError:
-                    pass
-            
-            # 폴백: 기본 구조 반환
-            return self._get_default_enhanced_outline(child_name, child_age, child_interests)
-            
-        except Exception as e:
-            logger.error(f"Enhanced 스토리 개요 생성 중 오류: {e}")
-            return self._get_default_enhanced_outline(child_name, child_age, child_interests)
-    
-    def _get_default_enhanced_outline(self, child_name: str, child_age: int, interests: List[str]) -> Dict:
-        """기본 Enhanced 스토리 개요"""
-        main_interest = interests[0] if interests else "모험"
-        
-        return {
-            "title": f"{child_name}의 {main_interest} 모험",
-            "main_character": child_name,
-            "setting": "마법의 세계",
-            "problem": "친구를 도와야 하는 상황",
-            "solution": "용기와 지혜로 문제 해결",
-            "message": "우정과 용기의 소중함",
-            "scenes": [
-                f"{child_name}가 모험을 시작하는 장면",
-                "어려움에 부딪히는 장면", 
-                "친구들과 함께 문제를 해결하는 장면"
-            ],
-            "enhanced_features": {
-                "age_appropriate_language": True,
-                "educational_value": "협동과 문제해결 능력",
-                "emotional_elements": ["우정", "용기", "성취감"]
-            }
-        }
-    
-    def create_story_outline(self) -> Dict:
-        """기본 스토리 개요 생성"""
-        return self.get_story_outline() or self._get_default_story_structure("주인공", 5)
-    
-    def create_enhanced_summary(self, conversation_history: List[Dict], age_group: int) -> str:
-        """Enhanced 대화 요약"""
-        if not conversation_history:
-            return "아직 대화가 시작되지 않았습니다."
-        
-        # Enhanced 모드에서는 더 상세한 분석 포함
-        summary = self.get_conversation_summary(conversation_history, "", age_group)
-        
-        if self.enhanced_mode:
-            # 추가 분석 정보 포함
-            elements_summary = self._get_elements_summary()
-            summary += f"\n\n수집 진행 상황: {elements_summary}"
-            
-            if self.quality_scores:
-                avg_quality = sum(self.quality_scores) / len(self.quality_scores)
-                summary += f"\n평균 응답 품질: {avg_quality:.2f}/1.0"
-        
-        return summary
-    
-    def create_conversation_summary(self) -> str:
-        """기본 대화 요약 (레거시 호환)"""
-        if self.conversation_manager:
-            history = self.conversation_manager.get_all_messages()
-            return self.get_conversation_summary(history)
-        return "대화 기록이 없습니다."
-    
-    def suggest_enhanced_element(self, user_input: str, age_group: int, interests: List[str]) -> str:
-        """Enhanced 스토리 요소 제안"""
-        if not self.openai_client:
-            return "그 아이디어 정말 좋아요! 더 자세히 말해주세요."
-        
-        try:
-            system_message = f"""
-            당신은 {age_group}세 아이의 창의성을 자극하는 전문가입니다.
-            현재 단계: {self.story_stage}
-            아이 관심사: {', '.join(interests) if interests else '다양한 주제'}
-            
-            아이의 아이디어를 바탕으로 더 흥미로운 요소를 제안해주세요.
-            연령에 맞고 교육적 가치가 있는 제안을 해주세요.
-            """
-            
-            messages = [
-                {"role": "system", "content": system_message},
-                {"role": "user", "content": f"아이의 아이디어: '{user_input}'"}
-            ]
-            
-            response = self.openai_client.chat.completions.create(
-                model="gpt-4o-mini",
-                messages=messages,
-                max_tokens=150,
-                temperature=0.8
-            )
-            
-            return response.choices[0].message.content
-            
-        except Exception as e:
-            logger.error(f"Enhanced 요소 제안 중 오류: {e}")
-            return "와! 그런 아이디어는 어떨까요? 정말 재미있을 것 같아요!"
-    
-    def suggest_story_element(self, user_input: str) -> str:
-        """기본 스토리 요소 제안"""
-        # 간단한 키워드 기반 제안
-        suggestions = {
-            "character": ["용감한 기사", "마법사", "귀여운 동물 친구"],
-            "setting": ["마법의 숲", "구름 위의 성", "바닷속 궁전"],
-            "problem": ["잃어버린 보물", "마법에 걸린 친구", "악한 마녀"],
-            "resolution": ["용기로 극복", "친구들과 협력", "지혜로운 해결"]
-        }
-        
-        stage_suggestions = suggestions.get(self.story_stage, suggestions["character"])
-        suggestion = random.choice(stage_suggestions)
-        
-        return f"그런 아이디어는 어때요? '{suggestion}' 같은 건 어떨까요?" 

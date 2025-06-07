@@ -13,6 +13,7 @@ import uuid
 import os
 import json
 import base64
+from datetime import datetime
 
 # Langchain imports
 from langchain_core.prompts import ChatPromptTemplate
@@ -162,6 +163,7 @@ class ContentPipeline():
                 # This method might need to be re-evaluated based on how TextGenerator/ImageGenerator are initialized
                 # with target_age specific configurations.
                 # For example, if generators are re-initialized or configured per call, this might be less critical.
+                # For now, assuming generators handle their specific chain setups.
                 pass # Assuming generators handle their specific chain setups.
             logger.info(f"LangChain 체인 설정 (대상 연령: {self.target_age}) - Note: Generators manage their own detailed chains.")
                 

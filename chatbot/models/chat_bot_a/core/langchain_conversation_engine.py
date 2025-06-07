@@ -11,12 +11,12 @@ import json
 # LangChain imports
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.output_parsers import StrOutputParser
-from langchain_openai import ChatOpenAI
+from langchain_community.chat_models import ChatOpenAI
 from langchain_core.runnables import RunnablePassthrough
 
 # Project imports
 from .conversation_engine import ConversationEngine
-from .rag_engine import RAGEngine
+from .rag_engine import RAGSystem
 from shared.utils.logging_utils import get_module_logger
 
 logger = get_module_logger(__name__)
@@ -32,7 +32,7 @@ class LangChainConversationEngine(ConversationEngine):
     def __init__(self, 
                  token_limit: int = 10000,
                  openai_client=None,
-                 rag_engine: RAGEngine = None,
+                 rag_engine: RAGSystem = None,
                  prompts_file_path: str = "chatbot/data/prompts/chatbot_a_prompts.json",
                  model_name: str = "gpt-4o-mini",
                  temperature: float = 0.9):

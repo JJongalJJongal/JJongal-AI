@@ -135,6 +135,9 @@ def get_default_chatbot_b_prompts() -> Dict[str, Any]:
                 "아이들이 쉽게 이해할 수 있는 언어를 사용하고, 이야기의 흐름을 자연스럽게 이어가야 해."
             ]
         },
-        "image_generation_prompt_template": "Gentle children's book illustration. 테마: {theme}, 등장인물: {characters}, 배경: {setting}. Hand-sketched with colored pencils and soft watercolor, like a beloved worn storybook. Visible pencil lines, slightly uneven coloring, warm paper texture. Muted pastels - faded pinks, sage greens, butter yellows. Cozy and nostalgic, imperfect but charming.",
-        "narration_generation_prompt_template": "다음 동화 장면에 대한 내레이션을 작성해 주세요. 이 내레이션은 {age}세 아이가 듣기에 적합해야 합니다. 간결하고 생생한 표현을 사용하세요. 정서적으로 풍부하고 아이의 상상력을 자극할 수 있는 내용이어야 합니다.\n\n장면 설명: {scene_description}"
+        "image_generation_prompt_template": "Gentle children's book illustration. 등장인물: {characters}, 배경: {setting}. Hand-sketched with colored pencils and soft watercolor, like a beloved worn storybook. Visible pencil lines, slightly uneven coloring, warm paper texture. Magical and friendly mood.",
+        "narration_generation_prompt_template": "다음 동화 장면에 대한 내레이션을 작성해 주세요. 이 내레이션은 {age}세 아이가 듣기에 적합해야 합니다. 간결하고 생생한 표현을 사용하세요. 정서적으로 풍부하고 아이의 상상력을 자극할 수 있는 내용이어야 합니다.\n\n장면 설명: {scene_description}",
+        "narration_prompt_template": "당신은 아이들에게 동화를 들려주는 따뜻한 목소리의 성우입니다. 다음 문장을 아이들이 이해하기 쉽고 감정을 잘 느낄 수 있도록 실감 나게 읽어주세요. 문장: {narration}",
+        "rag_story_enrichment_template": "다음 아이디어를 바탕으로 {age_group}세 아이에게 맞는 동화 아이디어를 더 풍부하게 만들어주세요.\n\n기본 아이디어: {query_text}\n\n참고 자료:\n{context}",
+        "rag_story_generation_template": "아래 정보를 바탕으로 {age_group}세 어린이를 위한 짧은 동화의 시작 부분을 만들어주세요.\n\n[컨텍스트]\n{context}\n\n[요청사항]\n{user_request}"
     } 

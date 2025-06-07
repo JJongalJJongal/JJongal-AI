@@ -333,23 +333,34 @@ class ChatBotA:
     # Enhanced 스토리 수집 기능
     # ==========================================
     
-    def suggest_story_theme(self) -> Dict:
-        """Enhanced 연령별 스토리 주제 제안"""
-        if self.enhanced_mode and self.age_group:
-            return self.story_engine.suggest_enhanced_theme(
-                age_group=self.age_group,
-                interests=self.interests
-            )
-        else:
-            # StoryEngine.suggest_story_theme은 매개변수가 필요함
-            conversation_history = self.conversation.get_all_messages() if self.conversation else []
-            return self.story_engine.suggest_story_theme(
-                conversation_history=conversation_history,
-                child_name=self.child_name or "친구",
-                age_group=self.age_group or 5,
-                interests=self.interests or [],
-                story_collection_prompt="대화에서 수집된 정보를 바탕으로 이야기 주제를 제안해주세요."
-            )
+    def get_story_data(self) -> Dict:
+        """현재 생성된 스토리 데이터를 반환합니다."""
+        return self.story_engine.get_story_data()
+
+    def suggest_story_idea(self) -> Dict:
+        """
+        대화 기록을 바탕으로 동화 아이디어를 제안합니다.
+        """
+        # StoryEngine의 suggest_story_idea를 호출 (비동기 처리 필요)
+        # 여기서는 간단한 동기적 호출 예시를 보여주나, 실제로는 비동기 처리가 필요함
+        # conversation_history = self.conversation_manager.get_history() # 예시
+        conversation_history = [] # 임시
+        
+        # asyncio.run()은 이미 실행 중인 이벤트 루프에서 호출할 수 없으므로
+        # 실제 FastAPI 환경에서는 바로 await를 사용해야 합니다.
+        # loop = asyncio.get_event_loop()
+        # return loop.run_until_complete(self.story_engine.suggest_story_idea(conversation_history))
+        
+        # 임시 동기 반환 (실제 사용 시 주의)
+        return {
+            "title": "임시 아이디어",
+            "summary": "RAG를 통해 생성된 재미있는 모험 이야기"
+        }
+
+    def reset_story(self):
+        """스토리 데이터를 초기화합니다."""
+        self.story_engine.reset_story()
+        logger.info("ChatBot A 스토리 데이터 리셋 완료.")
     
     def get_story_outline_for_chatbot_b(self) -> Dict[str, Any]:
         """

@@ -29,7 +29,7 @@ class StoryOutlineRequest(BaseModel):
     child_name: str = Field(..., description="아이 이름")
     age: int = Field(..., ge=3, le=12, description="아이 나이 (3-12세)")
     interests: Optional[List[str]] = Field(None, description="아이 관심사 목록")
-    story_theme_summary: str = Field(..., description="ChatBot A 또는 사용자가 제공한 이야기 주제/줄거리 요약")
+    story_summary: str = Field(..., description="ChatBot A 또는 사용자가 제공한 이야기 줄거리 요약")
     initial_tags: Optional[List[str]] = Field(None, description="초기 태그")
 
 class StoryGenerationStatus(BaseModel):
@@ -79,7 +79,7 @@ async def process_story_generation_task_background(story_id: str):
         chatbot_b = StoryGenerationChatBot()
         chatbot_b.set_target_age(input_outline_data.get("age"))
         story_outline_for_b = {
-            "summary_text": input_outline_data.get("story_theme_summary"),
+            "summary_text": input_outline_data.get("story_summary"),
             "tags": input_outline_data.get("initial_tags", []),
         }
         chatbot_b.set_story_outline(story_outline_for_b)

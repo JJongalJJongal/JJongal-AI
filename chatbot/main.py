@@ -166,7 +166,7 @@ class EnhancedChatBotSystem:
         
         # 부기가 이야기 주제 추출
         try:
-            story_outline = self.bugi.suggest_story_theme()
+            story_outline = self.bugi.suggest_story_idea()
             
             if not story_outline or "summary_text" not in story_outline:
                 print("이야기 주제를 추출하지 못했습니다. 더 많은 대화가 필요합니다.")
