@@ -103,24 +103,26 @@ async def handle_audio_websocket(
         chunk_collection_start_time = time.time() # 오디오 chunk 수집 시작 시간
 
         while True:
-            # WebSocket 연결 상태 사전 체크 (ping 없이 상태만 확인)
-            try:
-                if websocket.client_state.value != 1:  # CONNECTED = 1
-                    logger.info(f"WebSocket 연결 끊어짐 감지 (상태: {websocket.client_state}): {client_id}")
-                    break
-            except Exception as e:
-                logger.info(f"WebSocket 상태 체크 실패, 연결 종료: {client_id}, 오류: {e}")
-                break
-            
             try:
                 data = await asyncio.wait_for(websocket.receive_bytes(), timeout=30.0) # 오디오 데이터 수신
             except asyncio.TimeoutError: # 타임아웃 시
-                await ws_engine.ping(websocket) # 연결 상태 확인 메시지 전송
-                chunk_collection_start_time = time.time() # 타임아웃 시 리셋
-                continue
+                # 타임아웃 시 연결 상태 체크
+                try:
+                    if websocket.client_state.value != 1:  # CONNECTED = 1
+                        logger.info(f"타임아웃 후 연결 끊어짐 감지: {client_id}")
+                        break
+                    await ws_engine.ping(websocket) # 연결 상태 확인 메시지 전송
+                    chunk_collection_start_time = time.time() # 타임아웃 시 리셋
+                    continue
+                except Exception as e:
+                    logger.info(f"타임아웃 후 연결 상태 체크 실패, 연결 종료: {client_id}, 오류: {e}")
+                    break
             except WebSocketDisconnect: # WebSocket 연결 종료 시
                 logger.info(f"클라이언트 연결 종료됨 (메인 루프): {client_id}")
                 break # 루프 종료
+            except Exception as e:
+                logger.error(f"예상치 못한 데이터 수신 오류: {client_id}, 오류: {e}")
+                break
             
             audio_chunks.append(data) # 오디오 chunk 추가
             audio_bytes_accumulated += len(data) # 오디오 byte 누적

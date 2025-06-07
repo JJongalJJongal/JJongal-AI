@@ -373,6 +373,24 @@ async def get_story(story_id: str, auth: dict = Depends(verify_auth)):
             error_code="STORY_RETRIEVAL_FAILED"
         )
 
+@app.post("/api/v1/auth/token")
+async def get_auth_token():
+    """JWT 토큰 발급"""
+    try:
+        token_data = auth_processor.get_test_token()
+        return {
+            "success": True,
+            "message": "토큰 발급 성공",
+            "data": token_data
+        }
+    except Exception as e:
+        logger.error(f"토큰 발급 실패: {e}", exc_info=True)
+        return {
+            "success": False,
+            "message": f"토큰 발급 중 오류가 발생했습니다: {str(e)}",
+            "error_code": "TOKEN_GENERATION_FAILED"
+        }
+
 @app.get("/api/v1/health", response_model=HealthResponse)
 async def api_health_check():
     """API 헬스체크"""
