@@ -11,6 +11,7 @@ from typing import Optional
 from datetime import datetime
 from fastapi import FastAPI, WebSocket, HTTPException, Response, Query, status, Depends, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.websockets import WebSocketDisconnect, WebSocketState
 from dotenv import load_dotenv
 
 # 경로 설정
@@ -203,11 +204,16 @@ async def test_endpoint(websocket: WebSocket, token: str = Query("development_to
                 
             except Exception as e:
                 logger.error(f"테스트 메시지 처리 오류: {e}")
-                await websocket.send_json({
-                    "type": "error",
-                    "message": str(e),
-                    "timestamp": datetime.now().isoformat()
-                })
+                # 연결 상태 확인 후 에러 메시지 전송
+                try:
+                    if websocket.client_state == WebSocketState.CONNECTED:
+                        await websocket.send_json({
+                            "type": "error",
+                            "message": str(e),
+                            "timestamp": datetime.now().isoformat()
+                        })
+                except:
+                    pass  # 연결이 이미 끊어진 경우 무시
                 break
                 
     except Exception as e:
@@ -272,12 +278,17 @@ async def binary_test_endpoint(websocket: WebSocket, token: str = Query("develop
                 
             except Exception as e:
                 logger.error(f"바이너리 데이터 수신 오류: {e}")
-                await websocket.send_json({
-                    "type": "error",
-                    "message": str(e),
-                    "chunks_received": chunk_count,
-                    "timestamp": datetime.now().isoformat()
-                })
+                # 연결 상태 확인 후 에러 메시지 전송
+                try:
+                    if websocket.client_state == WebSocketState.CONNECTED:
+                        await websocket.send_json({
+                            "type": "error",
+                            "message": str(e),
+                            "chunks_received": chunk_count,
+                            "timestamp": datetime.now().isoformat()
+                        })
+                except:
+                    pass  # 연결이 이미 끊어진 경우 무시
                 break
                 
     except Exception as e:
@@ -371,6 +382,8 @@ def _determine_age_group(age: int) -> AgeGroup:
 # ===========================================
 # 대화 내역 API 엔드포인트
 # ===========================================
+
+logger.info("=== 대화 내역 API 엔드포인트 등록 시작 ===")
 
 @app.get("/api/v1/conversations")
 async def list_conversations(auth: dict = Depends(verify_auth)):
@@ -490,6 +503,8 @@ async def get_conversation_file(file_path: str, auth: dict = Depends(verify_auth
 # ===========================================
 # 임시 파일 API 엔드포인트
 # ===========================================
+
+logger.info("=== 임시 파일 API 엔드포인트 등록 시작 ===")
 
 @app.get("/api/v1/temp")
 async def list_temp_files(auth: dict = Depends(verify_auth)):
@@ -734,6 +749,8 @@ async def get_temp_files_by_story(story_id: str, auth: dict = Depends(verify_aut
 # ===========================================
 # 시스템 모니터링 및 자동 백업 API
 # ===========================================
+
+logger.info("=== 시스템 모니터링 API 엔드포인트 등록 시작 ===")
 
 @app.get("/api/v1/system/disk-usage")
 async def get_disk_usage(auth: dict = Depends(verify_auth)):
@@ -1014,6 +1031,8 @@ async def restore_file_from_s3(
 # 스토리 생성 API 엔드포인트
 # ===========================================
 
+logger.info("=== 스토리 생성 API 엔드포인트 등록 시작 ===")
+
 @app.post("/api/v1/stories", response_model=StoryResponse)
 async def create_story(
     request: Request,
@@ -1145,6 +1164,8 @@ async def get_story(story_id: str, auth: dict = Depends(verify_auth)):
             message=f"이야기 조회 중 오류가 발생했습니다: {str(e)}",
             error_code="STORY_RETRIEVAL_FAILED"
         )
+
+logger.info("=== 인증 API 엔드포인트 등록 시작 ===")
 
 @app.post("/api/v1/auth/token")
 async def get_auth_token():

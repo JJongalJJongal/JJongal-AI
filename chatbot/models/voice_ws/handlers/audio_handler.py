@@ -8,11 +8,12 @@ import asyncio
 import traceback
 from typing import Optional, Dict, Any
 from fastapi import WebSocket, status
+from fastapi.websockets import WebSocketDisconnect, WebSocketState
 
 from shared.utils.logging_utils import get_module_logger
 from chatbot.models.chat_bot_a import ChatBotA # 부기 챗봇 import
 from ..core.connection_engine import ConnectionEngine
-from ..core.websocket_engine import WebSocketDisconnect, WebSocketEngine # WebSocket 연결 종료 처리
+from ..core.websocket_engine import WebSocketEngine # WebSocket 연결 종료 처리
 from ..processors.audio_processor import AudioProcessor
 
 
@@ -101,22 +102,36 @@ async def handle_audio_websocket(
         audio_chunks = [] # 오디오 chunk 목록
         audio_bytes_accumulated = 0 # 오디오 byte 누적 값
         chunk_collection_start_time = time.time() # 오디오 chunk 수집 시작 시간
+        last_ping_time = time.time() # 마지막 ping 시간
+        ping_interval = 30.0 # ping 간격 (30초)
 
         while True:
             try:
-                data = await asyncio.wait_for(websocket.receive_bytes(), timeout=60.0) # 오디오 데이터 수신
+                # 짧은 타임아웃으로 변경하여 더 빠른 응답성 확보
+                data = await asyncio.wait_for(websocket.receive_bytes(), timeout=10.0) # 오디오 데이터 수신
             except asyncio.TimeoutError: # 타임아웃 시
-                # 타임아웃 시 연결 상태 체크
-                try:
-                    if websocket.client_state.value != 1:  # CONNECTED = 1
-                        logger.info(f"타임아웃 후 연결 끊어짐 감지: {client_id}")
+                # 주기적인 ping 전송으로 연결 유지
+                current_time = time.time()
+                if current_time - last_ping_time >= ping_interval:
+                    try:
+                        if websocket.client_state != WebSocketState.CONNECTED:
+                            logger.info(f"연결 끊어짐 감지: {client_id}")
+                            break
+                        
+                        # ping 전송으로 연결 상태 확인
+                        await ws_engine.ping(websocket)
+                        last_ping_time = current_time
+                        logger.debug(f"Keep-alive ping 전송: {client_id}")
+                        
+                        # 오디오 청크 수집 시간 리셋
+                        chunk_collection_start_time = time.time()
+                        continue
+                    except Exception as e:
+                        logger.info(f"연결 상태 체크 실패, 연결 종료: {client_id}, 오류: {e}")
                         break
-                    await ws_engine.ping(websocket) # 연결 상태 확인 메시지 전송
-                    chunk_collection_start_time = time.time() # 타임아웃 시 리셋
+                else:
+                    # ping 주기가 아직 안됐으면 계속 대기
                     continue
-                except Exception as e:
-                    logger.info(f"타임아웃 후 연결 상태 체크 실패, 연결 종료: {client_id}, 오류: {e}")
-                    break
             except WebSocketDisconnect: # WebSocket 연결 종료 시
                 logger.info(f"클라이언트 연결 종료됨 (메인 루프): {client_id}")
                 break # 루프 종료
@@ -127,6 +142,9 @@ async def handle_audio_websocket(
             audio_chunks.append(data) # 오디오 chunk 추가
             audio_bytes_accumulated += len(data) # 오디오 byte 누적
             elapsed_chunk_time = time.time() - chunk_collection_start_time # 오디오 chunk 수집 시간 계산
+            
+            # 데이터 수신이 활발하면 ping 시간 업데이트 (불필요한 ping 방지)
+            last_ping_time = time.time()
 
             if elapsed_chunk_time >= 1.0 or audio_bytes_accumulated >= 64 * 1024: # 오디오 chunk 수집 시간이 1초 이상이거나 오디오 byte 누적 값이 64KB 이상일 경우
                 temp_file_path = None # 임시 파일 경로 초기화

@@ -8,6 +8,7 @@ import json
 import asyncio
 from typing import Dict, Any, Optional, Union
 from fastapi import WebSocket, WebSocketDisconnect as FastAPIWebSocketDisconnect
+from fastapi.websockets import WebSocketState
 
 from shared.utils.logging_utils import get_module_logger
 
@@ -49,7 +50,7 @@ class WebSocketEngine:
         """
         try:
             # WebSocket 연결 상태 확인
-            if websocket.client_state.value != 1:  # CONNECTED = 1
+            if websocket.client_state != WebSocketState.CONNECTED:
                 logger.warning(f"WebSocket 연결 상태가 유효하지 않음: {websocket.client_state}")
                 return False
             
@@ -219,7 +220,7 @@ class WebSocketEngine:
         """
         try:
             # 1. 기본 연결 상태 확인
-            if websocket.client_state.value != 1:  # CONNECTED = 1
+            if websocket.client_state != WebSocketState.CONNECTED:
                 return False
             
             # 2. ping 메시지로 실제 연결 확인
