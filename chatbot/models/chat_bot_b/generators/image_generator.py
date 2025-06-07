@@ -812,7 +812,11 @@ class ImageGenerator(BaseGenerator):
             
             # Base64 이미지 데이터 처리
             image_data = response.data[0].b64_json
-            image_path = self.temp_storage_path / f"chapter_{chapter_number}_{story_id[:8]}.png"
+            
+            # story_id별 폴더 생성
+            story_folder = self.temp_storage_path / story_id[:8]
+            story_folder.mkdir(parents=True, exist_ok=True)
+            image_path = story_folder / f"chapter_{chapter_number}_{story_id[:8]}.png"
             
             # 이미지 저장
             with open(image_path, "wb") as f:
@@ -844,7 +848,10 @@ class ImageGenerator(BaseGenerator):
                                      story_id: str) -> Path:
         """URL에서 이미지 다운로드 (Enhanced)"""
         
-        image_path = self.temp_storage_path / f"chapter_{chapter_number}_{story_id[:8]}.png" # 이미지 경로
+        # story_id별 폴더 생성
+        story_folder = self.temp_storage_path / story_id[:8]
+        story_folder.mkdir(parents=True, exist_ok=True)
+        image_path = story_folder / f"chapter_{chapter_number}_{story_id[:8]}.png" # 이미지 경로
         
         try:
             # SSL 컨텍스트 설정

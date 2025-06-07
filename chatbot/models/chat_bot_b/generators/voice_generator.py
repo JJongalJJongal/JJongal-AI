@@ -50,10 +50,10 @@ class VoiceGenerator(BaseGenerator):
         
         # 기본 음성 설정
         self.voice_settings = voice_settings or {
-            "stability": 0.5,
-            "similarity_boost": 0.75,
-            "style": 0.0,
-            "use_speaker_boost": True
+            "stability": 0.5, # 안정성 (0.0-1.0)
+            "similarity_boost": 0.75, # 유사성 증가 (0.0-1.0)
+            "style": 0.2, # 스타일 (0.0-1.0)
+            "use_speaker_boost": True # 스피커 부스트 (True/False)
         }
         
         # 캐릭터별 음성 매핑 (캐릭터명 -> 음성 ID)
@@ -73,38 +73,38 @@ class VoiceGenerator(BaseGenerator):
         self.character_voice_settings = {
             "narrator": {
                 "stability": 0.6, # 안정성 (0.0-1.0)
-                "similarity_boost": 0.8, # 유사성 증가 (0.0-1.0)
-                "style": 0.1, # 스타일 (0.0-1.0)
+                "similarity_boost": 1.0, # 유사성 증가 (0.0-1.0)
+                "style": 0.2, # 스타일 (0.0-1.0)
                 "use_speaker_boost": True # 스피커 부스트 (True/False)
             },
             "child": {
                 "stability": 0.4, # 안정성 (0.0-1.0)
-                "similarity_boost": 0.7, # 유사성 증가 (0.0-1.0)
-                "style": 0.3, # 스타일 (0.0-1.0)
+                "similarity_boost": 0.8, # 유사성 증가 (0.0-1.0)
+                "style": 0.7, # 스타일 (0.0-1.0)
                 "use_speaker_boost": True # 스피커 부스트 (True/False)
             },
             "adult_male": {
                 "stability": 0.7, # 안정성 (0.0-1.0)
                 "similarity_boost": 0.8, # 유사성 증가 (0.0-1.0)
-                "style": 0.0, # 스타일 (0.0-1.0)
+                "style": 0.4, # 스타일 (0.0-1.0)
                 "use_speaker_boost": True # 스피커 부스트 (True/False)
             },
             "adult_female": {
                 "stability": 0.6, # 안정성 (0.0-1.0)
                 "similarity_boost": 0.8, # 유사성 증가 (0.0-1.0)
-                "style": 0.1, # 스타일 (0.0-1.0)
+                "style": 0.4, # 스타일 (0.0-1.0)
                 "use_speaker_boost": True # 스피커 부스트 (True/False)
             },
             "fantasy": {
                 "stability": 0.3, # 안정성 (0.0-1.0)
                 "similarity_boost": 0.6, # 유사성 증가 (0.0-1.0)
-                "style": 0.5, # 스타일 (0.0-1.0)
+                "style": 0.8, # 스타일 (0.0-1.0)
                 "use_speaker_boost": True # 스피커 부스트 (True/False)
             },
             "grandma": {
                 "stability": 0.7, # 안정성 (0.0-1.0)
                 "similarity_boost": 0.8, # 유사성 증가 (0.0-1.0)
-                "style": 0.0, # 스타일 (0.0-1.0)
+                "style": 0.4, # 스타일 (0.0-1.0)
                 "use_speaker_boost": True # 스피커 부스트 (True/False)
             }
         }
@@ -588,7 +588,17 @@ class VoiceGenerator(BaseGenerator):
             
             # 파일 저장
             audio_filename = f"{filename_prefix}.mp3"
-            audio_path = self.temp_storage_path / audio_filename
+            
+            # story_id별 폴더 생성 (filename_prefix에서 story_id 추출)
+            if "_" in filename_prefix:
+                # filename_prefix 예시: "dialogue_ch1_0_fcc21cbb" 또는 "narration_ch1_fcc21cbb"
+                story_id_short = filename_prefix.split("_")[-1]  # "fcc21cbb" 추출
+                story_folder = self.temp_storage_path / story_id_short
+                story_folder.mkdir(parents=True, exist_ok=True)
+                audio_path = story_folder / audio_filename
+            else:
+                # fallback: 기존 방식
+                audio_path = self.temp_storage_path / audio_filename
             
             with open(audio_path, 'wb') as f:
                 f.write(audio_data)
@@ -693,7 +703,17 @@ class VoiceGenerator(BaseGenerator):
             
             # 오디오 파일 경로 설정
             audio_filename = f"{filename_prefix}.mp3"
-            audio_path = self.temp_storage_path / audio_filename
+            
+            # story_id별 폴더 생성 (filename_prefix에서 story_id 추출)
+            if "_" in filename_prefix:
+                # filename_prefix 예시: "dialogue_ch1_0_fcc21cbb" 또는 "narration_ch1_fcc21cbb"
+                story_id_short = filename_prefix.split("_")[-1]  # "fcc21cbb" 추출
+                story_folder = self.temp_storage_path / story_id_short
+                story_folder.mkdir(parents=True, exist_ok=True)
+                audio_path = story_folder / audio_filename
+            else:
+                # fallback: 기존 방식
+                audio_path = self.temp_storage_path / audio_filename
             
             # 스트리밍 정보 추적
             streaming_info = {
