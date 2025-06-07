@@ -579,8 +579,35 @@ class WorkflowOrchestrator:
             full_content = ""
             if chapters:
                 for chapter in chapters:
-                    chapter_content = chapter.get("content", chapter.get("chapter_content", ""))
+                    # Enhanced TextGenerator의 새로운 구조: narration + dialogues
+                    chapter_content = ""
+                    
+                    # 1. content 또는 chapter_content (legacy)
+                    if chapter.get("content"):
+                        chapter_content = chapter.get("content")
+                    elif chapter.get("chapter_content"):
+                        chapter_content = chapter.get("chapter_content")
+                    # 2. Enhanced 구조: narration + dialogues
+                    else:
+                        narration = chapter.get("narration", "")
+                        dialogues = chapter.get("dialogues", [])
+                        
+                        # 내레이션 추가
+                        if narration:
+                            chapter_content += narration
+                        
+                        # 대화 추가
+                        for dialogue in dialogues:
+                            speaker = dialogue.get("speaker", "")
+                            text = dialogue.get("text", "")
+                            if speaker and text:
+                                chapter_content += f"\n{speaker}: \"{text}\""
+                    
                     if chapter_content:
+                        # 챕터 제목 추가 (있는 경우)
+                        chapter_title = chapter.get("chapter_title", "")
+                        if chapter_title:
+                            full_content += f"**{chapter_title}**\n\n"
                         full_content += chapter_content + "\n\n"
             
             formatted_result = {

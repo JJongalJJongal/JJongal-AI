@@ -13,9 +13,8 @@ from fastapi import WebSocket, status
 from shared.utils.logging_utils import get_module_logger
 from chatbot.models.chat_bot_b import ChatBotB # 꼬기 챗봇 import
 from ..core.connection_engine import ConnectionEngine # 연결 엔진 import
-from ..core.websocket_engine import WebSocketDisconnect # WebSocket 연결 종료 처리
+from ..core.websocket_engine import WebSocketDisconnect, WebSocketEngine # WebSocket 연결 종료 처리
 from ..processors.audio_processor import AudioProcessor # 오디오 처리 프로세서
-from ..processors.message_processor import MessageProcessor # 메시지 처리 프로세서
 
 logger = get_module_logger(__name__) # 로깅
 
@@ -31,6 +30,9 @@ async def handle_story_generation_websocket(
     동화 생성 WebSocket 연결의 전체 라이프사이클을 관리.
     """
     client_id = f"storygen_{child_name}_{int(time.time())}" if child_name else f"storygen_unknown_{int(time.time())}" # 클라이언트 ID 생성
+    
+    # WebSocket 엔진 인스턴스 생성
+    ws_engine = WebSocketEngine()
 
     if not child_name or not (4 <= age <= 9): # 아이 정보 검증
         await websocket.close(code=status.WS_1003_UNSUPPORTED_DATA, reason="아이 정보 오류") # WebSocket 연결 종료
@@ -58,7 +60,7 @@ async def handle_story_generation_websocket(
         })
 
         # 연결 상태 전송
-        await websocket.send_json({"type": "status", "message": "꼬기(ChatBot B)와 연결되었습니다. 이야기 개요를 보내주세요.", "status": "connected"})
+        await ws_engine.send_status(websocket, "connected", "꼬기(ChatBot B)와 연결되었습니다. 이야기 개요를 보내주세요.")
 
         while True:
             try:
@@ -68,35 +70,35 @@ async def handle_story_generation_websocket(
                 connection_engine.update_chatbot_b_activity(client_id) # 활동 시간 갱신
 
                 if message_type == "story_outline": # 만약 메시지 타입이 "story_outline" 이면
-                    await handle_story_outline(websocket, client_id, message, connection_engine, chatbot_b) # 이야기 개요 처리
+                    await handle_story_outline(websocket, client_id, message, connection_engine, chatbot_b, ws_engine) # 이야기 개요 처리
                 elif message_type == "generate_illustrations": # 만약 메시지 타입이 "generate_illustrations" 이면
-                    await handle_generate_illustrations(websocket, client_id, chatbot_b) # 삽화 생성 처리
+                    await handle_generate_illustrations(websocket, client_id, chatbot_b, ws_engine) # 삽화 생성 처리
                 elif message_type == "generate_voice": # 만약 메시지 타입이 "generate_voice" 이면
-                    await handle_generate_voice(websocket, client_id, chatbot_b) # 음성 생성 처리
+                    await handle_generate_voice(websocket, client_id, chatbot_b, ws_engine) # 음성 생성 처리
                 elif message_type == "save_story": # 만약 메시지 타입이 "save_story" 이면
-                    await handle_save_story(websocket, client_id, message, chatbot_b) # 이야기 저장 처리
+                    await handle_save_story(websocket, client_id, message, chatbot_b, ws_engine) # 이야기 저장 처리
                 else: # 알 수 없는 메시지 타입 처리
-                    await websocket.send_json({"type": "error", "message": f"알 수 없는 메시지 타입: {message_type}", "status": "error"}) # 오류 메시지 전송
+                    await ws_engine.send_error(websocket, f"알 수 없는 메시지 타입: {message_type}", "unknown_message_type") # 오류 메시지 전송
             
             except asyncio.TimeoutError: # 타임아웃 처리
-                await websocket.send_json({"type": "ping", "message": "connection_check"}) # 연결 상태 확인 메시지 전송
+                await ws_engine.ping(websocket) # 연결 상태 확인 메시지 전송
                 connection_engine.update_chatbot_b_activity(client_id) # 활동 시간 갱신
                 continue
             except json.JSONDecodeError: # JSON parsing 오류 처리
-                await websocket.send_json({"type": "error", "message": "잘못된 JSON 형식입니다.", "status": "error"}) # 오류 메시지 전송
+                await ws_engine.send_error(websocket, "잘못된 JSON 형식입니다.", "json_decode_error") # 오류 메시지 전송
             except WebSocketDisconnect: # WebSocket 연결 끊어진 경우
                 logger.info(f"동화 생성 클라이언트 연결 종료됨 (메시지 루프): {client_id}") # 로깅
                 raise
             except Exception as e: # 예외 처리
                 logger.error(f"동화 생성 메시지 루프 오류 ({client_id}): {e}\n{traceback.format_exc()}") # 로깅
-                await websocket.send_json({"type": "error", "message": str(e), "error_code": "story_loop_error", "status": "error"}) # 오류 메시지 전송
+                await ws_engine.send_error(websocket, str(e), "story_loop_error") # 오류 메시지 전송
 
     except WebSocketDisconnect:
         logger.info(f"동화 생성 WebSocket 연결 종료됨: {client_id}")
     except Exception as e:
         logger.error(f"동화 생성 WebSocket 핸들러 오류 ({client_id}): {e}\n{traceback.format_exc()}")
         try:
-            await websocket.send_json({"type": "error", "message": str(e), "error_code": "story_handler_error", "status": "error"})
+            await ws_engine.send_error(websocket, str(e), "story_handler_error")
         except: # 이미 연결이 끊겼을 수 있음
             pass 
     finally:
@@ -109,12 +111,12 @@ async def handle_story_generation_websocket(
         # 일반 연결 해제시 로직은 connection_engine.handle_disconnect에서 처리
         logger.info(f"동화 생성 WebSocket 연결 정리 완료: {client_id}")
 
-async def handle_story_outline(websocket: WebSocket, client_id: str, message: dict, connection_engine: ConnectionEngine, chatbot_b: ChatBotB):
+async def handle_story_outline(websocket: WebSocket, client_id: str, message: dict, connection_engine: ConnectionEngine, chatbot_b: ChatBotB, ws_engine: WebSocketEngine):
     """이야기 개요 처리 핸들러"""
     logger.info(f"이야기 개요 수신 ({client_id}): {message.get('outline')}")
     story_outline_data = message.get("outline")
     if not story_outline_data or not isinstance(story_outline_data, dict):
-        await websocket.send_json({"type": "error", "message": "잘못된 이야기 개요 형식입니다.", "status": "error"})
+        await ws_engine.send_error(websocket, "잘못된 이야기 개요 형식입니다.", "invalid_story_outline")
         return
 
     try:
@@ -125,46 +127,46 @@ async def handle_story_outline(websocket: WebSocket, client_id: str, message: di
         detailed_story = await asyncio.to_thread(chatbot_b.generate_detailed_story)
         
         if detailed_story:
-            await websocket.send_json({"type": "story_generated", "story": detailed_story, "status": "ok"})
+            await ws_engine.send_json(websocket, {"type": "story_generated", "story": detailed_story, "status": "ok"})
             logger.info(f"상세 이야기 생성 완료 및 전송 ({client_id})")
         else:
-            await websocket.send_json({"type": "error", "message": "상세 이야기 생성 실패", "status": "error"})
+            await ws_engine.send_error(websocket, "상세 이야기 생성 실패", "story_generation_failed")
             logger.error(f"상세 이야기 생성 실패 ({client_id})")
     except Exception as e:
         logger.error(f"이야기 개요 처리 중 오류 ({client_id}): {e}\n{traceback.format_exc()}")
-        await websocket.send_json({"type": "error", "message": f"이야기 개요 처리 오류: {str(e)}", "status": "error"})
+        await ws_engine.send_error(websocket, f"이야기 개요 처리 오류: {str(e)}", "story_outline_processing_error")
 
-async def handle_generate_illustrations(websocket: WebSocket, client_id: str, chatbot_b: ChatBotB):
+async def handle_generate_illustrations(websocket: WebSocket, client_id: str, chatbot_b: ChatBotB, ws_engine: WebSocketEngine):
     """삽화 생성 요청 처리 핸들러"""
     logger.info(f"삽화 생성 요청 수신 ({client_id})")
     try:
         # 삽화 생성 (ChatBot B 내부 로직 사용)
         illustrations = await asyncio.to_thread(chatbot_b.generate_illustrations)
         if illustrations:
-            await websocket.send_json({"type": "illustrations_generated", "illustrations": illustrations, "status": "ok"})
+            await ws_engine.send_json(websocket, {"type": "illustrations_generated", "illustrations": illustrations, "status": "ok"})
             logger.info(f"삽화 생성 완료 및 전송 ({client_id})")
         else:
-            await websocket.send_json({"type": "error", "message": "삽화 생성 실패", "status": "error"})
+            await ws_engine.send_error(websocket, "삽화 생성 실패", "illustration_generation_failed")
             logger.error(f"삽화 생성 실패 ({client_id})")
     except Exception as e:
         logger.error(f"삽화 생성 중 오류 ({client_id}): {e}\n{traceback.format_exc()}")
-        await websocket.send_json({"type": "error", "message": f"삽화 생성 오류: {str(e)}", "status": "error"})
+        await ws_engine.send_error(websocket, f"삽화 생성 오류: {str(e)}", "illustration_generation_error")
 
-async def handle_generate_voice(websocket: WebSocket, client_id: str, chatbot_b: ChatBotB):
+async def handle_generate_voice(websocket: WebSocket, client_id: str, chatbot_b: ChatBotB, ws_engine: WebSocketEngine):
     """음성 생성 요청 처리 핸들러"""
     logger.info(f"음성 생성 요청 수신 ({client_id})")
     try:
         # 음성 생성 (ChatBot B 내부 로직 사용)
         voice_data = await asyncio.to_thread(chatbot_b.generate_voice)
         if voice_data:
-            await websocket.send_json({"type": "voice_generated", "voice_data": voice_data, "status": "ok"})
+            await ws_engine.send_json(websocket, {"type": "voice_generated", "voice_data": voice_data, "status": "ok"})
             logger.info(f"음성 생성 완료 및 전송 ({client_id})")
         else:
-            await websocket.send_json({"type": "error", "message": "음성 생성 실패", "status": "error"})
+            await ws_engine.send_error(websocket, "음성 생성 실패", "voice_generation_failed")
             logger.error(f"음성 생성 실패 ({client_id})")
     except Exception as e:
         logger.error(f"음성 생성 중 오류 ({client_id}): {e}\n{traceback.format_exc()}")
-        await websocket.send_json({"type": "error", "message": f"음성 생성 오류: {str(e)}", "status": "error"})
+        await ws_engine.send_error(websocket, f"음성 생성 오류: {str(e)}", "voice_generation_error")
 
 async def handle_get_preview(websocket: WebSocket, client_id: str, chatbot_b: ChatBotB):
     """미리보기 요청 처리 핸들러"""
@@ -179,7 +181,7 @@ async def handle_get_preview(websocket: WebSocket, client_id: str, chatbot_b: Ch
         logger.error(f"미리보기 생성 중 오류 ({client_id}): {e}\n{traceback.format_exc()}")
         await websocket.send_json({"type": "error", "message": f"미리보기 오류: {str(e)}", "status": "error"})
 
-async def handle_save_story(websocket: WebSocket, client_id: str, message: dict, chatbot_b: ChatBotB):
+async def handle_save_story(websocket: WebSocket, client_id: str, message: dict, chatbot_b: ChatBotB, ws_engine: WebSocketEngine):
     """이야기 저장 요청 처리 핸들러"""
     logger.info(f"이야기 저장 요청 수신 ({client_id})")
     # file_format = message.get("format", "json") # 필요시 파일 포맷 지정
@@ -195,7 +197,7 @@ async def handle_save_story(websocket: WebSocket, client_id: str, message: dict,
         #     # 여기서 파일 저장 로직을 수행할 수 있음 (예: ws_utils.save_generated_story)
         #     pass
         
-        await websocket.send_json({"type": "story_saved", "message": "이야기 저장 기능은 ChatBot B에 구현 필요", "status": "ok_placeholder"})
+        await ws_engine.send_json(websocket, {"type": "story_saved", "message": "이야기 저장 기능은 ChatBot B에 구현 필요", "status": "ok_placeholder"})
         logger.info(f"이야기 저장 처리 완료 (플레이스홀더) ({client_id})")
         
     except Exception as e:
