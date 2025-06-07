@@ -146,33 +146,80 @@ enhanced_theme = rag.enrich_story_theme("우주 모험", age_group=7)
 
 ### WebSocket 연결
 ```javascript
-const ws = new WebSocket("wss://your-server.com/ws/audio?token=valid_token&child_name=민준&age=5&interests=공룡,우주,동물");
+// ✅ 올바른 연결 방법
+const ws = new WebSocket("ws://13.124.141.8:8000/ws/audio?" + new URLSearchParams({
+  child_name: "민준",
+  age: 5,
+  interests: "공룡,우주,동물",
+  token: "development_token"  // 개발용 또는 JWT 토큰
+}));
 
-// 메시지 수신
+// 메시지 수신 처리
 ws.onmessage = (event) => {
   const response = JSON.parse(event.data);
   
-  // 텍스트 처리
-  console.log("AI 응답:", response.text);
+  // AI 응답 처리
+  if (response.type === "ai_response") {
+    console.log("AI 응답:", response.text);
+    console.log("사용자 음성 인식:", response.user_text);
+    
+    // Base64 오디오 재생
+    if (response.audio) {
+      const audio = new Audio("data:audio/mp3;base64," + response.audio);
+      audio.play();
+    }
+  }
   
-  // 오디오 처리 (base64 디코딩 후 재생)
-  if (response.audio) {
-    const audio = new Audio("data:audio/mp3;base64," + response.audio);
-    audio.play();
+  // 에러 처리
+  else if (response.type === "error") {
+    console.error("에러:", response.error_message);
+    console.error("에러 코드:", response.error_code);
+  }
+  
+  // 음성 인식 중간 결과
+  else if (response.type === "transcription") {
+    console.log("음성 인식:", response.text, "신뢰도:", response.confidence);
   }
 };
 
-// 오디오 데이터 전송 (예: MediaRecorder 사용)
+// ⚠️ 중요: 바이너리 오디오 데이터 전송
+// JSON이 아닌 순수 바이너리로 전송해야 함
+
+// React Native 예시
+const sendAudioFile = async (audioFilePath) => {
+  if (ws.readyState !== WebSocket.OPEN) {
+    console.error("WebSocket 연결이 열려있지 않습니다");
+    return;
+  }
+  
+  try {
+    // 파일을 base64로 읽고 바이너리로 변환
+    const base64Audio = await RNFS.readFile(audioFilePath, 'base64');
+    const audioBuffer = Buffer.from(base64Audio, 'base64');
+    
+    // 바이너리 데이터 직접 전송
+    ws.send(audioBuffer);
+  } catch (error) {
+    console.error("오디오 전송 실패:", error);
+  }
+};
+
+// Web 브라우저 예시 (실시간 녹음)
 navigator.mediaDevices.getUserMedia({ audio: true })
   .then(stream => {
-    const mediaRecorder = new MediaRecorder(stream);
+    const mediaRecorder = new MediaRecorder(stream, {
+      mimeType: 'audio/webm'
+    });
+    
     mediaRecorder.ondataavailable = (event) => {
       if (event.data.size > 0 && ws.readyState === WebSocket.OPEN) {
+        // Blob 데이터를 바이너리로 직접 전송
         ws.send(event.data);
       }
     };
-    // 100ms마다 오디오 데이터 전송
-    mediaRecorder.start(100);
+    
+    // 1초마다 청크 전송 (서버 처리 기준에 맞춤)
+    mediaRecorder.start(1000);
   });
 ```
 
@@ -180,10 +227,12 @@ navigator.mediaDevices.getUserMedia({ audio: true })
 ```json
 {
   "type": "ai_response",
-  "text": "안녕 병찬아! 오늘은 어떤 이야기를 만들고 싶니?",
-  "audio": "base64_encoded_audio_data...",
+  "text": "안녕 민준아! 공룡과 우주에 대한 멋진 이야기를 만들어볼까?",
+  "audio": "UklGRnoGAABXQVZFZm10IBAAAA...",
   "status": "ok",
-  "user_text": "안녕 반가워"
+  "user_text": "안녕 반가워, 이야기 만들어줘",
+  "confidence": 0.95,
+  "timestamp": "2024-01-01T12:00:00Z"
 }
 ```
 
@@ -191,8 +240,38 @@ navigator.mediaDevices.getUserMedia({ audio: true })
 ```json
 {
   "type": "error",
-  "error_message": "오디오 처리 중 오류가 발생했습니다",
-  "error_code": "whisper_error",
-  "status": "error"
+  "error_message": "음성 인식에 실패했습니다",
+  "error_code": "WHISPER_ERROR",
+  "status": "error",
+  "timestamp": "2024-01-01T12:00:00Z"
 }
-``` 
+```
+
+### 🧪 개발 및 테스트
+
+#### 연결 테스트
+```javascript
+// 1. 기본 연결 테스트
+const testWs = new WebSocket('ws://13.124.141.8:8000/ws/test?token=development_token');
+
+testWs.onopen = () => {
+  console.log('✅ WebSocket 연결 성공');
+  testWs.send(JSON.stringify({ type: 'test', message: 'Hello' }));
+};
+
+// 2. 바이너리 전송 테스트
+const binaryWs = new WebSocket('ws://13.124.141.8:8000/ws/binary-test?token=development_token');
+
+binaryWs.onopen = () => {
+  console.log('✅ 바이너리 테스트 연결 성공');
+  const testData = new Uint8Array([1, 2, 3, 4, 5]);
+  binaryWs.send(testData);
+};
+```
+
+### ⚠️ 주의사항
+1. **바이너리 전송 필수**: `/ws/audio`는 JSON이 아닌 바이너리 데이터만 받음
+2. **청크 기준**: 서버는 1초 또는 64KB마다 오디오 처리
+3. **토큰 인증**: 개발용 `development_token` 또는 실제 JWT 토큰 필요
+4. **연결 상태 확인**: 전송 전에 반드시 `ws.readyState === WebSocket.OPEN` 확인
+5. **에러 처리**: 모든 `type: "error"` 응답에 대한 적절한 처리 로직 필요 

@@ -29,24 +29,44 @@ Frontend ↔ Nginx ↔ FastAPI Backend
 
 ## 🔐 인증
 
-### JWT 토큰 인증
-모든 API 요청에는 JWT 토큰이 필요합니다.
+### 토큰 인증
+API 요청에는 JWT 토큰 또는 개발용 토큰이 필요합니다.
 
 #### 토큰 획득
 ```http
-GET /api/test-token
+POST /api/v1/auth/token
+Content-Type: application/json
+
+{}
 ```
 
-#### 요청 헤더
+**응답**
+```json
+{
+  "success": true,
+  "token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
+  "expires_in": 3600,
+  "token_type": "Bearer"
+}
+```
+
+#### REST API 인증
 ```http
 Authorization: Bearer <your-jwt-token>
 ```
 
 #### WebSocket 인증
 ```javascript
-// 쿼리 파라미터로 토큰 전달
-const ws = new WebSocket('ws://localhost:8000/ws/audio?token=your-jwt-token');
+// 개발 환경
+const ws = new WebSocket('ws://localhost:8000/ws/audio?token=development_token');
+
+// 프로덕션 환경
+const ws = new WebSocket('ws://your-domain.com/ws/audio?token=your-jwt-token');
 ```
+
+#### 토큰 종류
+- **개발용**: `development_token` (개발 및 테스트 환경)
+- **프로덕션**: JWT 토큰 (실제 서비스 환경)
 
 ---
 
@@ -280,65 +300,178 @@ const ws = new WebSocket('ws://localhost:8000/ws/audio?token=your-jwt-token');
 ### 🎤 음성 대화 WebSocket
 
 #### `WebSocket /ws/audio`
-실시간 음성 대화 처리
+실시간 음성 대화 처리 (메인 오디오 엔드포인트)
 
-**연결 파라미터**
+**연결 URL**
 ```javascript
+// 개발 환경
 const ws = new WebSocket('ws://localhost:8000/ws/audio?' + new URLSearchParams({
   child_name: '민지',
   age: 7,
   interests: '공주,마법,동물',
-  token: 'your-jwt-token'
+  token: 'development_token'  // 개발용 토큰 또는 JWT
+}));
+
+// AWS 프로덕션 환경
+const ws = new WebSocket('ws://13.124.141.8:8000/ws/audio?' + new URLSearchParams({
+  child_name: '민지',
+  age: 7,
+  interests: '공주,마법,동물',
+  token: 'your_jwt_token'
 }));
 ```
 
-**메시지 타입**
+**연결 파라미터**
+- `child_name`: 아이 이름 (string, 필수)
+- `age`: 아이 나이 (integer, 필수)
+- `interests`: 아이 관심사 (string, 쉼표로 구분, 선택사항)
+- `token`: 인증 토큰 (string, 필수)
+  - 개발: `development_token`
+  - 프로덕션: JWT 토큰
 
-##### 1. 음성 데이터 전송
-```json
-{
-  "type": "audio_chunk",
-  "data": "base64-encoded-audio-data",
-  "chunk_index": 1,
-  "is_final": false
-}
+**⚠️ 중요: 오디오 전송 방식**
+서버는 **순수 바이너리 데이터**만 받습니다. JSON 형태가 아닙니다!
+
+**오디오 데이터 전송**
+```javascript
+// ❌ 잘못된 방식 (JSON)
+ws.send(JSON.stringify({
+  type: "audio_chunk",
+  data: "base64-audio-data"
+}));
+
+// ✅ 올바른 방식 (바이너리)
+// React Native 예시
+const audioFile = await RNFS.readFile(audioFilePath, 'base64');
+const audioBuffer = Buffer.from(audioFile, 'base64');
+ws.send(audioBuffer);
+
+// Web 브라우저 예시
+navigator.mediaDevices.getUserMedia({ audio: true })
+  .then(stream => {
+    const mediaRecorder = new MediaRecorder(stream);
+    mediaRecorder.ondataavailable = (event) => {
+      if (event.data.size > 0 && ws.readyState === WebSocket.OPEN) {
+        // 바이너리 Blob 직접 전송
+        ws.send(event.data);
+      }
+    };
+    // 1초마다 청크 전송 (서버는 1초 또는 64KB마다 처리)
+    mediaRecorder.start(1000);
+  });
 ```
 
-##### 2. 대화 종료 신호
+**처리 기준**
+- **시간**: 1초마다 누적된 오디오 처리
+- **크기**: 64KB 이상 누적되면 즉시 처리
+- **음성 인식**: Whisper 모델 사용
+- **응답 생성**: GPT-4o-mini 사용
+- **음성 합성**: ElevenLabs API 사용
+
+**서버 응답 (JSON 형태)**
+
+##### 1. AI 응답 (정상)
 ```json
 {
-  "type": "conversation_end"
-}
-```
-
-**서버 응답**
-
-##### 1. 음성 인식 결과
-```json
-{
-  "type": "transcription",
-  "text": "공주님이 나오는 이야기 만들어줘",
+  "type": "ai_response",
+  "text": "안녕 민지야! 어떤 공주님 이야기를 듣고 싶어?",
+  "audio": "UklGRnoGAABXQVZFZm10IBAAAA...",  // base64 인코딩된 MP3
+  "status": "ok",
+  "user_text": "공주님 이야기 해줘",  // STT 결과
   "confidence": 0.95,
   "timestamp": "2024-01-01T12:00:00Z"
 }
 ```
 
-##### 2. AI 응답
+##### 2. 음성 인식 결과 (중간 단계)
 ```json
 {
-  "type": "ai_response",
-  "text": "어떤 공주님을 좋아하나요? 예쁜 드레스를 입은 공주님일까요?",
-  "audio_url": "/audio/response_12345.mp3"
+  "type": "transcription",
+  "text": "공주님 이야기 해줘",
+  "confidence": 0.95,
+  "status": "partial",  // 또는 "final"
+  "timestamp": "2024-01-01T12:00:00Z"
 }
 ```
 
-##### 3. 에러 메시지
+##### 3. 처리 상태 알림
+```json
+{
+  "type": "processing",
+  "message": "음성을 분석하고 있어요...",
+  "stage": "speech_recognition",  // "ai_generation", "voice_synthesis"
+  "timestamp": "2024-01-01T12:00:00Z"
+}
+```
+
+##### 4. 에러 응답
 ```json
 {
   "type": "error",
-  "message": "음성 인식에 실패했습니다",
-  "error_code": "STT_FAILED"
+  "error_message": "음성 인식에 실패했습니다",
+  "error_code": "WHISPER_ERROR",  // "STT_FAILED", "AI_ERROR", "TTS_ERROR"
+  "status": "error",
+  "timestamp": "2024-01-01T12:00:00Z"
 }
+```
+
+##### 5. 연결 종료 알림
+```json
+{
+  "type": "conversation_end",
+  "message": "대화가 저장되었습니다",
+  "conversation_file": "/app/output/conversations/민지_20240101_120000.json",
+  "total_exchanges": 5,
+  "duration_minutes": 3.2
+}
+```
+
+### 🧪 테스트용 WebSocket 엔드포인트
+
+#### `WebSocket /ws/test`
+기본 연결 및 JSON 메시지 테스트용
+
+**연결**
+```javascript
+const testWs = new WebSocket('ws://localhost:8000/ws/test?token=development_token');
+
+testWs.onopen = () => {
+  console.log('테스트 연결 성공');
+  
+  // 테스트 메시지 전송
+  testWs.send(JSON.stringify({
+    type: 'test',
+    message: 'Hello WebSocket'
+  }));
+};
+
+testWs.onmessage = (event) => {
+  const response = JSON.parse(event.data);
+  console.log('서버 응답:', response);
+  // { type: "echo", original_message: {...}, timestamp: "..." }
+};
+```
+
+#### `WebSocket /ws/binary-test`
+바이너리 데이터 전송 테스트용
+
+**연결**
+```javascript
+const binaryWs = new WebSocket('ws://localhost:8000/ws/binary-test?token=development_token');
+
+binaryWs.onopen = () => {
+  console.log('바이너리 테스트 연결 성공');
+  
+  // 테스트 바이너리 데이터 전송
+  const testData = new Uint8Array([1, 2, 3, 4, 5]);
+  binaryWs.send(testData);
+};
+
+binaryWs.onmessage = (event) => {
+  const response = JSON.parse(event.data);
+  console.log('바이너리 수신 확인:', response);
+  // { type: "binary_received", chunk_number: 1, chunk_size: 5, ... }
+};
 ```
 
 ### 📚 이야기 생성 WebSocket
@@ -352,7 +485,7 @@ const ws = new WebSocket('ws://localhost:8000/ws/story_generation?' + new URLSea
   child_name: '민지',
   age: 7,
   interests: '공주,마법,동물',
-  token: 'your-jwt-token'
+  token: 'development_token'
 }));
 ```
 
@@ -362,10 +495,11 @@ const ws = new WebSocket('ws://localhost:8000/ws/story_generation?' + new URLSea
 ```json
 {
   "type": "generation_status",
-  "story_id": "uuid-1234-5678-9012",
+  "story_id": "story_uuid_12345",
   "stage": "text_generation",
   "progress": 45.5,
-  "message": "이야기 텍스트를 생성하고 있습니다..."
+  "message": "이야기 텍스트를 생성하고 있습니다...",
+  "estimated_remaining": "2분"
 }
 ```
 
@@ -373,7 +507,7 @@ const ws = new WebSocket('ws://localhost:8000/ws/story_generation?' + new URLSea
 ```json
 {
   "type": "chapter_completed",
-  "story_id": "uuid-1234-5678-9012",
+  "story_id": "story_uuid_12345",
   "chapter_number": 1,
   "title": "공주의 만남",
   "preview": "옛날 옛적에 마법의 성에..."
@@ -384,12 +518,64 @@ const ws = new WebSocket('ws://localhost:8000/ws/story_generation?' + new URLSea
 ```json
 {
   "type": "story_completed",
-  "story_id": "uuid-1234-5678-9012",
+  "story_id": "story_uuid_12345",
   "title": "마법의 공주와 친구들",
   "total_chapters": 3,
-  "download_url": "/api/v1/stories/uuid-1234-5678-9012"
+  "download_url": "/api/v1/stories/story_uuid_12345"
 }
 ```
+
+### 🔧 WebSocket 연결 관리
+
+**연결 상태 확인**
+```javascript
+ws.onopen = () => console.log('✅ 연결 성공');
+ws.onclose = () => console.log('❌ 연결 종료');
+ws.onerror = (error) => console.error('🚨 연결 에러:', error);
+
+// 연결 상태 체크
+if (ws.readyState === WebSocket.OPEN) {
+  // 데이터 전송 가능
+} else if (ws.readyState === WebSocket.CONNECTING) {
+  // 연결 중...
+}
+```
+
+**자동 재연결 (권장)**
+```javascript
+class AutoReconnectWebSocket {
+  constructor(url) {
+    this.url = url;
+    this.reconnectAttempts = 0;
+    this.maxReconnectAttempts = 5;
+    this.connect();
+  }
+  
+  connect() {
+    this.ws = new WebSocket(this.url);
+    
+    this.ws.onopen = () => {
+      console.log('WebSocket 연결됨');
+      this.reconnectAttempts = 0;
+    };
+    
+    this.ws.onclose = () => {
+      if (this.reconnectAttempts < this.maxReconnectAttempts) {
+        this.reconnectAttempts++;
+        console.log(`재연결 시도 ${this.reconnectAttempts}/${this.maxReconnectAttempts}`);
+        setTimeout(() => this.connect(), 2000 * this.reconnectAttempts);
+      }
+    };
+  }
+}
+```
+
+**⚠️ 주의사항**
+1. **토큰 인증**: 개발 환경에서는 `development_token`, 프로덕션에서는 JWT 필수
+2. **바이너리 전송**: `/ws/audio`는 반드시 바이너리 데이터로 전송
+3. **청크 크기**: 너무 작은 청크(<1초)는 피하고, 너무 큰 청크(>5초)도 피할 것
+4. **에러 처리**: 항상 `type: "error"` 응답에 대한 처리 로직 포함
+5. **연결 제한**: 하나의 클라이언트당 하나의 WebSocket 연결만 유지
 
 ---
 
