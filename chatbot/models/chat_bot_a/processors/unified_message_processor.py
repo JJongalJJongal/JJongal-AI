@@ -640,12 +640,12 @@ class UnifiedMessageProcessor:
     def get_enhanced_greeting(self, age: int) -> str:
         """Enhanced 연령별 특화 인사말"""
         age_specific_greetings = {
-            4: f"안녕, {self.child_name or '친구'}! 나는 {self.chatbot_name}야! 재미있는 이야기를 같이 만들어볼까?",
-            5: f"안녕하세요, {self.child_name or '친구'}! 저는 {self.chatbot_name}예요. 멋진 동화를 함께 만들어보아요!",
-            6: f"안녕, {self.child_name or '친구'}! {self.chatbot_name}라고 해! 상상력 가득한 이야기를 만들어보자!",
-            7: f"안녕하세요, {self.child_name or '친구'}! 저는 {self.chatbot_name}입니다. 환상적인 모험 이야기를 함께 만들어볼까요?",
-            8: f"안녕, {self.child_name or '친구'}! {self.chatbot_name}야. 너만의 특별한 이야기를 만들어보자!",
-            9: f"안녕하세요, {self.child_name or '친구'}! 저는 {self.chatbot_name}예요. 창의적이고 흥미진진한 이야기를 함께 만들어보아요!"
+            4: f"안녕 {self.child_name or '친구'}야! 나는 {self.chatbot_name}야! 오늘 뭐 하고 놀까?",
+            5: f"안녕 {self.child_name or '친구'}! 나는 {self.chatbot_name}야. 재미있는 얘기 같이 만들어볼까?",
+            6: f"안녕 {self.child_name or '친구'}! {self.chatbot_name}라고 해! 신나는 모험 이야기 만들어보자!",
+            7: f"안녕 {self.child_name or '친구'}! 나는 {self.chatbot_name}야. 멋진 이야기를 함께 만들어보자!",
+            8: f"안녕 {self.child_name or '친구'}! {self.chatbot_name}야. 너만의 특별한 이야기를 만들어보자!",
+            9: f"안녕 {self.child_name or '친구'}! 나는 {self.chatbot_name}야. 창의적인 이야기를 함께 만들어볼까?"
         }
         
         greeting = age_specific_greetings.get(age, age_specific_greetings[5])
@@ -653,13 +653,13 @@ class UnifiedMessageProcessor:
         # 관심사가 있으면 추가
         if self.interests:
             interest_str = ", ".join(self.interests[:2])
-            greeting += f" {interest_str}에 관심이 많다고 들었어요!"
+            greeting += f" {interest_str} 좋아한다고 들었어!"
         
         return greeting
     
     def get_token_limit_message(self) -> str:
         """토큰 제한 메시지"""
-        return f"안녕, {self.child_name or '친구'}! 우리 대화가 너무 길어져서 여기서 마무리해야겠어요. 오늘 정말 재미있는 이야기를 들려줘서 고마워요!"
+        return f"안녕, {self.child_name or '친구'}! 우리 대화가 너무 길어져서 여기서 마무리해야겠어. 오늘 정말 재미있는 이야기를 들려줘서 고마워!"
     
     def validate_response(self, response: str) -> Dict[str, Any]:
         """응답 검증"""

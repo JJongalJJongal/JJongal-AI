@@ -104,7 +104,7 @@ async def handle_audio_websocket(
 
         while True:
             try:
-                data = await asyncio.wait_for(websocket.receive_bytes(), timeout=30.0) # 오디오 데이터 수신
+                data = await asyncio.wait_for(websocket.receive_bytes(), timeout=60.0) # 오디오 데이터 수신
             except asyncio.TimeoutError: # 타임아웃 시
                 # 타임아웃 시 연결 상태 체크
                 try:
