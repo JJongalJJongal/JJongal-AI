@@ -248,8 +248,7 @@ async def create_story(
     auth: dict = Depends(verify_auth)
 ):
     """새 이야기 생성"""
-    print("PRINT: CREATE_STORY Function Called")
-    logger.info("LOGGER: CREATE_STORY Function Called")
+    logger.info("CREATE_STORY Function Called")
     logger.info("=== 스토리 생성 API 호출됨 ===")
     logger.info(f"요청 데이터: 아이 이름={story_request.child_profile.name}, 나이={story_request.child_profile.age}")
     

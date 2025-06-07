@@ -253,20 +253,24 @@ class TextGenerator(BaseGenerator):
             
         # 출력 형식 지정
         # JSON 예시 부분을 일반 여러 줄 문자열로 변경하고, 내부 중괄호는 이중으로 이스케이프.
-        output_format_json_example = """    
+        output_format_json_example = """
 ```json
 {{
-  \"title\": \"동화 제목\",
-  \"chapters\": [
+  "title": "동화 제목",
+  "chapters": [
     {{
-      \"chapter_number\": 1,
-      \"chapter_title\": \"챕터 제목\",
-      \"chapter_content\": \"챕터 내용\",
-      \"educational_point\": \"교육적 포인트\",
-      \"interaction_question\": \"상호작용 질문\"
+      "chapter_number": 1,
+      "chapter_title": "챕터 제목",
+      "narration": "이곳은 조용한 숲 속... (대사가 아닌 서술 부분)",
+      "dialogues": [
+          {{"speaker": "토끼", "text": "안녕, 거북아!"}},
+          {{"speaker": "거북이", "text": "안녕, 토끼야. 어디 가니?"}}
+      ],
+      "educational_point": "교육적 포인트",
+      "interaction_question": "상호작용 질문"
     }}
   ],
-  \"reasoning_process\": \"추론 과정 설명\"
+  "reasoning_process": "추론 과정 설명"
 }}
 ```"""
 
@@ -319,14 +323,14 @@ class TextGenerator(BaseGenerator):
         
         try:
             # OpenAI 클라이언트 상태 확인
-            logger.info(f"🔥 OpenAI 클라이언트 상태: {self.openai_client is not None}")
-            logger.info(f"🔥 VectorDB 상태: {self.vector_store is not None}")
-            logger.info(f"🔥 Text chains 상태: {len(self.text_chains) if self.text_chains else 0}개")
+            logger.info(f"OpenAI 클라이언트 상태: {self.openai_client is not None}")
+            logger.info(f"VectorDB 상태: {self.vector_store is not None}")
+            logger.info(f"Text chains 상태: {len(self.text_chains) if self.text_chains else 0}개")
             
             # 연령대 결정
             target_age = input_data.get("target_age", input_data.get("age_group", 7))
             age_group_key = self._determine_age_group(target_age)
-            logger.info(f"🔥 결정된 연령대: {target_age} -> {age_group_key}")
+            logger.info(f"결정된 연령대: {target_age} -> {age_group_key}")
             
             # 진행 상황 업데이트
             if progress_callback:
@@ -368,18 +372,18 @@ class TextGenerator(BaseGenerator):
                 })
             
             # 4. 텍스트 생성 with 체인 오브 소트
-            logger.info(f"🔥 텍스트 생성 시작 - Chain: {age_group_key}")
-            logger.info(f"🔥 Prompt 데이터 keys: {list(prompt_data.keys())}")
+            logger.info(f"텍스트 생성 시작 - Chain: {age_group_key}")
+            logger.info(f"Prompt 데이터 keys: {list(prompt_data.keys())}")
             
             generated_text = await chain.ainvoke(prompt_data)
             
-            logger.info(f"🔥 생성된 텍스트 길이: {len(generated_text) if generated_text else 0}")
-            logger.info(f"🔥 생성된 텍스트 미리보기: {generated_text[:200] if generated_text else 'None'}...")
+            logger.info(f"생성된 텍스트 길이: {len(generated_text) if generated_text else 0}")
+            logger.info(f"생성된 텍스트 미리보기: {generated_text[:200] if generated_text else 'None'}...")
             
             # 5. Enhanced 파싱
             story_data = self._parse_enhanced_story(generated_text)
-            logger.info(f"🔥 파싱된 스토리 데이터 keys: {list(story_data.keys()) if story_data else 'None'}")
-            logger.info(f"🔥 파싱된 chapters 개수: {len(story_data.get('chapters', [])) if story_data else 0}")
+            logger.info(f"파싱된 스토리 데이터 keys: {list(story_data.keys()) if story_data else 'None'}")
+            logger.info(f"파싱된 chapters 개수: {len(story_data.get('chapters', [])) if story_data else 0}")
             
             # 6. 성능 메트릭 수집
             generation_time = time.time() - start_time
@@ -430,16 +434,24 @@ class TextGenerator(BaseGenerator):
             theme = input_data.get("theme", "")
             educational_value = input_data.get("educational_value", "")
             interests = input_data.get("interests", [])
-            age_group = input_data.get("target_age", input_data.get("age_group", 7))
+            target_age = input_data.get("target_age", 7) # 기본 7세
             
             query_text = f"{theme} {educational_value} {' '.join(interests)}"
             
-            # 연령대에 따른 필터링
-            metadata_filter = {
-                "age_min": {"$lte": age_group},
-                "age_max": {"$gte": age_group}
-            } if isinstance(age_group, int) else {}
+            # 연령대에 따른 age_group 문자열 생성
+            def _get_age_group_for_filter(age: int) -> str:
+                if 4 <= age <= 7:
+                    return "4-7세"
+                elif 8 <= age <= 9:
+                    return "8-9세"
+                else: # DB에 '4-7세' 데이터가 더 많을 수 있으므로 기본값 설정
+                    return "4-7세"
             
+            age_group_str = _get_age_group_for_filter(target_age)
+            metadata_filter = {"age_group": age_group_str}
+            
+            logger.info(f"RAG 검색 필터 생성: target_age={target_age} -> age_group='{age_group_str}'")
+
             # 벡터 검색 수행 (get_similar_stories 사용)
             # get_similar_stories는 동기 함수이므로 asyncio.to_thread 사용
             results = await asyncio.to_thread(
@@ -449,7 +461,7 @@ class TextGenerator(BaseGenerator):
                 n_results=5,
                 metadata_filter=metadata_filter,
                 collection_name=self.collection_name,
-                doc_type="summary" # 필요시 다른 doc_type 지정 가능
+                doc_type=None # DB에 'type' 필드가 없음
             )
             
             logger.info(f"RAG 검색 완료: {len(results)}개의 유사 스토리 반환")
@@ -508,6 +520,16 @@ class TextGenerator(BaseGenerator):
             if json_match:
                 json_str = json_match.group(1)
                 parsed_data = json.loads(json_str)
+                logger.info("JSON 블록 파싱 성공. 데이터 구조를 검증합니다.")
+
+                # 데이터 구조 검증 및 보강
+                for chapter in parsed_data.get("chapters", []):
+                    if "narration" not in chapter:
+                        chapter["narration"] = chapter.get("chapter_content", "")
+                    if "dialogues" not in chapter:
+                        chapter["dialogues"] = []
+                    if "chapter_content" in chapter:
+                        del chapter["chapter_content"] # 오래된 필드 제거
                 
                 # 추론 과정이 포함되어 있는지 확인
                 if "reasoning_process" not in parsed_data:
@@ -519,6 +541,7 @@ class TextGenerator(BaseGenerator):
                 return parsed_data
             else:
                 # JSON 블록이 없으면 텍스트 파싱
+                logger.warning("JSON 블록을 찾을 수 없음. 일반 텍스트 파싱으로 전환합니다.")
                 return self._parse_text_story_enhanced(generated_text)
                 
         except json.JSONDecodeError as e:
@@ -526,48 +549,56 @@ class TextGenerator(BaseGenerator):
             return self._parse_text_story_enhanced(generated_text)
     
     def _parse_text_story_enhanced(self, text: str) -> Dict[str, Any]:
-        """Enhanced 텍스트 스토리 파싱"""
+        """Enhanced 텍스트 스토리 파싱 (내레이션/대사 분리 기능 추가)"""
         try:
-            # 기본 제목 추출
             title_match = re.search(r'제목[:\s]*(.*?)(?=\n|$)', text, re.IGNORECASE)
             title = title_match.group(1).strip() if title_match else "생성된 동화"
             
-            # 챕터 추출 (더 정교한 패턴)
-            chapter_patterns = [
-                r'챕터\s*(\d+)[:\s]*(.*?)(?=챕터\s*\d+|$)',
-                r'장\s*(\d+)[:\s]*(.*?)(?=장\s*\d+|$)',
-                r'(\d+)\.\s*(.*?)(?=\d+\.|$)'
-            ]
-            
+            chapters_text = re.split(r'챕터\s*\d+|장\s*\d+', text)[1:]
+            if not chapters_text:
+                chapters_text = [text]
+
             chapters = []
-            for pattern in chapter_patterns:
-                matches = re.finditer(pattern, text, re.DOTALL | re.IGNORECASE)
-                if matches:
-                    for match in matches:
-                        chapter_num = int(match.group(1))
-                        chapter_content = match.group(2).strip()
-                        
-                        # 챕터 제목과 내용 분리
-                        lines = chapter_content.split('\n', 1)
-                        chapter_title = lines[0].strip()
-                        chapter_text = lines[1].strip() if len(lines) > 1 else chapter_content
-                        
-                        chapters.append({
-                            "chapter_number": chapter_num,
-                            "chapter_title": chapter_title,
-                            "chapter_content": chapter_text,
-                            "educational_point": self._extract_educational_point(chapter_text),
-                            "interaction_question": self._extract_interaction_question(chapter_text)
-                        })
-                    break
-            
-            # 추론 과정 추출
+            for i, content in enumerate(chapters_text, 1):
+                chapter_title_match = re.search(r'[:\s]*(.*?)(?=\n|$)', content)
+                chapter_title = chapter_title_match.group(1).strip() if chapter_title_match else f"챕터 {i}"
+
+                dialogues = []
+                narration_parts = []
+                
+                # 대사 패턴: "화자: 대사" 또는 화자: "대사"
+                dialogue_pattern = re.compile(r'^\s*([가-힣\w\s]+?)\s*:\s*["“](.+?)["”]', re.MULTILINE)
+                
+                last_pos = 0
+                for match in dialogue_pattern.finditer(content):
+                    # 대사 앞부분을 내레이션으로 추가
+                    narration_parts.append(content[last_pos:match.start()].strip())
+                    
+                    # 대사 추가
+                    dialogues.append({"speaker": match.group(1).strip(), "text": match.group(2).strip()})
+                    last_pos = match.end()
+
+                # 나머지 텍스트를 내레이션으로 추가
+                narration_parts.append(content[last_pos:].strip())
+
+                # 비어있지 않은 내레이션만 합치기
+                full_narration = "\n".join(part for part in narration_parts if part)
+
+                chapters.append({
+                    "chapter_number": i,
+                    "chapter_title": chapter_title,
+                    "narration": full_narration,
+                    "dialogues": dialogues,
+                    "educational_point": self._extract_educational_point(content),
+                    "interaction_question": self._extract_interaction_question(content)
+                })
+
             reasoning_match = re.search(r'추론\s*과정[:\s]*(.*?)(?=\n\n|\n#|$)', text, re.DOTALL | re.IGNORECASE)
             reasoning_process = reasoning_match.group(1).strip() if reasoning_match else ""
             
             return {
                 "title": title,
-                "chapters": chapters if chapters else [{"chapter_number": 1, "chapter_title": "동화", "chapter_content": text}],
+                "chapters": chapters if chapters else [{"chapter_number": 1, "chapter_title": "동화", "narration": text, "dialogues": []}],
                 "reasoning_process": reasoning_process
             }
             
@@ -575,7 +606,7 @@ class TextGenerator(BaseGenerator):
             logger.error(f"Enhanced 텍스트 파싱 실패: {e}")
             return {
                 "title": "생성된 동화",
-                "chapters": [{"chapter_number": 1, "chapter_title": "동화", "chapter_content": text}],
+                "chapters": [{"chapter_number": 1, "chapter_title": "동화", "narration": text, "dialogues": []}],
                 "reasoning_process": ""
             }
     

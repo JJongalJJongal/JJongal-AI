@@ -167,10 +167,7 @@ class VectorDB:
                     
                     # 대안 한국어 모델들 시도
                     alternative_models = [
-                        "nlpai-lab/KURE-v1",
-                        "jhgan/ko-sbert-nli",
-                        "jhgan/ko-sbert-sts", 
-                        "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
+                        "nlpai-lab/KURE-v1"
                     ]
                     
                     for alt_model in alternative_models:

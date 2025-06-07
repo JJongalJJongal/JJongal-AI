@@ -16,6 +16,10 @@ services:
     environment:
       - APP_ENV=development
       - PYTHONPATH=/app
+      # LangSmith Tracing 환경 변수 추가
+      - LANGCHAIN_TRACING_V2=true
+      - LANGCHAIN_API_KEY=${LANGCHAIN_API_KEY}
+      - LANGCHAIN_PROJECT=${LANGCHAIN_PROJECT}
     # 개발 모드로 실행 (--reload 옵션 추가) - 통합 서버 사용
     command: ["uvicorn", "chatbot.app:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]
     

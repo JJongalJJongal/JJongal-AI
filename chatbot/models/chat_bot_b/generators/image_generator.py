@@ -20,7 +20,7 @@ import time
 # LangChain imports 
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.output_parsers import StrOutputParser
-from langchain_openai import ChatOpenAI
+from langchain_community.chat_models import ChatOpenAI
 from langchain_community.utilities.dalle_image_generator import DallEAPIWrapper
 from langsmith import traceable
 

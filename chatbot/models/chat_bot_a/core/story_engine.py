@@ -9,6 +9,7 @@ import random
 import json
 import os
 import re
+from pathlib import Path
 
 from shared.utils.logging_utils import get_module_logger
 from shared.utils.vector_db_utils import get_db_type_path
@@ -68,7 +69,13 @@ class StoryEngine:
     def _initialize_rag_system(self) -> Optional[RAGSystem]:
         """RAG 시스템을 초기화하고 인스턴스를 반환합니다."""
         try:
-            db_path = get_db_type_path(db_type="summary")
+            # 이 파일의 위치를 기준으로 vector_db 폴더의 기본 경로를 계산합니다.
+            base_dir = Path(__file__).resolve().parent.parent.parent / 'data' / 'vector_db'
+            
+            # base_directory 인자를 추가하여 DB 경로를 가져옵니다.
+            db_path_str = get_db_type_path(db_type="summary", base_directory=str(base_dir))
+            db_path = Path(db_path_str) 
+
             if not db_path.exists():
                 logger.warning(f"RAG를 위한 VectorDB 경로를 찾을 수 없습니다: {db_path}")
                 return None

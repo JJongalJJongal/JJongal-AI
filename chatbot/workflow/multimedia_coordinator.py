@@ -105,6 +105,7 @@ class MultimediaCoordinator:
                 # 환경변수에서 vector_db_path 가져오기
                 vector_db_path = os.getenv("VECTOR_DB_PATH", "/app/chatbot/data/vector_db")
                 self.chat_bot_b = ChatBotB(
+                    output_dir=self.output_dir,
                     vector_db_path=vector_db_path,
                     collection_name="fairy_tales",
                     use_enhanced_generators=True,
@@ -213,36 +214,43 @@ class MultimediaCoordinator:
         try:
             self.logger.info(f"오디오 생성 시작: {story_schema.metadata.story_id}")
             
-            audio_files = []
-            story_id = story_schema.metadata.story_id
+            if not self.chat_bot_b or not self.chat_bot_b.voice_generator:
+                self.logger.warning("ChatBotB 또는 VoiceGenerator가 초기화되지 않아 오디오를 생성할 수 없습니다.")
+                return []
             
-            # 오디오 저장 디렉토리 생성
-            story_audio_dir = os.path.join(self.audio_dir, story_id)
-            os.makedirs(story_audio_dir, exist_ok=True)
+            # VoiceGenerator에 필요한 입력 데이터 구성
+            input_data = {
+                "story_data": story_schema.generated_story.to_dict(),
+                "story_id": story_schema.metadata.story_id,
+            }
             
-            # 전체 이야기 오디오 생성
-            if story_schema.generated_story:
-                full_audio = await self._generate_story_audio(
-                    story_schema.generated_story.content,
-                    story_audio_dir,
-                    "full_story"
-                )
-                if full_audio:
-                    audio_files.append(full_audio)
+            # 꼬기의 VoiceGenerator 사용
+            audio_result = await self.chat_bot_b.voice_generator.generate(input_data)
+
+            audio_files = audio_result.get("audio_files", [])
             
-            # 챕터별 오디오 생성
-            if story_schema.generated_story and story_schema.generated_story.chapters:
-                for i, chapter in enumerate(story_schema.generated_story.chapters):
-                    chapter_audio = await self._generate_story_audio(
-                        chapter.get("content", ""),
-                        story_audio_dir,
-                        f"chapter_{i}"
-                    )
-                    if chapter_audio:
-                        audio_files.append(chapter_audio)
+            final_audio_list = []
             
-            self.logger.info(f"오디오 생성 완료: {len(audio_files)}개")
-            return audio_files
+            # 생성된 오디오 파일 목록을 순회하며 결과 리스트 반환
+            for chapter_audio in audio_files:
+                if chapter_audio.get("combined_audio"):
+                    final_audio_list.append({
+                        "path": chapter_audio["combined_audio"],
+                        "chapter": chapter_audio["chapter_number"]
+                    })
+                # 합쳐진 파일이 없고 내레이션 파일만 있는 경우
+                elif chapter_audio.get("narration_audio"):
+                    final_audio_list.append({
+                        "path": chapter_audio["narration_audio"],
+                        "chapter": chapter_audio["chapter_number"]
+                    })
+                # 합쳐진 파일이 없고 내레이션 파일도 없는 경우
+                else:
+                    self.logger.warning(f"오디오 파일이 없음: {chapter_audio}")
+                    return []
+            
+            self.logger.info(f"오디오 생성 완료: {len(final_audio_list)}개")
+            return final_audio_list
             
         except Exception as e:
             self.logger.error(f"오디오 생성 실패: {e}")

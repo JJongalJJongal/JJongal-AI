@@ -19,6 +19,13 @@ services:
       - WS_AUTH_TOKEN=${WS_AUTH_TOKEN:-secure_default_token} # WebSocket 인증 토큰
       - JWT_SECRET_KEY=${JWT_SECRET_KEY:-ccb_ai_default_secret_key_2024} # JWT 시크릿 키
       
+
+      # LangSmith Tracing 환경 변수 추가
+      - LANGCHAIN_TRACING_V2=true
+      - LANGCHAIN_API_KEY=${LANGCHAIN_API_KEY}
+      - LANGCHAIN_PROJECT=${LANGCHAIN_PROJECT}
+      - LANGCHAIN_ENDPOINT=${LANGCHAIN_ENDPOINT}
+
       # 통합 서버 모드 설정
       - INTEGRATED_MODE=true # 모든 기능을 하나의 서버에서 실행
       - CHROMA_DB_PATH=/app/chatbot/data/vector_db # ChromaDB 저장 경로

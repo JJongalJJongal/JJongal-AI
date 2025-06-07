@@ -26,7 +26,6 @@ def query_vector_db(
 ) -> Dict[str, Any]: # VectorDB.query의 반환 타입과 일치 또는 format_query_results를 거친 타입
     """
     벡터 DB에서 쿼리 실행 (내부 사용 함수 또는 get_similar_stories의 일부로 통합 고려)
-    이 함수는 get_similar_stories에 의해 거의 대체되었으므로, 직접 사용은 줄어들 것임.
     
     Args:
         vector_db: VectorDB 인스턴스

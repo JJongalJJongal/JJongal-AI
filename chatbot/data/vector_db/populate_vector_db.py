@@ -190,21 +190,26 @@ def main():
                 logger.info(f"스토리 ID '{story_id_base}'의 내용이 비어있어 스킵합니다. (DB 유형: {db_type_to_use})")
             continue
 
+        # --- 메타데이터 포맷 통일 (중요) ---
+        # DB에 저장될 age_group 형식을 'age_4_7' 등으로 통일
+        raw_age_group = processed_s_data.get('age_group')
+        final_age_group = None
+        if raw_age_group == "4-7세":
+            final_age_group = "age_4_7"
+        elif raw_age_group == "8-9세":
+            final_age_group = "age_8_9"
+        # 필요한 경우 다른 조건 추가
+
         # 공통 메타데이터 (모두 processed_s_data 에서 가져옴)
         common_metadata = {
             'story_id': story_id_base, 
             'title': processed_s_data.get('title', '제목 없음'),
-            # tags_list 변수를 먼저 정의하고 사용해야 합니다.
-            # 'tags': processed_s_data.get('tags', []), # 이것이 원래 의도였거나, 아래처럼 처리
-        }
-        tags_list = processed_s_data.get('tags', [])
-        common_metadata['tags'] = ", ".join(tags_list) if tags_list else ""
-        common_metadata.update({
-            'age_group': processed_s_data.get('age_group'), # age_group 추가
+            'tags': ", ".join(processed_s_data.get('tags', [])),
+            'age_group': final_age_group, # 통일된 포맷 사용
             'educational_value': processed_s_data.get('educational_value'), 
-            'type': db_type_to_use, 
+            'type': db_type_to_use, # 'type' 필드 명시적 추가
             **doc_specific_metadata
-        })        
+        }
         
         final_metadata = {k: v for k, v in common_metadata.items() if v is not None} 
 
