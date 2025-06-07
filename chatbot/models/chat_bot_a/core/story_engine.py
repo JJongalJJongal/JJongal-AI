@@ -69,9 +69,9 @@ class StoryEngine:
     def _initialize_rag_system(self) -> Optional[RAGSystem]:
         """RAG 시스템을 초기화하고 인스턴스를 반환합니다."""
         try:
-            # 임시로 RAG 시스템 비활성화 (ChromaDB 충돌 방지)
-            logger.warning("RAG 시스템이 임시로 비활성화됨 (ChromaDB 충돌 방지)")
-            return None
+            # # 임시로 RAG 시스템 비활성화 (ChromaDB 충돌 방지)
+            # logger.warning("RAG 시스템이 임시로 비활성화됨 (ChromaDB 충돌 방지)")
+            # return None
             
             # 이 파일의 위치를 기준으로 vector_db 폴더의 기본 경로를 계산합니다.
             base_dir = Path(__file__).resolve().parent.parent.parent / 'data' / 'vector_db'
@@ -801,8 +801,9 @@ class StoryEngine:
             Dict: 분석 결과
         """
         if enhanced_mode and age_group:
-            # Enhanced 모드에서는 연령별 특화 분석
-            return self._analyze_input_enhanced(user_input, age_group)
+            # Enhanced 모드에서는 연령별 특화 분석 - 기본 분석 방식과 동일하게 처리
+            logger.info(f"Enhanced 모드로 입력 분석: 연령대 {age_group}세")
+            return self.analyze_user_response(user_input)
         else:
             # 기본 분석 방식 사용
             return self.analyze_user_response(user_input)
