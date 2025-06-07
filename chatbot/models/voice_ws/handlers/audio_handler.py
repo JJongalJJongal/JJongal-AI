@@ -6,6 +6,7 @@
 import time
 import asyncio
 import traceback
+from datetime import datetime
 from typing import Optional, Dict, Any
 from fastapi import WebSocket, status
 from fastapi.websockets import WebSocketDisconnect, WebSocketState
@@ -51,7 +52,13 @@ async def handle_audio_websocket(
     
     try:
         await websocket.accept() # WebSocket 연결 수락
-        logger.info(f"오디오 WebSocket 연결 수락: {client_id} ({child_name}, {age}세)") # 로깅
+        logger.info(f"==========================================")
+        logger.info(f"오디오 WebSocket 연결 수락")
+        logger.info(f"클라이언트 ID: {client_id}")
+        logger.info(f"아이 이름: {child_name}, 나이: {age}세")
+        logger.info(f"관심사: {interests_list}")
+        logger.info(f"WebSocket 상태: {websocket.client_state}")
+        logger.info(f"==========================================") # 로깅
         
         # 사전 로드된 VectorDB 인스턴스 가져오기
         vector_db_instance = websocket.app.state.vector_db
@@ -183,17 +190,30 @@ async def handle_audio_websocket(
                     
                     if stt_error: # 오디오 텍스트 변환 오류 시
                         logger.error(f"[AUDIO_PROCESS] 3단계 오류: {stt_error} (코드: {stt_code})")
-                        error_data = {"user_text": ""}
-                        await ws_engine.send_json(websocket, {"type": "error", "error_message": stt_error, "error_code": stt_code, "status": "error", "user_text": ""}) # 오디오 텍스트 변환 오류 전송
+                        error_response = {
+                            "type": "error",
+                            "error_message": stt_error,
+                            "error_code": stt_code,
+                            "status": "error",
+                            "user_text": "",
+                            "timestamp": datetime.now().isoformat()
+                        }
+                        await ws_engine.send_json(websocket, error_response) # 오디오 텍스트 변환 오류 전송
                         continue
                     
                     # === 4단계: 빈 텍스트 처리 ===
                     if not user_text:
                         logger.warning(f"[AUDIO_PROCESS] 4단계: 빈 텍스트 감지, 기본 응답 전송")
                         response_packet = {
-                            "type": "ai_response", "text": "", "audio": "", "status": "ok", "user_text": user_text,
-                            "error_message": "다시 말해줄래? 잘 안들렸어 미안해!", # 오류 메시지
-                            "error_code": "no_valid_speech" # 오류 코드
+                            "type": "ai_response",
+                            "text": "",
+                            "audio": "",
+                            "status": "ok",
+                            "user_text": user_text,
+                            "confidence": 0.0,  # 빈 텍스트이므로 신뢰도 0
+                            "timestamp": datetime.now().isoformat(),
+                            "error_message": "다시 말해줄래? 잘 안들렸어 미안해!",
+                            "error_code": "no_valid_speech"
                         }
                         await ws_engine.send_json(websocket, response_packet) # 오류 메시지 전송
                         continue
@@ -209,7 +229,8 @@ async def handle_audio_websocket(
                             "error_message": "챗봇 객체에 get_conversation_history 메서드가 없습니다.",
                             "error_code": "chatbot_object_invalid",
                             "status": "error",
-                            "user_text": user_text
+                            "user_text": user_text,
+                            "timestamp": datetime.now().isoformat()
                         })
                         continue
                     logger.info(f"[AUDIO_PROCESS] 5단계 완료: 챗봇 객체 검증 성공")
@@ -225,7 +246,14 @@ async def handle_audio_websocket(
                     except Exception as e:
                         step6_time = time.time() - step6_start
                         logger.error(f"[AUDIO_PROCESS] 6단계 예외: {e} ({step6_time:.2f}초 소요)")
-                        await ws_engine.send_json(websocket, {"type": "error", "error_message": f"챗봇 응답 생성 중 예외: {e}", "error_code": "chatbot_response_exception", "status": "error", "user_text": user_text})
+                        await ws_engine.send_json(websocket, {
+                            "type": "error",
+                            "error_message": f"챗봇 응답 생성 중 예외: {e}",
+                            "error_code": "chatbot_response_exception",
+                            "status": "error",
+                            "user_text": user_text,
+                            "timestamp": datetime.now().isoformat()
+                        })
                         continue
                     
                     # === 7단계: TTS (텍스트→음성) ===
@@ -244,9 +272,15 @@ async def handle_audio_websocket(
                     step8_start = time.time()
                     logger.info(f"[AUDIO_PROCESS] 8단계: 응답 전송 시작")
                     response_packet = {
-                        "type": "ai_response", "text": response, "audio": bot_audio_b64, # 챗봇 응답 텍스트 및 음성 전송
-                        "status": bot_tts_status, "user_text": user_text, # 챗봇 응답 상태 및 사용자 텍스트 전송
-                        "error_message": bot_tts_error, "error_code": bot_tts_code # 챗봇 응답 오류 메시지 및 코드 전송
+                        "type": "ai_response",
+                        "text": response,
+                        "audio": bot_audio_b64,
+                        "status": bot_tts_status,
+                        "user_text": user_text,
+                        "confidence": 0.85,  # 임시 기본값 (나중에 실제 STT confidence로 교체)
+                        "timestamp": datetime.now().isoformat(),
+                        "error_message": bot_tts_error,
+                        "error_code": bot_tts_code
                     }
                     await ws_engine.send_json(websocket, response_packet) # 챗봇 응답 전송
                     step8_time = time.time() - step8_start

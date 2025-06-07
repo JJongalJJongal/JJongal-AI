@@ -807,3 +807,122 @@ class StoryEngine:
         else:
             # 기본 분석 방식 사용
             return self.analyze_user_response(user_input)
+
+    def generate_enhanced_response(self, response_context: Dict) -> str:
+        """
+        Enhanced 모드에서 사용하는 응답 생성 (ChatBot A 호환)
+        
+        Args:
+            response_context: 응답 생성을 위한 컨텍스트
+                - user_input: 사용자 입력
+                - analysis: 분석 결과
+                - conversation_history: 대화 기록
+                - child_age: 아이 나이
+                - child_interests: 아이 관심사
+                - enhanced_mode: Enhanced 모드 여부
+                
+        Returns:
+            str: 생성된 응답
+        """
+        try:
+            user_input = response_context.get("user_input", "")
+            child_age = response_context.get("child_age", 5)
+            child_interests = response_context.get("child_interests", [])
+            conversation_history = response_context.get("conversation_history", [])
+            
+            logger.info(f"Enhanced 응답 생성: {user_input[:50]}...")
+            
+            # 기존 suggest_story_theme 메서드를 활용한 응답 생성
+            story_theme = self.suggest_story_theme(
+                conversation_history=conversation_history,
+                child_name="친구",  # 기본값
+                age_group=child_age,
+                interests=child_interests,
+                story_collection_prompt=user_input
+            )
+            
+            # 응답 생성 (이야기 주제를 자연스러운 대화로 변환)
+            if story_theme and story_theme.get("plot_summary"):
+                plot = story_theme["plot_summary"]
+                
+                # 연령대별 응답 조정
+                if child_age <= 7:
+                    response = f"우와! 정말 재미있는 이야기 같아! {plot[:100]}... 더 듣고 싶어!"
+                else:
+                    response = f"멋진 아이디어야! {plot[:150]}... 이런 모험은 어때?"
+                
+                return response
+            else:
+                # 기본 격려 응답
+                return "정말 흥미로운 이야기야! 더 자세히 들려줄 수 있어?"
+                
+        except Exception as e:
+            logger.error(f"Enhanced 응답 생성 중 오류: {e}")
+            return "미안해, 잠깐 생각할 시간이 필요해. 다시 말해줄래?"
+
+    def generate_contextual_response(self, user_input: str, analysis_result: Dict, conversation_history: List[Dict]) -> str:
+        """
+        기본 모드에서 사용하는 맥락적 응답 생성 (ChatBot A 호환)
+        
+        Args:
+            user_input: 사용자 입력
+            analysis_result: 분석 결과
+            conversation_history: 대화 기록
+            
+        Returns:
+            str: 생성된 응답
+        """
+        try:
+            logger.info(f"기본 응답 생성: {user_input[:50]}...")
+            
+            # 기존 analyze_user_response 결과를 활용한 응답 생성
+            keywords = analysis_result.get("keywords", [])
+            quality_score = analysis_result.get("quality_score", 0.5)
+            stage = analysis_result.get("stage", "character")
+            
+            # 단계별 응답 생성
+            stage_responses = {
+                "character": [
+                    "어떤 캐릭터가 나오면 좋을까?",
+                    "주인공은 누구로 할까?",
+                    "재미있는 친구들이 필요하겠어!"
+                ],
+                "setting": [
+                    "이야기가 어디서 일어나면 좋을까?",
+                    "어떤 곳에서 모험을 할까?",
+                    "배경이 중요해!"
+                ],
+                "problem": [
+                    "어떤 문제가 생기면 재미있을까?",
+                    "주인공이 해결해야 할 일이 뭘까?",
+                    "갈등이 있어야 흥미로워져!"
+                ],
+                "resolution": [
+                    "어떻게 해결하면 좋을까?",
+                    "해피엔딩으로 만들어보자!",
+                    "모든 문제가 잘 풀렸으면 좋겠어!"
+                ]
+            }
+            
+            # 키워드가 있으면 활용
+            if keywords:
+                keyword_str = ", ".join(keywords[:2])
+                response = f"{keyword_str}에 대한 이야기구나! "
+            else:
+                response = "흥미로운 이야기야! "
+            
+            # 단계별 질문 추가
+            stage_questions = stage_responses.get(stage, ["더 말해줄래?"])
+            response += random.choice(stage_questions)
+            
+            # 품질 점수에 따른 격려
+            if quality_score > 0.7:
+                response += " 정말 창의적이야!"
+            elif quality_score > 0.5:
+                response += " 좋은 아이디어네!"
+            
+            return response
+            
+        except Exception as e:
+            logger.error(f"기본 응답 생성 중 오류: {e}")
+            return "계속 이야기해줘! 더 듣고 싶어!"

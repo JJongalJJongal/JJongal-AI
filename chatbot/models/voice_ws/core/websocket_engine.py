@@ -6,7 +6,7 @@ Handles underlying WebSocket logic, message parsing, and custom exceptions.
 
 import json
 import asyncio
-from typing import Dict, Any, Optional, Union
+from typing import Dict, Any, Optional
 from fastapi import WebSocket, WebSocketDisconnect as FastAPIWebSocketDisconnect
 from fastapi.websockets import WebSocketState
 
@@ -143,11 +143,14 @@ class WebSocketEngine:
         Returns:
             전송 성공 여부
         """
+        from datetime import datetime
+        
         error_data = {
             "type": "error",
             "error_message": error_message,
             "error_code": error_code,
-            "status": "error"
+            "status": "error",
+            "timestamp": datetime.now().isoformat()
         }
         return await self.send_json(websocket, error_data)
 

@@ -144,9 +144,15 @@ async def audio_endpoint(
     interests: Optional[str] = Query(None),
 ):
     """WebSocket 오디오 처리 엔드포인트"""
+    logger.info(f"/ws/audio 엔드포인트 호출됨")
+    logger.info(f"요청 파라미터: child_name={child_name}, age={age}, interests={interests}")
+    logger.info(f"WebSocket 클라이언트: {websocket.client}")
+    
     if not await auth_processor.validate_connection(websocket):
+        logger.warning(f"인증 실패로 연결 거부")
         return
         
+    logger.info(f"인증 성공, audio_handler로 전달")
     await handle_audio_websocket(
         websocket,
         child_name,
