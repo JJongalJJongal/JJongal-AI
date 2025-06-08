@@ -482,11 +482,64 @@ class WorkflowOrchestrator:
             try:
                 # 대화 내용에서 이야기 요소 추출
                 messages = conversation_data.get("messages", []) # 대화 데이터에서 메시지 추출
+                
+                # 모든 메시지를 하나의 문자열로 합치기
+                user_messages = []
                 for message in messages:
-                    if message.get("role") == "user": # 사용자 메시지 확인
-                        # 사용자 메시지에서 이야기 요소 추출
-                        extracted = await self.chat_bot_a.extract_story_elements(message.get("content", ""))
-                        elements.extend(extracted) # 이야기 요소 추가
+                    if message.get("role") == "user": # 사용자 메시지만 추출
+                        user_messages.append(message.get("content", ""))
+                
+                if user_messages:
+                    # ChatBot A의 story_engine을 통한 분석
+                    combined_input = " ".join(user_messages)
+                    
+                    # StoryEngine의 analyze_input 메서드 사용
+                    analysis_result = self.chat_bot_a.story_engine.analyze_input(
+                        combined_input, 
+                        enhanced_mode=True,
+                        age_group=self.chat_bot_a.age_group
+                    )
+                    
+                    # 분석 결과를 StoryElement로 변환
+                    from .story_schema import StoryElement, ElementType
+                    
+                    # 키워드에서 요소 추출
+                    keywords = analysis_result.get("keywords", [])
+                    intent = analysis_result.get("intent", "")
+                    
+                    if keywords:
+                        # 캐릭터 요소 추출
+                        character_keywords = [k for k in keywords if any(char_word in k.lower() 
+                                            for char_word in ["공주", "토끼", "아이", "친구", "동물", "곰", "다람쥐"])]
+                        for keyword in character_keywords:
+                            elements.append(StoryElement(
+                                element_type=ElementType.CHARACTER,
+                                content=keyword,
+                                confidence_score=0.8,
+                                source_conversation="conversation_analysis"
+                            ))
+                        
+                        # 설정 요소 추출
+                        setting_keywords = [k for k in keywords if any(setting_word in k.lower() 
+                                          for setting_word in ["숲", "집", "학교", "바다", "하늘", "마을"])]
+                        for keyword in setting_keywords:
+                            elements.append(StoryElement(
+                                element_type=ElementType.SETTING,
+                                content=keyword,
+                                confidence_score=0.7,
+                                source_conversation="conversation_analysis"
+                            ))
+                        
+                        # 문제/주제 요소 추출
+                        if "모험" in intent or any("모험" in k for k in keywords):
+                            elements.append(StoryElement(
+                                element_type=ElementType.PROBLEM,
+                                content="모험을 떠나야 하는 상황",
+                                confidence_score=0.6,
+                                source_conversation="conversation_analysis"
+                            ))
+                        
+                self.logger.info(f"대화 분석으로 {len(elements)}개 요소 추출")
                         
             except Exception as e:
                 self.logger.warning(f"대화 데이터 분석 실패: {e}")

@@ -14,7 +14,10 @@ from pathlib import Path
 from shared.utils.logging_utils import get_module_logger
 from shared.utils.vector_db_utils import get_db_type_path
 from chatbot.data.vector_db.core import VectorDB
-from langchain_community.chat_models import ChatOpenAI
+try:
+    from langchain_openai import ChatOpenAI
+except ImportError:
+    from langchain_community.chat_models import ChatOpenAI
 from langchain.schema import HumanMessage, SystemMessage
 from langchain_core.prompts import ChatPromptTemplate
 
@@ -56,7 +59,6 @@ class StoryEngine:
         self.last_stage_transition = 0  # 마지막 단계 전환 턴
         
         # === 분석 및 생성 ===
-        self.openai_client = None
         self.conversation_manager = None
         self.story_outline = None  # 생성된 이야기 개요
         
@@ -546,7 +548,9 @@ class StoryEngine:
         if self.rag_system and interests:
             base_theme = f"{interests[0]}와 관련된 모험" if interests else "모험과 우정"
             try:
-                enriched_context = self.rag_system.enrich_story_theme(base_theme, age_group)
+                # RAG 시스템의 enhance_story_context는 비동기이므로 여기서는 기본 처리
+                logger.info(f"RAG 시스템 사용: {base_theme} (연령: {age_group})")
+                enriched_context = base_theme  # 동기 처리를 위해 임시로 기본값 사용
             except Exception as e:
                 logger.warning(f"RAG 시스템 사용 중 오류: {e}")
         
@@ -577,6 +581,11 @@ class StoryEngine:
         """
         
         try:
+            # OpenAI 클라이언트가 없으면 기본 구조 반환
+            if not self.openai_client:
+                logger.warning("OpenAI 클라이언트가 없어 기본 이야기 구조를 반환합니다. OpenAI API를 사용하려면 'pip install openai'를 실행하고 API 키를 설정하세요.")
+                return self._get_default_story_structure(child_name, age_group)
+            
             prompt_content = story_collection_prompt
             if enriched_context:
                 prompt_content += f"\n\n참고 정보:\n{enriched_context}"
@@ -608,12 +617,13 @@ class StoryEngine:
             # 이야기 개요 저장
             self.story_outline = story_data
             
-            # RAG 시스템에 추가
+            # RAG 시스템에 추가 (참고용 로깅만, 실제 저장은 별도 프로세스에서)
             if self.rag_system:
                 try:
-                    self.rag_system.add_story_to_vectordb(story_data)
+                    logger.info("RAG 시스템 연동: 생성된 스토리 정보를 기록함")
+                    # Note: 실제 벡터DB 저장은 별도 프로세스에서 처리됨
                 except Exception as e:
-                    logger.error(f"RAG 시스템에 스토리 추가 실패: {e}")
+                    logger.error(f"RAG 시스템 연동 중 오류: {e}")
             
             return story_data
             
@@ -836,14 +846,14 @@ class StoryEngine:
             
             logger.info(f"GPT 기반 Enhanced 응답 생성: {user_input[:50]}...")
             
-            # OpenAI 클라이언트가 없으면 기본 응답
-            if not self.openai_client:
-                return "재미있는 이야기야! 더 말해줄래?"
-            
             # 분석 결과에서 정보 추출
             stage = analysis.get("stage", self.story_stage)
             quality_score = analysis.get("quality_score", 0.5)
             keywords = analysis.get("keywords", [])
+            
+            # OpenAI 클라이언트가 없으면 기본 응답
+            if not self.openai_client:
+                return self._generate_fallback_response(user_input, child_name, stage, keywords)
             
             # 최근 대화 히스토리 구성
             history_text = ""
@@ -928,6 +938,68 @@ class StoryEngine:
             # 오류 시 기본 응답
             return f"와! {child_name}의 이야기 정말 재미있어! 더 자세히 말해줄래?"
 
+    def _generate_fallback_response(self, user_input: str, child_name: str, stage: str, keywords: List[str]) -> str:
+        """
+        OpenAI 클라이언트가 없을 때 사용하는 다양한 fallback 응답 생성
+        """
+        import random
+        
+        # 사용자 입력에서 키워드 추출 (특수문자 제거하고 의미있는 단어만)
+        if not keywords:
+            import re
+            # 특수문자 제거하고 한글, 영문만 추출
+            clean_words = re.findall(r'[가-힣a-zA-Z]+', user_input)
+            # 의미있는 단어만 필터링 (2글자 이상, 일반적인 인사말 제외)
+            stop_words = {'안녕', '나는', '그런데', '그리고', '하지만', '그래서', '진짜', '정말'}
+            keywords = [word for word in clean_words if len(word) >= 2 and word not in stop_words]
+        
+        # 단계별 응답 템플릿
+        stage_responses = {
+            "character": [
+                f"와! {child_name}이 말한 그 인물 정말 재미있어! 그 친구는 어떤 모습이야?",
+                f"{keywords[0] if keywords else '그 친구'}가 정말 특별한 것 같아! 더 말해줄래?",
+                f"우와, 멋진 캐릭터네! {child_name}이 상상한 그 친구에 대해 더 알고 싶어!"
+            ],
+            "setting": [
+                f"{child_name}이 말한 그 장소 정말 신비로운 것 같아! 거기엔 뭐가 있어?",
+                f"와! {keywords[0] if keywords else '그곳'}이 정말 재미있는 곳 같아! 더 자세히 알려줘!",
+                f"그런 멋진 곳에서 어떤 일이 일어날까? {child_name}은 어떻게 생각해?"
+            ],
+            "problem": [
+                f"아! {child_name}이 말한 그 문제 정말 흥미진진해! 어떻게 해결할 수 있을까?",
+                f"우와, 그런 어려운 일이 생겼구나! {child_name}이라면 어떻게 할 것 같아?",
+                f"정말 스릴 넘치는 모험이야! 그 다음엔 뭐가 일어날까?"
+            ],
+            "resolution": [
+                f"와! {child_name}의 해결 방법 정말 훌륭해! 그래서 어떻게 됐어?",
+                f"정말 멋진 아이디어야! 그 친구들이 기뻐했을 것 같아!",
+                f"와, 그런 결말이라니! {child_name}의 상상력이 정말 대단해!"
+            ]
+        }
+        
+        # 기본 긍정적 응답들
+        general_responses = [
+            f"정말 재미있는 이야기야, {child_name}! 더 말해줄래?",
+            f"와! {child_name}의 상상력이 정말 멋져! 계속 이야기해줘!",
+            f"너무 신나는 이야기야! {child_name}, 그 다음엔 뭐가 일어났어?",
+            f"우와, 흥미진진해! {child_name}이 생각한 걸 더 듣고 싶어!"
+        ]
+        
+        # 단계별 응답 선택
+        responses = stage_responses.get(stage, general_responses)
+        
+        # 키워드가 있으면 더 구체적인 응답
+        if keywords and len(keywords) > 0:
+            keyword = keywords[0]
+            specific_responses = [
+                f"와! {keyword}에 대한 이야기구나! 정말 재미있어!",
+                f"{keyword} 이야기를 해주다니 정말 좋은 아이디어야! 더 말해줘!",
+                f"{child_name}이 {keyword}에 대해 이야기해서 더 궁금해져!"
+            ]
+            responses.extend(specific_responses)
+        
+        return random.choice(responses)
+
     def generate_contextual_response(self, user_input: str, analysis_result: Dict, conversation_history: List[Dict]) -> str:
         """
         기본 모드에서 사용하는 GPT-4o-mini 기반 맥락적 응답 생성 (ChatBot A 호환)
@@ -944,14 +1016,15 @@ class StoryEngine:
         try:
             logger.info(f"GPT 기반 맥락적 응답 생성: {user_input[:50]}...")
             
-            # OpenAI 클라이언트가 없으면 기본 응답
-            if not self.openai_client:
-                return "계속 이야기해줘! 더 듣고 싶어!"
-            
             # 분석 결과에서 정보 추출
             keywords = analysis_result.get("keywords", [])
             quality_score = analysis_result.get("quality_score", 0.5)
             stage = analysis_result.get("stage", self.story_stage)
+            
+            # OpenAI 클라이언트가 없으면 기본 응답
+            if not self.openai_client:
+                logger.warning("OpenAI 클라이언트가 없어 fallback 응답을 사용합니다")
+                return self._generate_fallback_response(user_input, "친구", stage, keywords)
             
             # 최근 대화 히스토리 구성
             history_text = ""

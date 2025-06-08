@@ -187,14 +187,19 @@ class CCBIntegratedTest(unittest.IsolatedAsyncioTestCase):
         print("🤖 1단계: 부기 챗봇 기본 기능 테스트")
         print("="*50)
         
-        # 챗봇 인스턴스 생성
+        # 챗봇 인스턴스 생성 (Enhanced 모드 활성화)
         try:
             vector_db = VectorDB(persist_directory="chatbot/data/vector_db/main")
         except Exception as e:
             print(f"⚠️ VectorDB 초기화 실패, None으로 진행: {e}")
             vector_db = None
             
-        chatbot = ChatBotA(vector_db_instance=vector_db)
+        chatbot = ChatBotA(
+            vector_db_instance=vector_db,
+            use_langchain=True,
+            enhanced_mode=True,
+            enable_performance_tracking=True
+        )
         
         # 테스트 아이 정보
         child_name = "테스트"
@@ -211,6 +216,15 @@ class CCBIntegratedTest(unittest.IsolatedAsyncioTestCase):
         
         self.assertIsNotNone(greeting, "인사말이 생성되지 않았습니다.")
         print(f"✅ 인사말: {greeting}")
+        
+        # 시스템 상태 확인
+        system_status = chatbot.get_system_status()
+        print(f"🔧 시스템 상태:")
+        print(f"   - OpenAI 클라이언트: {'✅' if system_status.get('openai_client') else '❌'}")
+        print(f"   - Enhanced 모드: {'✅' if system_status.get('enhanced_mode') else '❌'}")
+        print(f"   - RAG 시스템: {'✅' if system_status.get('rag_system') else '❌'}")
+        print(f"   - 프롬프트 버전: {system_status.get('prompt_version', 'unknown')}")
+        print(f"   - 아이 정보 설정: {'✅' if system_status.get('child_info_set') else '❌'}")
         
         # 테스트 대화
         test_inputs = [
@@ -731,7 +745,7 @@ async def run_live_audio_test():
             response = await asyncio.wait_for(websocket.recv(), timeout=10.0)
             response_data = json.loads(response)
             
-            print("📥 응답 수신:")
+            print(" 응답 수신:")
             print(f"   사용자 음성: {response_data.get('user_text', '')}")
             print(f"   AI 응답: {response_data.get('text', '')}")
             

@@ -88,8 +88,10 @@ class ChatBotA:
         # OpenAI 클라이언트 초기화
         try:
             self.openai_client = initialize_client()
+            logger.info("OpenAI 클라이언트 초기화 성공")
         except Exception as e:
-            logger.error(f"OpenAI 클라이언트 초기화 실패: {e}")
+            logger.warning(f"OpenAI 클라이언트 초기화 실패: {e}")
+            logger.warning("fallback 모드로 동작합니다. 실제 GPT 응답을 원한다면 'pip install openai'를 실행하세요.")
             self.openai_client = None
         
         # RAG 시스템 설정
@@ -112,8 +114,25 @@ class ChatBotA:
     
     def _initialize_engines(self):
         """핵심 엔진들 초기화 (Enhanced)"""
-        # 대화 관리자
-        self.conversation = ConversationManager(self.token_limit)
+        # LangChain 기반 대화 관리자 (use_langchain가 True이고 OpenAI 클라이언트가 있을 때)
+        if self.use_langchain and self.openai_client:
+            try:
+                from .core.legacy_integration import LegacyIntegrationManager
+                self.conversation_manager = LegacyIntegrationManager(
+                    token_limit=self.token_limit,
+                    use_langchain=True,
+                    openai_client=self.openai_client,
+                    rag_system=self.rag_system,
+                    prompts=self.prompts
+                )
+                self.conversation = self.conversation_manager.conversation
+                logger.info("LangChain 기반 대화 엔진 초기화 완료")
+            except Exception as e:
+                logger.warning(f"LangChain 초기화 실패, 기본 모드로 전환: {e}")
+                self.conversation = ConversationManager(self.token_limit)
+        else:
+            # 기본 대화 관리자
+            self.conversation = ConversationManager(self.token_limit)
         
         # Enhanced 이야기 엔진
         self.story_engine = StoryEngine(
@@ -297,6 +316,21 @@ class ChatBotA:
         """Enhanced 맥락적 응답 생성"""
         conversation_history = self.conversation.get_recent_messages(5)
         
+        # LangChain을 사용할 수 있는 경우 우선 시도
+        if self.use_langchain and self.openai_client and hasattr(self.conversation_manager, 'get_enhanced_response'):
+            try:
+                response = self.conversation_manager.get_enhanced_response(
+                    user_input=user_input,
+                    child_name=self.child_name,
+                    age_group=self.age_group,
+                    interests=self.interests,
+                    chatbot_name=self.chatbot_name
+                )
+                logger.info("LangChain 기반 응답 생성 완료")
+                return response
+            except Exception as e:
+                logger.warning(f"LangChain 응답 생성 실패, fallback 모드로 전환: {e}")
+        
         if self.enhanced_mode:
             # Enhanced 프롬프트 시스템 사용
             response_context = {
@@ -360,6 +394,36 @@ class ChatBotA:
             "title": "임시 아이디어",
             "summary": "RAG를 통해 생성된 재미있는 모험 이야기"
         }
+
+    def suggest_story_theme(self) -> Dict:
+        """
+        대화 기록을 바탕으로 이야기 주제를 제안합니다.
+        """
+        try:
+            conversation_history = self.conversation.get_conversation_history()
+            
+            # StoryEngine의 suggest_story_theme 메서드 호출
+            story_theme = self.story_engine.suggest_story_theme(
+                conversation_history=conversation_history,
+                child_name=self.child_name,
+                age_group=self.age_group,
+                interests=self.interests,
+                story_collection_prompt="수집된 대화를 바탕으로 이야기 주제를 생성해주세요"
+            )
+            
+            return story_theme
+            
+        except Exception as e:
+            logger.error(f"이야기 주제 제안 중 오류: {e}")
+            return {
+                "title": f"{self.child_name}의 모험",
+                "theme": "우정과 모험",
+                "plot_summary": "더 많은 대화가 필요해!",
+                "educational_value": "상상력과 창의성",
+                "target_age": self.age_group,
+                "estimated_length": "짧음",
+                "key_scenes": []
+            }
 
     def reset_story(self):
         """스토리 데이터를 초기화합니다."""

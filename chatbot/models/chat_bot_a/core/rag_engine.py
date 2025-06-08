@@ -10,7 +10,10 @@ from typing import Dict, List, Any
 # LangChain imports
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.output_parsers import StrOutputParser
-from langchain_community.chat_models import ChatOpenAI
+try:
+    from langchain_openai import ChatOpenAI
+except ImportError:
+    from langchain_community.chat_models import ChatOpenAI
 
 
 # Project imports
@@ -39,7 +42,7 @@ class RAGSystem:
     def _initialize_chains(self):
         """LLM 체인을 초기화합니다."""
         try:
-            llm = ChatOpenAI(model_name="gpt-4-turbo", temperature=0.7)
+            llm = ChatOpenAI(model="gpt-4o-mini", temperature=0.7)
             
             # 스토리 컨텍스트 보강 체인 (기존 enrich_story_theme 대체)
             enrichment_template = self.prompts.get("rag_templates", {}).get(

@@ -7,7 +7,7 @@ services:
     image: ccb-ai:latest
     container_name: ccb-ai-app
     ports:
-      - "8000:8000" # 포트 포워딩 (Host:Container)
+      - "8001:8001" # 포트 포워딩 (Host:Container)
     environment:
       # 환경 변수는 .env 파일에서 로드
       - PYTHONPATH=/app # 파이썬 Module 검색 경로

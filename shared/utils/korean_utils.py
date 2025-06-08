@@ -23,9 +23,24 @@ def has_final_consonant(word: str) -> bool:
     # 한글이 아닌 경우 기본값 반환
     if not ord('가') <= ord(last_char) <= ord('힣'):
         return False
+    
+    # 실제 받침이 없는 자음들을 명시적으로 확인
+    # 한글 유니코드에서 종성(받침) 계산
+    char_code = ord(last_char) - ord('가')
+    jong_code = char_code % 28  # 종성(받침) 코드
+    
+    # 종성 코드가 0이면 받침이 없음
+    # 하지만 일부 특수한 경우를 추가로 확인
+    if jong_code == 0:
+        return False
+    
+    # 예외적으로 받침이 없다고 처리해야 할 문자들 (실제로는 거의 없음)
+    # 대부분의 경우 유니코드 계산이 정확함
+    no_final_exceptions = []  # '영'은 실제로 받침이 있음
+    if last_char in no_final_exceptions:
+        return False
         
-    # 받침 유무 확인
-    return (ord(last_char) - 0xAC00) % 28 > 0
+    return True
 
 
 def get_josa(word: str, josa_type: str) -> str:

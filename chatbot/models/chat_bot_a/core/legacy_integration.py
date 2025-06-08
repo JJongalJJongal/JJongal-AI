@@ -16,7 +16,7 @@ from .langchain_conversation_engine import LangChainConversationEngine
 from .story_engine import StoryEngine
 from .rag_engine import RAGSystem
 from ..processors import MessageProcessor, LanguageProcessor
-
+from shared.configs import load_chatbot_a_prompts
 from shared.utils.logging_utils import get_module_logger
 
 logger = get_module_logger(__name__)
@@ -268,23 +268,16 @@ class LegacyStoryAnalyzerAdapter:
         rag_engine = None
         if rag_system:
             try:
-                # 기존 RAG 시스템의 설정을 사용하여 새로운 RAG 엔진 생성
-                vector_db_path = None
-                if hasattr(rag_system, 'persist_directory') and rag_system.persist_directory: # VectorDB 경로 존재 여부 확인
-                    vector_db_path = str(rag_system.persist_directory) # VectorDB 경로
-                else:
-                    # 환경변수에서 경로 가져오기
-                    import os
-                    vector_db_path = os.getenv("VECTOR_DB_PATH", "/app/chatbot/data/vector_db") # VectorDB 경로
-                
-                rag_engine = RAGSystem( # RAG 엔진 생성
-                    openai_client=openai_client,
-                    vector_db_path=vector_db_path # VectorDB 경로
-                )
+                # 기존 RAG 시스템이 VectorDB라면 직접 사용
+                prompts = load_chatbot_a_prompts()
+                rag_engine = RAGSystem(rag_system, prompts)
+                logger.info("RAG 엔진 변환 완료")
             except Exception as e:
                 logger.warning(f"RAG 엔진 변환 실패: {e}")
         
-        self.engine = StoryEngine(openai_client, rag_engine)
+        # story_engine이 아닌 StoryEngine으로 수정
+        user_data = {}
+        self.engine = StoryEngine(user_data, openai_client=openai_client)
         
         # 레거시 호환성을 위한 속성들
         self.openai_client = openai_client
@@ -338,38 +331,28 @@ class LegacyIntegrationManager:
         self.rag_engine = None
         if rag_system:
             try:
-                # VectorDB 인스턴스에서 경로 추출
-                vector_db_path = None
-                if hasattr(rag_system, 'persist_directory') and rag_system.persist_directory: # VectorDB 경로 존재 여부 확인
-                    vector_db_path = str(rag_system.persist_directory) # VectorDB 경로
-                else:
-                    # 환경변수에서 경로 가져오기
-                    import os
-                    vector_db_path = os.getenv("VECTOR_DB_PATH", "/app/chatbot/data/vector_db") # VectorDB 경로
-                
-                self.rag_engine = RAGSystem( # RAG 엔진 생성    
-                    openai_client=openai_client,
-                    vector_db_path=vector_db_path # VectorDB 경로
-                )
-                logger.info(f"RAG 엔진 생성 완료: {vector_db_path}") # 로그 출력
+                # VectorDB 인스턴스에서 프롬프트와 함께 RAG 엔진 생성
+                prompts_data = prompts or load_chatbot_a_prompts()
+                self.rag_engine = RAGSystem(rag_system, prompts_data)
+                logger.info("RAG 엔진 생성 완료")
             except Exception as e:
                 logger.warning(f"RAG 엔진 생성 실패: {e}")
         
         # 어댑터들 초기화
         self.conversation = LegacyConversationManagerAdapter(
-            token_limit, use_langchain, openai_client, self.rag_engine # RAG 엔진 전달
+            token_limit, use_langchain, openai_client, self.rag_engine
         )
         
         self.formatter = LegacyMessageFormatterAdapter(
-            prompts or {}, None, None, None, "부기" # 프롬프트 딕셔너리 전달
+            prompts or {}, None, None, None, "부기"
         )
         
         self.collector = LegacyStoryCollectorAdapter(
-            openai_client, self.rag_engine # RAG 엔진 전달
+            openai_client, self.rag_engine
         )
         
         self.analyzer = LegacyStoryAnalyzerAdapter(
-            openai_client, rag_system # RAG 시스템 전달
+            openai_client, rag_system
         )
         
         logger.info(f"레거시 통합 매니저 초기화 완료 (LangChain: {use_langchain})")

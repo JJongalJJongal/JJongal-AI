@@ -253,15 +253,24 @@ class UnifiedMessageProcessor:
         return self._get_legacy_story_question(story_stage)
     
     def _get_legacy_story_question(self, story_stage: str) -> str:
-        """레거시 이야기 질문 생성"""
-        story_questions = self.prompts.get('story_prompting_questions', {})
-        current_stage_questions = story_questions.get(story_stage, [])
-        
-        if not current_stage_questions:
+        """실제 JSON 프롬프트의 단계별 질문 사용"""
+        try:
+            # shared.configs에서 프롬프트 로드
+            from shared.configs import load_chatbot_a_prompts
+            prompts = load_chatbot_a_prompts()
+            
+            story_questions = prompts.get('story_prompting_questions', {})
+            current_stage_questions = story_questions.get(story_stage, [])
+            
+            if not current_stage_questions:
+                return self.get_follow_up_question()
+            
+            question = random.choice(current_stage_questions)
+            return self._apply_korean_formatting(question)
+            
+        except Exception as e:
+            logger.error(f"JSON 프롬프트 질문 생성 실패: {e}")
             return self.get_follow_up_question()
-        
-        question = random.choice(current_stage_questions)
-        return self._apply_korean_formatting(question)
     
     def get_follow_up_question(self) -> str:
         """
@@ -282,15 +291,23 @@ class UnifiedMessageProcessor:
             except Exception as e:
                 logger.warning(f"중앙화된 후속 질문 사용 실패: {e}")
         
-        # 폴백: 기존 방식
-        questions = self.prompts.get('follow_up_questions', [
-            "더 자세히 이야기해 주세요.",
-            "그래서 어떻게 됐을까요?",
-            "정말 재미있네요! 계속 들려주세요."
-        ])
-        
-        question = random.choice(questions)
-        return self._apply_korean_formatting(question)
+        # 폴백: 실제 JSON 프롬프트 사용
+        try:
+            from shared.configs import load_chatbot_a_prompts
+            prompts = load_chatbot_a_prompts()
+            
+            questions = prompts.get('follow_up_questions', [
+                "더 자세히 이야기해 주세요.",
+                "그래서 어떻게 됐을까요?",
+                "정말 재미있네요! 계속 들려주세요."
+            ])
+            
+            question = random.choice(questions)
+            return self._apply_korean_formatting(question)
+            
+        except Exception as e:
+            logger.error(f"JSON 프롬프트 후속 질문 생성 실패: {e}")
+            return "더 자세히 말해줄 수 있어?"
     
     def get_encouragement(self) -> str:
         """
@@ -311,16 +328,24 @@ class UnifiedMessageProcessor:
             except Exception as e:
                 logger.warning(f"중앙화된 격려 문구 사용 실패: {e}")
         
-        # 폴백: 기존 방식
-        encouragements = self.prompts.get('encouragement_phrases', [
-            "와! 정말 좋은 생각이야!",
-            "멋진 아이디어네!",
-            "상상력이 정말 대단해!",
-            "더 이야기해줘!"
-        ])
-        
-        encouragement = random.choice(encouragements)
-        return self._apply_korean_formatting(encouragement)
+        # 폴백: 실제 JSON 프롬프트 사용
+        try:
+            from shared.configs import load_chatbot_a_prompts
+            prompts = load_chatbot_a_prompts()
+            
+            encouragements = prompts.get('encouragement_phrases', [
+                "와! 정말 좋은 생각이야!",
+                "멋진 아이디어네!",
+                "상상력이 정말 대단해!",
+                "더 이야기해줘!"
+            ])
+            
+            encouragement = random.choice(encouragements)
+            return self._apply_korean_formatting(encouragement)
+            
+        except Exception as e:
+            logger.error(f"JSON 프롬프트 격려 문구 생성 실패: {e}")
+            return "와! 정말 좋은 생각이야!"
     
     def get_stage_transition_message(self, story_stage: str) -> str:
         """
