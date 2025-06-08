@@ -58,23 +58,50 @@ async def handle_audio_websocket(
         await websocket.accept()
         logger.info(f"오디오 WebSocket 연결 수락: {client_id} ({child_name}, {age}세)")
         
-        # ChatBot A 인스턴스 생성 및 관리 (ConnectionEngine 사용)
-        chatbot_a = ChatBotA(
-            child_name=child_name,
-            age_group=age,
-            interests=[item.strip() for item in interests_str.split(",")] if interests_str else [],
-            enhanced_mode=True
-        )
+        # VectorDB 인스턴스 생성 (ChatBotA에 필요)
+        try:
+            from chatbot.data.vector_db.core import VectorDB
+            import os
+            
+            # .env에서 VectorDB 경로 읽기 (통일된 환경변수 사용)
+            chroma_base = os.getenv("CHROMA_DB_PATH", "chatbot/data/vector_db")
+            vector_db_path = os.path.join(chroma_base, "main")  # main DB 사용
+            logger.info(f"VectorDB 경로 환경변수: {vector_db_path}")
+            
+            # VectorDB 초기화
+            vector_db = VectorDB(
+                persist_directory=vector_db_path,
+                embedding_model="nlpai-lab/KURE-v1",
+                use_hybrid_mode=True,
+                memory_cache_size=1000,
+                enable_lfu_cache=True
+            )
+            logger.info(f"VectorDB 초기화 완료: {vector_db_path}")
         
-        # ChatBot A 인스턴스 추가 
-        connection_engine.add_client(client_id, {
-            "websocket": websocket,
-            "chatbot_a": chatbot_a,
-            "child_name": child_name,
-            "age": age,
-            "interests": [item.strip() for item in interests_str.split(",")] if interests_str else [],
-            "last_activity": time.time()
-        })
+            # ChatBot A 인스턴스 생성 및 관리 (ConnectionEngine 사용)
+            chatbot_a = ChatBotA(
+                vector_db_instance=vector_db,
+                token_limit=10000,
+                use_langchain=True,
+                legacy_compatibility=True,
+                enhanced_mode=True,
+                enable_performance_tracking=True
+            )
+            
+            chatbot_a.update_child_info(child_name=child_name, age=age, interests=[item.strip() for item in interests_str.split(",")] if interests_str else [])
+            
+            # ChatBot A 인스턴스 추가 
+            connection_engine.add_client(client_id, {
+                "websocket": websocket,
+                "chatbot_a": chatbot_a,
+                "child_name": child_name,
+                "age": age,
+                "interests": [item.strip() for item in interests_str.split(",")] if interests_str else [],
+                "last_activity": time.time()
+            })
+        except Exception as e:
+            logger.warning(f"ChatBotA 초기화 실패: {e}, None으로 진행")
+            raise
         
         # 연결 상태 전송
         await ws_engine.send_status(websocket, "connected", f"안녕 {child_name}! 부기와 함께 재미있는 이야기를 만들어보자!")

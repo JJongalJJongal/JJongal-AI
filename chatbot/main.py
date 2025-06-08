@@ -54,7 +54,34 @@ class EnhancedChatBotSystem:
         # Enhanced 챗봇들 초기화
         logger.info(f"Enhanced 챗봇 시스템 초기화 시작 - Mode: {'Enhanced' if enhanced_mode else 'Basic'}")
         
+        # VectorDB 인스턴스 생성 (ChatBotA에 필요)
+        try:
+            from chatbot.data.vector_db.core import VectorDB
+            import os
+            
+            # .env에서 VectorDB 경로 읽기 (통일된 환경변수 사용)
+            chroma_base = os.getenv("CHROMA_DB_PATH", "chatbot/data/vector_db")
+            vector_db_path = os.path.join(chroma_base, "main")  # main DB 사용
+            logger.info(f"VectorDB 경로 환경변수: {vector_db_path}")
+            
+            # VectorDB 초기화
+            vector_db = VectorDB(
+                persist_directory=vector_db_path,
+                embedding_model="nlpai-lab/KURE-v1",
+                use_hybrid_mode=True,
+                memory_cache_size=1000,
+                enable_lfu_cache=True
+            )
+            logger.info(f"VectorDB 초기화 완료: {vector_db_path}")
+        except Exception as e:
+            logger.warning(f"VectorDB 초기화 실패: {e}, None으로 진행")
+            vector_db = None
+
         self.bugi = ChatBotA(
+            vector_db_instance=vector_db,
+            token_limit=10000,
+            use_langchain=True,
+            legacy_compatibility=True,
             enhanced_mode=enhanced_mode,
             enable_performance_tracking=enable_performance_tracking
         )  # Enhanced 부기 (Chat-bot A)
