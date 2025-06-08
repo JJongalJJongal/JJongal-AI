@@ -13,6 +13,9 @@ from pathlib import Path
 from typing import List, Dict, Any, Optional, Tuple
 from dotenv import load_dotenv
 import subprocess
+import warnings
+import librosa
+import soundfile as sf
 
 from shared.utils.logging_utils import get_module_logger
 from elevenlabs import ElevenLabs
@@ -79,11 +82,11 @@ class VoiceCloningProcessor:
         self.max_sample_duration = 30  # 최대 샘플 길이 (초)
         self.min_sample_duration = 3   # 최소 샘플 길이 (초)
         
-        # 품질 기준 (테스트용 완화된 기준)
-        self.min_snr_db = 15.0  # 최소 SNR 15dB (테스트용 완화)
-        self.min_quality_score = 0.6  # 최소 품질 점수 60% (테스트용 완화)
-        self.max_noise_level = 0.25  # 최대 노이즈 레벨 25% (테스트용 완화)
-        self.min_sample_rate = 8000  # 최소 샘플 레이트 8kHz (테스트용 완화)
+        # 품질 기준 (테스트용 더 완화된 기준)
+        self.min_snr_db = 10.0  # 최소 SNR 10dB (더욱 완화)
+        self.min_quality_score = 0.45  # 최소 품질 점수 45% (더욱 완화)
+        self.max_noise_level = 0.35  # 최대 노이즈 레벨 35% (더욱 완화)
+        self.min_sample_rate = 8000  # 최소 샘플 레이트 8kHz
         self.preferred_sample_rate = 44100  # 권장 샘플 레이트 44.1kHz
         
         # 사용자별 음성 데이터 관리
@@ -120,19 +123,44 @@ class VoiceCloningProcessor:
             import time
             timestamp = int(time.time())
             
-            # 오디오 형식 감지
+            # 오디오 형식을 WAV로 통일 (최적 호환성)
+            audio_file_path = user_audio_dir / f"sample_{timestamp}.wav"
+            
+            # WAV 형식이 아닌 경우 변환 후 저장
             if audio_data[:4] == b'RIFF' and audio_data[8:12] == b'WAVE':
-                extension = '.wav'
-            elif audio_data[:3] == b'ID3' or (audio_data[0:2] == b'\xff\xfb') or (audio_data[0:2] == b'\xff\xf3'):
-                extension = '.mp3'
+                # 이미 WAV 형식
+                with open(audio_file_path, 'wb') as f:
+                    f.write(audio_data)
             else:
-                extension = '.wav'  # 기본값
-            
-            audio_file_path = user_audio_dir / f"sample_{timestamp}{extension}"
-            
-            # 오디오 파일 저장
-            with open(audio_file_path, 'wb') as f:
-                f.write(audio_data)
+                # 다른 형식은 임시 파일로 저장 후 WAV로 변환
+                temp_file_path = user_audio_dir / f"temp_{timestamp}.raw"
+                with open(temp_file_path, 'wb') as f:
+                    f.write(audio_data)
+                
+                try:
+                    # librosa로 로드 후 WAV로 저장
+                    with warnings.catch_warnings():
+                        warnings.simplefilter("ignore")
+                        y, sr = librosa.load(str(temp_file_path), sr=None)
+                    
+                    # WAV 형식으로 저장
+                    if LIBROSA_AVAILABLE and sf is not None:
+                        sf.write(str(audio_file_path), y, sr)
+                    else:
+                        # soundfile이 없으면 원본 그대로 저장
+                        with open(audio_file_path, 'wb') as f:
+                            f.write(audio_data)
+                    
+                    # 임시 파일 제거
+                    os.remove(temp_file_path)
+                    
+                except Exception as conversion_error:
+                    logger.warning(f"WAV 변환 실패, 원본 형식으로 저장: {conversion_error}")
+                    with open(audio_file_path, 'wb') as f:
+                        f.write(audio_data)
+                    # 임시 파일이 있으면 제거
+                    if temp_file_path.exists():
+                        os.remove(temp_file_path)
             
             # RNNoise 노이즈 제거 적용
             denoised_path = None
@@ -224,7 +252,10 @@ class VoiceCloningProcessor:
             
             # 1. 오디오 파일을 16kHz PCM으로 변환 (RNNoise 요구사항)
             try:
-                y, sr = librosa.load(str(audio_file_path), sr=16000)
+                # WAV 파일 최적화 로딩 (경고 억제)
+                with warnings.catch_warnings():
+                    warnings.simplefilter("ignore")
+                    y, sr = librosa.load(str(audio_file_path), sr=16000)
                 
                 # 16-bit PCM으로 변환
                 y_int16 = (y * 32767).astype(np.int16)
@@ -402,8 +433,10 @@ class VoiceCloningProcessor:
             return quality_analysis
         
         try:
-            # librosa로 오디오 로드
-            y, sr = librosa.load(str(audio_file_path), sr=None)
+            # librosa로 오디오 로드 (WAV 최적화, 경고 억제)
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore")
+                y, sr = librosa.load(str(audio_file_path), sr=None)
             quality_analysis["sample_rate"] = sr
             quality_analysis["duration_seconds"] = len(y) / sr
             quality_analysis["analysis_method"] = "advanced"
@@ -548,9 +581,9 @@ class VoiceCloningProcessor:
         size_score = np.clip(file_size_kb / 100.0, 0.0, 1.0)  # 100KB 기준
         score += size_score * 0.1
         
-        # 클리핑 패널티
+        # 클리핑 패널티 
         if analysis.get("has_clipping", False):
-            score *= 0.7
+            score *= 0.85  # 85%
         
         return float(np.clip(score, 0.0, 1.0))
     
@@ -606,10 +639,11 @@ class VoiceCloningProcessor:
                 reasons.append(f"노이즈 레벨 과다 ({quality_analysis['noise_level']:.2f} > {self.max_noise_level})")
                 recommendations.append("배경 소음이 없는 조용한 곳에서 녹음해주세요")
             
-            # 클리핑 체크
-            if quality_analysis["has_clipping"]:
-                reasons.append("오디오 클리핑 감지 (너무 큰 소리)")
-                recommendations.append("마이크 볼륨을 줄이거나 조금 더 멀리서 말해주세요")
+            # 클리핑 체크 (더 관대하게 - 심각한 클리핑만 차단)
+            clipping_ratio = quality_analysis.get("clipping_ratio", 0.0)
+            if quality_analysis["has_clipping"] and clipping_ratio > 0.1:  # 10% 이상 클리핑된 경우만
+                reasons.append(f"심각한 오디오 클리핑 감지 (클리핑 비율: {clipping_ratio:.1%})")
+                recommendations.append("마이크 볼륨을 줄이거나 조금 더 멀리서 말해줘!")
         
         # 종합 품질 점수 체크 (강화된 기준)
         if quality_analysis["quality_score"] < self.min_quality_score:

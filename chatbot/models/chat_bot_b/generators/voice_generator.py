@@ -5,6 +5,15 @@ ElevenLabs API를 사용한 챕터별 음성 생성
 WebSocket 실시간 스트리밍 지원
 """
 
+# VoiceGenerator: 한국어 동화 최적화 ElevenLabs TTS 생성기
+# 
+# 최적화 설정:
+# - Model: eleven_turbo_v2_5 (한국어 지원 + 고품질 + 저지연 250-300ms)
+# - Voice Settings: 동화 캐릭터별 맞춤 설정 (stability, similarity_boost, style)
+# - Text Processing: 한국어 감정 표현 최적화 + ElevenLabs 프롬프팅 가이드 적용
+# - Audio Format: 44.1kHz WAV (고품질) + 스트리밍 최적화
+# - Character Mapping: 내레이터, 아이, 어른, 판타지 캐릭터별 전용 음성
+
 import uuid
 import asyncio
 import json
@@ -27,7 +36,7 @@ class VoiceGenerator(BaseGenerator):
     def __init__(self, 
                  elevenlabs_api_key: str = None,
                  voice_id: str = "AW5wrnG1jVizOYY7R1Oo",  # Jiyoung (기본 내레이터 음성)
-                 model_id: str = "eleven_multilingual_v2", # 기본 모델 ID (한국어 지원)
+                 model_id: str = "eleven_turbo_v2_5", # 한국어 지원 + 고품질 + 저지연 (250-300ms)
                  voice_settings: Dict[str, float] = None, # 음성 설정 (stability, similarity_boost, style, use_speaker_boost)
                  temp_storage_path: str = "output/temp/audio", # 임시 저장 경로
                  max_retries: int = 3, # 최대 재시도 횟수
@@ -49,12 +58,12 @@ class VoiceGenerator(BaseGenerator):
         self.model_id = model_id
         self.temp_storage_path = Path(temp_storage_path)
         
-        # 기본 음성 설정
+        # 동화 최적화 음성 설정 (ElevenLabs 공식 가이드 기반)
         self.voice_settings = voice_settings or {
-            "stability": 0.5, # 안정성 (0.0-1.0)
-            "similarity_boost": 0.75, # 유사성 증가 (0.0-1.0)
-            "style": 0.2, # 스타일 (0.0-1.0)
-            "use_speaker_boost": True # 스피커 부스트 (True/False)
+            "stability": 0.6,  # 동화 내레이션: 안정성 중시 (0.5 → 0.6)
+            "similarity_boost": 0.8,  # 명확성 강화 (0.75 → 0.8)  
+            "style": 0.0,  # 스타일 과장 비활성화 (안정성 향상)
+            "use_speaker_boost": True  # 화자 특성 강화
         }
         
         # 캐릭터별 음성 매핑 (캐릭터명 -> 음성 ID)
@@ -70,43 +79,43 @@ class VoiceGenerator(BaseGenerator):
             "fantasy": "xi3rF0t7dg7uN2M0WUhr",  # Yuna (판타지 캐릭터)
         }
         
-        # 캐릭터 타입별 음성 설정
+        # 동화 캐릭터별 최적화 음성 설정
         self.character_voice_settings = {
             "narrator": {
-                "stability": 0.5, # 안정성 (0.0-1.0)
-                "similarity_boost": 0.75, # 유사성 증가 (0.0-1.0)
-                "style": 0.4, # 스타일 (0.0-1.0)
-                "use_speaker_boost": True # 스피커 부스트 (True/False)
+                "stability": 0.65,  # 내레이터: 높은 안정성 (일관된 톤)
+                "similarity_boost": 0.85,  # 명확한 발음
+                "style": 0.0,  # 과장 없는 자연스러운 스타일
+                "use_speaker_boost": True
             },
             "child": {
-                "stability": 0.3, # 안정성 (0.0-1.0)
-                "similarity_boost": 0.6, # 유사성 증가 (0.0-1.0)
-                "style": 0.3, # 스타일 (0.0-1.0)
-                "use_speaker_boost": True # 스피커 부스트 (True/False)
+                "stability": 0.45,  # 아이: 더 다양한 감정 표현
+                "similarity_boost": 0.75,  # 자연스러운 아이 목소리
+                "style": 0.1,  # 약간의 활기찬 스타일
+                "use_speaker_boost": True
             },
             "adult_male": {
-                "stability": 0.6, # 안정성 (0.0-1.0)
-                "similarity_boost": 0.75, # 유사성 증가 (0.0-1.0)
-                "style": 0.3, # 스타일 (0.0-1.0)
-                "use_speaker_boost": True # 스피커 부스트 (True/False)
+                "stability": 0.7,  # 어른 남성: 신뢰감 있는 안정성
+                "similarity_boost": 0.8,  # 명확한 발음
+                "style": 0.0,  # 자연스러운 스타일
+                "use_speaker_boost": True
             },
             "adult_female": {
-                "stability": 0.5, # 안정성 (0.0-1.0)
-                "similarity_boost": 0.75, # 유사성 증가 (0.0-1.0)
-                "style": 0.3, # 스타일 (0.0-1.0)
-                "use_speaker_boost": True # 스피커 부스트 (True/False)
+                "stability": 0.6,  # 어른 여성: 따뜻한 톤
+                "similarity_boost": 0.8,  # 명확한 발음
+                "style": 0.0,  # 자연스러운 스타일
+                "use_speaker_boost": True
             },
             "fantasy": {
-                "stability": 0.3, # 안정성 (0.0-1.0)
-                "similarity_boost": 0.6, # 유사성 증가 (0.0-1.0)
-                "style": 0.3, # 스타일 (0.0-1.0)
-                "use_speaker_boost": True # 스피커 부스트 (True/False)
+                "stability": 0.4,  # 판타지: 창의적이고 다채로운 표현
+                "similarity_boost": 0.7,  # 캐릭터 특성 유지
+                "style": 0.2,  # 약간의 극적 스타일
+                "use_speaker_boost": True
             },
-            "grandma": {
-                "stability": 0.5, # 안정성 (0.0-1.0)
-                "similarity_boost": 0.75, # 유사성 증가 (0.0-1.0)
-                "style": 0.3, # 스타일 (0.0-1.0)
-                "use_speaker_boost": True # 스피커 부스트 (True/False)
+            "grandpa": {
+                "stability": 0.75,  # 할아버지: 매우 안정적이고 차분한 톤
+                "similarity_boost": 0.85,  # 명확한 발음
+                "style": 0.0,  # 자연스러운 스타일
+                "use_speaker_boost": True
             }
         }
         
@@ -514,34 +523,73 @@ class VoiceGenerator(BaseGenerator):
         return result
     
     def _prepare_text_for_speech(self, text: str, speaker_type: str = "narrator") -> str:
-        """화자 타입에 맞게 텍스트를 음성 생성용으로 준비"""
+        """한국어 동화 최적화 텍스트 전처리 (ElevenLabs 감정 인식 활용)"""
         
         # 기본 텍스트 정리
         text = self._clean_text_for_speech(text)
         
-        # 화자 타입별 텍스트 조정
+        # 동화 캐릭터별 자연스러운 감정 톤 적용 (ElevenLabs 프롬프팅 가이드 적용)
         if speaker_type == "child":
-            # 아이 캐릭터: 더 활기찬 표현
-            text = text.replace(".", "!")
-            text = text.replace("요.", "요!")
+            # 아이: 호기심 많고 순수한 톤
+            if "?" in text:
+                text = f"{text} (궁금해하며)"
+            elif "!" in text:
+                text = f"{text} (신나게)"
+            else:
+                text = f"{text} (밝은 목소리로)"
+                
+        elif speaker_type == "adult_male":
+            # 어른 남성: 든든하고 지혜로운 톤
+            if "?" in text:
+                text = f"{text} (부드럽게 물으며)"
+            else:
+                text = f"{text} (차분하고 든든하게)"
+                
+        elif speaker_type == "adult_female":
+            # 어른 여성: 따뜻하고 포근한 톤
+            if "?" in text:
+                text = f"{text} (다정하게 물으며)"
+            else:
+                text = f"{text} (따뜻하고 부드럽게)"
+                
         elif speaker_type == "fantasy":
-            # 판타지 캐릭터: 신비로운 느낌 추가
-            text = text.replace("말했습니다", "속삭였습니다")
+            # 판타지: 신비롭고 매력적인 톤
+            if "마법" in text or "요술" in text:
+                text = f"{text} (신비롭게)"
+            elif "!" in text:
+                text = f"{text} (흥미진진하게)"
+            else:
+                text = f"{text} (신비한 목소리로)"
+                
+        elif speaker_type == "grandpa":
+            # 할아버지: 지혜롭고 자상한 톤
+            text = f"{text} (자상하고 지혜롭게)"
+            
+        elif speaker_type == "narrator":
+            # 내레이터: 동화책을 읽어주는 따뜻한 톤
+            if "옛날" in text or "예전" in text:
+                text = f"{text} (이야기를 시작하며)"
+            elif "그래서" in text or "그러나" in text:
+                text = f"{text} (이야기를 이어가며)"
+            elif "끝" in text or "마지막" in text:
+                text = f"{text} (이야기를 마무리하며)"
+            else:
+                text = f"{text} (동화책을 읽어주듯이)"
         
-        # ElevenLabs 텍스트 길이 제한 확인
-        if len(text) > 5000:
-            logger.warning(f"텍스트가 너무 깁니다 ({len(text)}자). 5000자로 자릅니다.")
-            text = text[:4997] + "..."
+        # ElevenLabs Turbo v2.5 텍스트 길이 제한 (40,000자)
+        if len(text) > 39000:
+            logger.warning(f"텍스트가 너무 깁니다 ({len(text)}자). 39000자로 자릅니다.")
+            text = text[:38997] + "..."
         
         return text
     
     def _clean_text_for_speech(self, text: str) -> str:
-        """음성 생성을 위한 텍스트 정리"""
+        """한국어 동화 음성 생성을 위한 텍스트 정리"""
         
         # 기본 정리
         text = text.strip()
         
-        # 특수 문자 처리
+        # 마크다운 및 특수 문자 처리
         replacements = {
             "**": "",  # 마크다운 볼드 제거
             "*": "",   # 마크다운 이탤릭 제거
@@ -549,18 +597,42 @@ class VoiceGenerator(BaseGenerator):
             "#": "",   # 해시태그 제거
             "`": "",   # 백틱 제거
             "---": ".",  # 구분선을 마침표로
-            "...": ".",  # 말줄임표 정리
+            "…": ".",   # 말줄임표 정리
+            "...": ".",  # 영문 말줄임표 정리
+            "~": "",    # 물결표 제거
+            "^": "",    # 캐럿 제거
+            "[": "",    # 대괄호 제거
+            "]": "",    
+            "{": "",    # 중괄호 제거
+            "}": "",
         }
         
         for old, new in replacements.items():
             text = text.replace(old, new)
         
-        # 연속된 공백 정리
+        # 한국어 동화 특화 정리
         import re
+        
+        # 연속된 공백 정리
         text = re.sub(r'\s+', ' ', text)
         
         # 연속된 마침표 정리
         text = re.sub(r'\.{2,}', '.', text)
+        
+        # 한국어 문장 부호 정리
+        text = re.sub(r'[，、]', ',', text)  # 쉼표 통일
+        text = re.sub(r'[。．]', '.', text)  # 마침표 통일
+        text = re.sub(r'[？]', '?', text)   # 물음표 통일
+        text = re.sub(r'[！]', '!', text)   # 느낌표 통일
+        
+        # 연속된 문장 부호 정리
+        text = re.sub(r'[,]{2,}', ',', text)
+        text = re.sub(r'[!]{2,}', '!', text)
+        text = re.sub(r'[?]{2,}', '?', text)
+        
+        # 문장 끝 정리 (마침표 없이 끝나는 문장에 마침표 추가)
+        if text and not text.endswith(('.', '!', '?', ',')):
+            text += '.'
         
         return text.strip()
     
@@ -573,12 +645,14 @@ class VoiceGenerator(BaseGenerator):
         """HTTP API를 사용한 단일 오디오 생성"""
         
         try:
-            # API 요청 데이터
+            # API 요청 데이터 (한국어 동화 최적화)
             data = {
                 "text": text,
                 "model_id": model_id,
                 "voice_settings": voice_settings,
-                "output_format": "wav_44100"
+                "output_format": "wav_44100",  # 고품질 44.1kHz WAV 포맷
+                "optimize_streaming_latency": 2,  # 스트리밍 최적화 (0-4)
+                "apply_text_normalization": True  # 한국어 텍스트 정규화 활성화
             }
             
             # ElevenLabs API 호출
@@ -719,7 +793,7 @@ class VoiceGenerator(BaseGenerator):
         
         try:
             # WebSocket URI 구성
-            model_id = "eleven_flash_v2_5"  # 낮은 지연시간을 위한 모델
+            model_id = "eleven_turbo_v2_5"  # 한국어 지원 + 고품질 + 저지연 (250-300ms)
             uri = f"wss://api.elevenlabs.io/v1/text-to-speech/{voice_id}/stream-input?model_id={model_id}"
             
             # 오디오 파일 경로 설정
@@ -843,7 +917,7 @@ class VoiceGenerator(BaseGenerator):
                 text=text,
                 voice_id=voice_id,
                 voice_settings=voice_settings,
-                model_id="eleven_multilingual_v2",
+                model_id="eleven_turbo_v2_5",
                 filename_prefix=filename_prefix
             )
             return fallback_path, {"websocket_fallback": True, "chunks_received": 0, "total_bytes": 0}
