@@ -55,6 +55,10 @@ async def handle_audio_websocket(
         
         logger.info(f"오디오 WebSocket 핸들러 시작: {client_id} ({child_name}, {age}세)") # 로깅
         
+        # 즉시 연결 중 메시지 전송 (타임아웃 방지)
+        await ws_engine.send_status(websocket, "partial", f"안녕 {child_name}! 부기가 준비중이라 조금만 기다려줘!")
+        logger.info(f"초기화 메시지 전송 완료: {client_id}")
+        
         # VectorDB 인스턴스 생성 (ChatBotA에 필요)
         try:
             from chatbot.data.vector_db.core import VectorDB
@@ -151,7 +155,14 @@ async def handle_audio_websocket(
                                             logger.debug(f"[AUDIO_END] 임시 파일 생성: {temp_file_path}")
                                             
                                             # STT 처리
-                                            stt_result = await audio_processor.speech_to_text(temp_file_path)
+                                            text, error_msg, error_code = await audio_processor.transcribe_audio(temp_file_path)
+                                            
+                                            # STT 결과를 기존 형식에 맞게 변환
+                                            if text and not error_msg:
+                                                stt_result = {"text": text, "confidence": 0.95}  # confidence는 기본값
+                                            else:
+                                                logger.error(f"[STT] 오류 발생: {error_msg} (오류 코드: {error_code})")
+                                                stt_result = None
                                             
                                             if stt_result and stt_result.get("text"):
                                                 user_text = stt_result["text"].strip()
@@ -205,9 +216,9 @@ async def handle_audio_websocket(
                                                         if send_success:
                                                             logger.info(f"[STORY_READY] 이야기 준비 완료 메시지 전송 완료: {client_id}")
                                                         
-                                                        # === 꼬기(ChatBot B) 자동 호출 ===
+                                                        # === 꼬기(ChatBot B) 자동 호출 (WorkflowOrchestrator 사용) ===
                                                         try:
-                                                            await handle_automatic_story_generation(
+                                                            story_id = await handle_orchestrator_story_generation(
                                                                 websocket=websocket,
                                                                 client_id=client_id,
                                                                 chatbot_a=chatbot_a,
@@ -217,6 +228,16 @@ async def handle_audio_websocket(
                                                                 ws_engine=ws_engine,
                                                                 connection_engine=connection_engine
                                                             )
+                                                            
+                                                            # story_id를 프론트엔드에 전송 (status 체크용)
+                                                            await ws_engine.send_json(websocket, {
+                                                                "type": "story_id_assigned",
+                                                                "story_id": story_id,
+                                                                "message": "동화 생성이 시작되었어요! 잠시만 기다려주세요.",
+                                                                "status_check_url": f"/api/v1/stories/{story_id}/completion",
+                                                                "timestamp": datetime.now().isoformat()
+                                                            })
+                                                            
                                                         except Exception as story_gen_error:
                                                             logger.error(f"[STORY_GEN] 자동 동화 생성 중 오류: {story_gen_error}")
                                                             await ws_engine.send_error(websocket, f"동화 생성 중 오류가 발생했습니다: {str(story_gen_error)}", "story_generation_failed")
@@ -311,9 +332,9 @@ async def handle_audio_websocket(
                             elif control_message.get("type") == "conversation_finish":
                                 logger.info(f"[CONVERSATION_FINISH] 사용자가 대화 완료 요청: {client_id}")
                                 
-                                # === 꼬기(ChatBot B) 자동 호출 ===
+                                # === 꼬기(ChatBot B) 자동 호출 (WorkflowOrchestrator 사용) ===
                                 try:
-                                    await handle_automatic_story_generation(
+                                    story_id = await handle_orchestrator_story_generation(
                                         websocket=websocket,
                                         client_id=client_id,
                                         chatbot_a=chatbot_a,
@@ -323,6 +344,16 @@ async def handle_audio_websocket(
                                         ws_engine=ws_engine,
                                         connection_engine=connection_engine
                                     )
+                                    
+                                    # story_id를 프론트엔드에 전송 (status 체크용)
+                                    await ws_engine.send_json(websocket, {
+                                        "type": "story_id_assigned",
+                                        "story_id": story_id,
+                                        "message": "동화 생성이 시작되었어요! 잠시만 기다려주세요.",
+                                        "status_check_url": f"/api/v1/stories/{story_id}/completion",
+                                        "timestamp": datetime.now().isoformat()
+                                    })
+                                    
                                 except Exception as story_gen_error:
                                     logger.error(f"[STORY_GEN] 수동 동화 생성 중 오류: {story_gen_error}")
                                     await ws_engine.send_error(websocket, f"동화 생성 중 오류가 발생했습니다: {str(story_gen_error)}", "story_generation_failed")
@@ -400,6 +431,90 @@ async def handle_audio_websocket(
         logger.info(f"오디오 WebSocket 연결 정리 시작: {client_id}")
         await connection_engine.handle_disconnect(client_id)
         logger.info(f"오디오 WebSocket 연결 정리 완료: {client_id}")
+
+async def handle_orchestrator_story_generation(
+    websocket: WebSocket,
+    client_id: str,
+    chatbot_a,
+    child_name: str,
+    age: int,
+    interests_list: list,
+    ws_engine: WebSocketEngine,
+    connection_engine: ConnectionEngine
+) -> str:
+    """
+    WorkflowOrchestrator를 사용한 동화 생성 (REST API 연동)
+    
+    Returns:
+        str: 생성된 story_id
+    """
+    logger.info(f"[ORCHESTRATOR] WorkflowOrchestrator를 통한 동화 생성 시작: {client_id}")
+    
+    try:
+        # 1. WorkflowOrchestrator 가져오기
+        from chatbot.app import orchestrator
+        from chatbot.workflow.story_schema import ChildProfile
+        
+        if not orchestrator:
+            raise RuntimeError("WorkflowOrchestrator가 초기화되지 않았습니다")
+        
+        # 2. 부기에서 대화 데이터 추출
+        conversation_history = chatbot_a.conversation.get_conversation_history()
+        conversation_data = {
+            "messages": [
+                {"role": msg.get("role", "user"), "content": msg.get("content", "")}
+                for msg in conversation_history
+            ],
+            "child_name": child_name,
+            "interests": interests_list,
+            "total_turns": len(conversation_history)
+        }
+        
+        # 3. ChildProfile 생성
+        child_profile = ChildProfile(
+            name=child_name,
+            age=age,
+            interests=interests_list,
+            language_level="basic"
+        )
+        
+        # 4. 동화 생성 시작 알림
+        await ws_engine.send_json(websocket, {
+            "type": "orchestrator_story_started",
+            "message": "WorkflowOrchestrator가 동화를 생성하고 있어요...",
+            "child_name": child_name,
+            "timestamp": datetime.now().isoformat()
+        })
+        
+    
+        # 5. 실제 동화 생성 실행 (실시간)
+        story_schema = await orchestrator.create_story(
+            child_profile=child_profile,
+            conversation_data=conversation_data,
+            story_preferences=None
+        )
+        
+        actual_story_id = story_schema.metadata.story_id
+        logger.info(f"[ORCHESTRATOR] 동화 생성 완료: {actual_story_id}")
+        
+        # 완료 알림
+        try:
+            await ws_engine.send_json(websocket, {
+                "type": "orchestrator_story_completed",
+                "story_id": actual_story_id,
+                "message": "🎉 동화가 완성되었어요! 이제 확인해보세요.",
+                "files_ready": True,
+                "completion_url": f"/api/v1/stories/{actual_story_id}/completion",
+                "timestamp": datetime.now().isoformat()
+            })
+        except Exception as e:
+            logger.warning(f"[ORCHESTRATOR] 완료 알림 전송 실패: {e}")
+        
+        return actual_story_id
+        
+    except Exception as e:
+        logger.error(f"[ORCHESTRATOR] WorkflowOrchestrator 동화 생성 실패: {e}")
+        raise
 
 async def handle_automatic_story_generation(
     websocket: WebSocket,

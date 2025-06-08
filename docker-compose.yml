@@ -58,7 +58,7 @@ services:
       - ai_cache:/root/.cache # 캐시 데이터 저장 경로
       
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8000/api/v1/health"] # 상태 확인 명령어
+      test: ["CMD", "curl", "-f", "http://0.0.0.0:8000/api/v1/health"] # 상태 확인 명령어
       interval: 30s # 상태 확인 간격
       timeout: 10s # 상태 확인 시간 초과
       retries: 3 # 상태 확인 실패 시 재시도 횟수

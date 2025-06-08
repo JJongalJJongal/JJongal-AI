@@ -10,6 +10,7 @@ from contextlib import asynccontextmanager
 from typing import Optional
 from datetime import datetime
 from fastapi import FastAPI, WebSocket, HTTPException, Response, Query, status, Depends, Request
+from fastapi.responses import FileResponse
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.websockets import WebSocketDisconnect, WebSocketState
 from fastapi.staticfiles import StaticFiles

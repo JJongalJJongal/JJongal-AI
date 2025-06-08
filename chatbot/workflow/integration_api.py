@@ -50,7 +50,7 @@ else:
     limiter = None
 
 # 보안 설정
-security = HTTPBearer(auto_error=False) if FASTAPI_AVAILABLE else None
+security = HTTPBearer(auto_error=True) if FASTAPI_AVAILABLE else None
 
 # Pydantic 모델들 (FastAPI가 사용 가능한 경우에만)
 if FASTAPI_AVAILABLE:
@@ -110,18 +110,42 @@ if FASTAPI_AVAILABLE:
         active_stories: int
         total_stories: int
 
+# AuthProcessor 인스턴스 생성
+from chatbot.models.voice_ws.processors.auth_processor import AuthProcessor
+_auth_processor = AuthProcessor()
+
 # 인증 검증 함수
 async def verify_auth(credentials: Optional[HTTPAuthorizationCredentials] = Depends(security)):
-    """API 인증 검증"""  # 사용자의 정보 검증
+    """API 인증 검증 - AuthProcessor를 활용한 실제 토큰 검증"""
     if not credentials:
-        # 개발 환경에서는 인증 스킵
-        return {"user_id": "development_user"}
+        # 토큰이 없는 경우 401 반환 (실제 서비스에서는 인증 필수)
+        raise HTTPException(
+            status_code=401, 
+            detail="인증 토큰이 필요합니다. Authorization 헤더에 'Bearer <token>'을 포함해주세요."
+        )
     
-    # 실제 토큰 검증 로직 
-    if credentials.credentials == "development_token":
-        return {"user_id": "development_user"}
+    # AuthProcessor를 통한 토큰 검증
+    token = credentials.credentials
+    is_valid = _auth_processor.validate_token(token)
     
-    raise HTTPException(status_code=401, detail="유효하지 않은 인증 토큰입니다")
+    if not is_valid:
+        raise HTTPException(
+            status_code=401, 
+            detail="유효하지 않거나 만료된 토큰입니다."
+        )
+    
+    # 토큰이 유효한 경우 사용자 정보 반환
+    if token == "development_token":
+        return {"user_id": "development_user", "token_type": "development"}
+    else:
+        # JWT 토큰인 경우 페이로드 디코딩하여 사용자 정보 추출
+        try:
+            import jwt
+            payload = jwt.decode(token, _auth_processor.JWT_SECRET_KEY, algorithms=[_auth_processor.JWT_ALGORITHM])
+            return {"user_id": payload.get("sub", "unknown"), "token_type": "jwt", "payload": payload}
+        except:
+            # JWT 디코딩 실패해도 검증은 통과했으므로 기본 정보 반환
+            return {"user_id": "authenticated_user", "token_type": "unknown"}
 
 class IntegrationAPI:
     """
