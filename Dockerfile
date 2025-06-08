@@ -123,7 +123,6 @@ ENV TOKENIZERS_PARALLELISM=false
 # 오디오 라이브러리 설정
 ENV LIBROSA_CACHE_DIR=/tmp/librosa_cache
 ENV NUMBA_CACHE_DIR=/tmp/numba_cache
-ENV PYTHONWARNINGS="ignore:FutureWarning,ignore:UserWarning:librosa"
 
 # 포트 노출
 EXPOSE 8000

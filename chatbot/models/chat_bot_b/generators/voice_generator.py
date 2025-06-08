@@ -73,39 +73,39 @@ class VoiceGenerator(BaseGenerator):
         # 캐릭터 타입별 음성 설정
         self.character_voice_settings = {
             "narrator": {
-                "stability": 0.6, # 안정성 (0.0-1.0)
-                "similarity_boost": 1.0, # 유사성 증가 (0.0-1.0)
-                "style": 0.2, # 스타일 (0.0-1.0)
+                "stability": 0.5, # 안정성 (0.0-1.0)
+                "similarity_boost": 0.75, # 유사성 증가 (0.0-1.0)
+                "style": 0.4, # 스타일 (0.0-1.0)
                 "use_speaker_boost": True # 스피커 부스트 (True/False)
             },
             "child": {
-                "stability": 0.4, # 안정성 (0.0-1.0)
-                "similarity_boost": 0.8, # 유사성 증가 (0.0-1.0)
-                "style": 0.7, # 스타일 (0.0-1.0)
+                "stability": 0.3, # 안정성 (0.0-1.0)
+                "similarity_boost": 0.6, # 유사성 증가 (0.0-1.0)
+                "style": 0.3, # 스타일 (0.0-1.0)
                 "use_speaker_boost": True # 스피커 부스트 (True/False)
             },
             "adult_male": {
-                "stability": 0.7, # 안정성 (0.0-1.0)
-                "similarity_boost": 0.8, # 유사성 증가 (0.0-1.0)
-                "style": 0.4, # 스타일 (0.0-1.0)
+                "stability": 0.6, # 안정성 (0.0-1.0)
+                "similarity_boost": 0.75, # 유사성 증가 (0.0-1.0)
+                "style": 0.3, # 스타일 (0.0-1.0)
                 "use_speaker_boost": True # 스피커 부스트 (True/False)
             },
             "adult_female": {
-                "stability": 0.6, # 안정성 (0.0-1.0)
-                "similarity_boost": 0.8, # 유사성 증가 (0.0-1.0)
-                "style": 0.4, # 스타일 (0.0-1.0)
+                "stability": 0.5, # 안정성 (0.0-1.0)
+                "similarity_boost": 0.75, # 유사성 증가 (0.0-1.0)
+                "style": 0.3, # 스타일 (0.0-1.0)
                 "use_speaker_boost": True # 스피커 부스트 (True/False)
             },
             "fantasy": {
                 "stability": 0.3, # 안정성 (0.0-1.0)
                 "similarity_boost": 0.6, # 유사성 증가 (0.0-1.0)
-                "style": 0.8, # 스타일 (0.0-1.0)
+                "style": 0.3, # 스타일 (0.0-1.0)
                 "use_speaker_boost": True # 스피커 부스트 (True/False)
             },
             "grandma": {
-                "stability": 0.7, # 안정성 (0.0-1.0)
-                "similarity_boost": 0.8, # 유사성 증가 (0.0-1.0)
-                "style": 0.4, # 스타일 (0.0-1.0)
+                "stability": 0.5, # 안정성 (0.0-1.0)
+                "similarity_boost": 0.75, # 유사성 증가 (0.0-1.0)
+                "style": 0.3, # 스타일 (0.0-1.0)
                 "use_speaker_boost": True # 스피커 부스트 (True/False)
             }
         }

@@ -13,6 +13,134 @@ logger = get_module_logger(__name__)
 SESSION_CLEANUP_INTERVAL = 10 * 60  # 10 minutes, for example
 DEFAULT_SESSION_TIMEOUT = 30 * 60   # 30 minutes
 
+# 글로벌 세션 스토어 (WebSocket과 REST API 간 데이터 공유)
+class GlobalSessionStore:
+    """
+    WebSocket과 REST API 간 conversation_data 공유를 위한 글로벌 스토어
+    """
+    
+    def __init__(self):
+        self.conversation_data_store = {}  # {child_name: conversation_data}
+        self.session_metadata = {}  # {child_name: metadata}
+        logger.info("GlobalSessionStore 초기화 완료")
+    
+    def store_conversation_data(self, child_name: str, conversation_data: Dict[str, Any], client_id: str = None) -> None:
+        """
+        대화 데이터 저장
+        
+        Args:
+            child_name: 아이 이름 (키)
+            conversation_data: 대화 데이터
+            client_id: 클라이언트 ID (선택사항)
+        """
+        self.conversation_data_store[child_name] = conversation_data
+        self.session_metadata[child_name] = {
+            "client_id": client_id,
+            "stored_at": time.time(),
+            "last_accessed": time.time()
+        }
+        logger.info(f"[GLOBAL_STORE] 대화 데이터 저장: {child_name} ({len(conversation_data.get('messages', []))}개 메시지)")
+    
+    def get_conversation_data(self, child_name: str) -> Optional[Dict[str, Any]]:
+        """
+        대화 데이터 조회
+        
+        Args:
+            child_name: 아이 이름
+            
+        Returns:
+            Optional[Dict[str, Any]]: 대화 데이터 (없으면 None)
+        """
+        if child_name in self.conversation_data_store:
+            # 접근 시간 업데이트
+            if child_name in self.session_metadata:
+                self.session_metadata[child_name]["last_accessed"] = time.time()
+            
+            conversation_data = self.conversation_data_store[child_name]
+            logger.info(f"[GLOBAL_STORE] 대화 데이터 조회: {child_name} ({len(conversation_data.get('messages', []))}개 메시지)")
+            return conversation_data
+        
+        logger.warning(f"[GLOBAL_STORE] 대화 데이터 없음: {child_name}")
+        return None
+    
+    def remove_conversation_data(self, child_name: str) -> bool:
+        """
+        대화 데이터 삭제
+        
+        Args:
+            child_name: 아이 이름
+            
+        Returns:
+            bool: 삭제 성공 여부
+        """
+        if child_name in self.conversation_data_store:
+            del self.conversation_data_store[child_name]
+            if child_name in self.session_metadata:
+                del self.session_metadata[child_name]
+            logger.info(f"[GLOBAL_STORE] 대화 데이터 삭제: {child_name}")
+            return True
+        return False
+    
+    def cleanup_expired_sessions(self, expiry_time: int = 3600) -> int:
+        """
+        만료된 세션 정리
+        
+        Args:
+            expiry_time: 만료 시간 (초, 기본값: 1시간)
+            
+        Returns:
+            int: 정리된 세션 수
+        """
+        current_time = time.time()
+        expired_sessions = []
+        
+        for child_name, metadata in self.session_metadata.items():
+            if current_time - metadata["stored_at"] > expiry_time:
+                expired_sessions.append(child_name)
+        
+        for child_name in expired_sessions:
+            self.remove_conversation_data(child_name)
+        
+        if expired_sessions:
+            logger.info(f"[GLOBAL_STORE] 만료된 세션 {len(expired_sessions)}개 정리")
+        
+        return len(expired_sessions)
+    
+    def get_all_active_sessions(self) -> List[str]:
+        """
+        활성 세션 목록 반환
+        
+        Returns:
+            List[str]: 활성 세션 아이 이름 목록
+        """
+        return list(self.conversation_data_store.keys())
+    
+    def get_session_stats(self) -> Dict[str, Any]:
+        """
+        세션 통계 정보 반환
+        
+        Returns:
+            Dict[str, Any]: 세션 통계
+        """
+        current_time = time.time()
+        total_sessions = len(self.conversation_data_store)
+        total_messages = sum(len(data.get('messages', [])) for data in self.conversation_data_store.values())
+        
+        recent_sessions = 0
+        for metadata in self.session_metadata.values():
+            if current_time - metadata["last_accessed"] < 300:  # 5분 이내
+                recent_sessions += 1
+        
+        return {
+            "total_sessions": total_sessions,
+            "recent_sessions": recent_sessions,
+            "total_messages": total_messages,
+            "store_keys": list(self.conversation_data_store.keys())
+        }
+
+# 글로벌 인스턴스
+global_session_store = GlobalSessionStore()
+
 class SessionManager:
     def __init__(self, default_timeout: int = DEFAULT_SESSION_TIMEOUT):
         self.sessions: Dict[str, Dict[str, Any]] = {}
@@ -46,39 +174,77 @@ class SessionManager:
         logger.debug(f"조회할 세션 없음: {client_id}")
         return None
 
-    def update_session_data(self, client_id: str, data_to_update: Dict[str, Any]) -> bool:
-        """세션 데이터를 업데이트하고 활동 시간을 갱신합니다."""
-        session = self.sessions.get(client_id)
-        if session:
-            session["data"].update(data_to_update)
-            session["last_activity"] = time.time()
-            logger.info(f"세션 데이터 업데이트: {client_id}")
+    def update_session_data(self, client_id: str, data: Dict[str, Any]) -> bool:
+        """세션 데이터를 업데이트합니다."""
+        if client_id in self.sessions:
+            self.sessions[client_id]["data"].update(data)
+            self.sessions[client_id]["last_activity"] = time.time()
+            logger.debug(f"세션 데이터 업데이트: {client_id}")
             return True
-        logger.warning(f"업데이트할 세션 없음: {client_id}")
+        logger.warning(f"업데이트할 세션이 없음: {client_id}")
         return False
 
     def remove_session(self, client_id: str) -> bool:
         """세션을 제거합니다."""
         if client_id in self.sessions:
             del self.sessions[client_id]
-            logger.info(f"세션 제거: {client_id}")
+            logger.info(f"세션 제거 완료: {client_id}")
             return True
-        logger.warning(f"제거할 세션 없음: {client_id}")
+        logger.warning(f"제거할 세션이 없음: {client_id}")
         return False
 
-    def list_active_sessions(self) -> List[str]:
-        """현재 활성화된 모든 세션 ID 목록을 반환합니다."""
-        return list(self.sessions.keys())
+    def cleanup_expired_sessions(self) -> int:
+        """만료된 세션들을 정리합니다."""
+        current_time = time.time()
+        expired_sessions = []
+        
+        for client_id, session in self.sessions.items():
+            if current_time - session["last_activity"] > self.default_timeout:
+                expired_sessions.append(client_id)
+        
+        for client_id in expired_sessions:
+            self.remove_session(client_id)
+        
+        if expired_sessions:
+            logger.info(f"만료된 세션 {len(expired_sessions)}개 정리")
+        
+        return len(expired_sessions)
 
-    def get_session_activity_info(self, client_id: str) -> Optional[Dict[str, float]]:
-        """세션의 생성 및 마지막 활동 시간을 반환합니다."""
-        session = self.sessions.get(client_id)
-        if session:
-            return {
-                "created_at": session["created_at"],
-                "last_activity": session["last_activity"]
-            }
-        return None
+    def get_active_sessions(self) -> List[str]:
+        """활성 세션 목록을 반환합니다."""
+        current_time = time.time()
+        active_sessions = []
+        
+        for client_id, session in self.sessions.items():
+            if current_time - session["last_activity"] <= self.default_timeout:
+                active_sessions.append(client_id)
+        
+        return active_sessions
+
+    def get_session_count(self) -> int:
+        """현재 세션 수를 반환합니다."""
+        return len(self.sessions)
+
+    def get_session_stats(self) -> Dict[str, Any]:
+        """세션 통계를 반환합니다."""
+        current_time = time.time()
+        active_count = len(self.get_active_sessions())
+        
+        oldest_session = None
+        newest_session = None
+        
+        if self.sessions:
+            creation_times = [session["created_at"] for session in self.sessions.values()]
+            oldest_session = current_time - min(creation_times)
+            newest_session = current_time - max(creation_times)
+        
+        return {
+            "total_sessions": len(self.sessions),
+            "active_sessions": active_count,
+            "oldest_session_age": oldest_session,
+            "newest_session_age": newest_session,
+            "default_timeout": self.default_timeout
+        }
 
     def cleanup_inactive_sessions(self, timeout: Optional[int] = None) -> int:
         """지정된 시간 동안 비활성 상태인 세션을 정리합니다."""
@@ -103,11 +269,3 @@ class SessionManager:
             
         return cleaned_count
 
-# 비동기 백그라운드 태스크로 세션 정리 (예시, app.py 등에 통합 필요)
-# async def periodic_session_cleanup(session_manager: SessionManager, interval_seconds: int = SESSION_CLEANUP_INTERVAL):
-#     import asyncio
-#     logger.info(f"주기적 세션 정리 태스크 시작 (주기: {interval_seconds}초).")
-#     while True:
-#         await asyncio.sleep(interval_seconds)
-#         logger.debug("주기적 세션 정리 실행...")
-#         session_manager.cleanup_inactive_sessions() 

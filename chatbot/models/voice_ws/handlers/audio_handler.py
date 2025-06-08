@@ -18,6 +18,7 @@ from shared.utils.logging_utils import get_module_logger
 from chatbot.models.chat_bot_a import ChatBotA # 부기 챗봇 import
 from ..core.connection_engine import ConnectionEngine
 from ..core.websocket_engine import WebSocketEngine # WebSocket 연결 종료 처리
+from ..core.session_manager import global_session_store
 from ..processors.audio_processor import AudioProcessor
 from chatbot.models.voice_ws.processors.voice_cloning_processor import VoiceCloningProcessor
 
@@ -213,7 +214,8 @@ async def handle_audio_websocket(
                                                     if len(combined_audio) > 10000 and len(text.strip()) > 2:  # ~3초 이상 + 의미있는 텍스트
                                                         sample_saved = await voice_cloning_processor.collect_user_audio_sample(
                                                             user_id=child_name,
-                                                            audio_data=combined_audio
+                                                            audio_data=combined_audio,
+                                                            for_cloning=True  # 음성 클로닝용이므로 엄격한 검증
                                                         )
                                                         
                                                         if sample_saved:
@@ -254,8 +256,42 @@ async def handle_audio_websocket(
                                                 
                                                 logger.info(f"[STT] 변환 완료: '{user_text}' (신뢰도: {confidence:.2f})")
                                                 
+                                                # 대화 처리 전 상태 로깅
+                                                pre_conversation_length = len(chatbot_a.conversation.get_conversation_history()) if hasattr(chatbot_a, 'conversation') else 0
+                                                logger.info(f"[CONVERSATION_TRACK] 대화 처리 전 메시지 수: {pre_conversation_length}")
+                                                
                                                 # ChatBot A 응답 처리
                                                 ai_response, tts_result, conversation_length = await handle_chat_a_response(chatbot_a, user_text, audio_processor, client_id)
+                                                
+                                                # 대화 처리 후 상태 로깅
+                                                post_conversation_length = len(chatbot_a.conversation.get_conversation_history()) if hasattr(chatbot_a, 'conversation') else 0
+                                                logger.info(f"[CONVERSATION_TRACK] 대화 처리 후 메시지 수: {post_conversation_length}")
+                                                logger.info(f"[CONVERSATION_TRACK] 추가된 메시지 수: {post_conversation_length - pre_conversation_length}")
+                                                
+                                                # 최근 대화 내용 샘플 로깅
+                                                if hasattr(chatbot_a, 'conversation'):
+                                                    recent_messages = chatbot_a.conversation.get_conversation_history()[-2:]  # 최근 2개 메시지
+                                                    logger.info(f"[CONVERSATION_TRACK] 최근 메시지들:")
+                                                    for i, msg in enumerate(recent_messages):
+                                                        logger.info(f"  {i+1}. {msg.get('role', 'unknown')}: {msg.get('content', '')[:50]}...")
+                                                    
+                                                    # 📋 글로벌 세션 스토어에 대화 데이터 저장
+                                                    if post_conversation_length > 0:
+                                                        full_conversation_history = chatbot_a.conversation.get_conversation_history()
+                                                        conversation_data_for_store = {
+                                                            "messages": [
+                                                                {"role": msg.get("role", "user"), "content": msg.get("content", "")}
+                                                                for msg in full_conversation_history
+                                                            ],
+                                                            "child_name": child_name,
+                                                            "interests": [item.strip() for item in interests_str.split(",")] if interests_str else [],
+                                                            "total_turns": len(full_conversation_history),
+                                                            "source": "websocket_realtime",
+                                                            "summary": f"{child_name}이와 부기가 나눈 실시간 대화",
+                                                            "last_updated": datetime.now().isoformat()
+                                                        }
+                                                        global_session_store.store_conversation_data(child_name, conversation_data_for_store, client_id)
+                                                        logger.info(f"[GLOBAL_STORE] 실시간 대화 데이터 저장: {child_name} ({len(full_conversation_history)}개 메시지)")
                                                 
                                                 # 응답 패킷 구성
                                                 response_packet = {
@@ -542,8 +578,28 @@ async def handle_orchestrator_story_generation(
         if not orchestrator:
             raise RuntimeError("WorkflowOrchestrator가 초기화되지 않았습니다")
         
-        # 2. 부기에서 대화 데이터 추출
-        conversation_history = chatbot_a.conversation.get_conversation_history()
+        # 2. 부기에서 대화 데이터 추출 
+        logger.info(f"[ORCHESTRATOR] ChatBot A 인스턴스 상태 확인: {type(chatbot_a)}")
+        logger.info(f"[ORCHESTRATOR] hasattr conversation: {hasattr(chatbot_a, 'conversation')}")
+        logger.info(f"[ORCHESTRATOR] hasattr get_conversation_history: {hasattr(chatbot_a, 'get_conversation_history')}")
+        
+        # 대화 데이터 추출 시도
+        conversation_history = []
+        if hasattr(chatbot_a, 'conversation') and hasattr(chatbot_a.conversation, 'get_conversation_history'):
+            conversation_history = chatbot_a.conversation.get_conversation_history()
+            logger.info(f"[ORCHESTRATOR] conversation.get_conversation_history() 결과: {len(conversation_history)}개 메시지")
+        elif hasattr(chatbot_a, 'get_conversation_history'):
+            conversation_history = chatbot_a.get_conversation_history()
+            logger.info(f"[ORCHESTRATOR] get_conversation_history() 결과: {len(conversation_history)}개 메시지")
+        else:
+            logger.error(f"[ORCHESTRATOR] 대화 이력을 가져올 수 있는 메서드를 찾을 수 없음!")
+        
+        # 실제 대화 내용 로깅 (처음 3개 메시지)
+        if conversation_history:
+            logger.info(f"[ORCHESTRATOR] 대화 내용 샘플 (처음 3개):")
+            for i, msg in enumerate(conversation_history[:3]):
+                logger.info(f"  {i+1}. {msg.get('role', 'unknown')}: {msg.get('content', '')[:100]}...")
+        
         conversation_data = {
             "messages": [
                 {"role": msg.get("role", "user"), "content": msg.get("content", "")}
@@ -551,8 +607,52 @@ async def handle_orchestrator_story_generation(
             ],
             "child_name": child_name,
             "interests": interests_list,
-            "total_turns": len(conversation_history)
+            "total_turns": len(conversation_history),
+            "source": "websocket_conversation",
+            "summary": f"{child_name}이와 부기가 나눈 대화 내용"
         }
+        
+        # 대화 데이터 로그 출력
+        logger.info(f"[ORCHESTRATOR] 추출된 대화 데이터: {len(conversation_history)}개 메시지")
+        logger.info(f"[ORCHESTRATOR] conversation_data 구조: {list(conversation_data.keys())}")
+        
+        # 대화 데이터가 비어있으면 기본값 생성 (WebSocket에서도)
+        if not conversation_history or len(conversation_history) == 0:
+            logger.warning(f"[ORCHESTRATOR] 대화 이력이 비어있음, 기본값 생성: {client_id}")
+            
+            # ConnectionEngine에서 대화 이력 확인 시도
+            connection_info = connection_engine.get_client_info(client_id)
+            if connection_info and "chatbot" in connection_info:
+                alternative_chatbot = connection_info["chatbot"] 
+                if hasattr(alternative_chatbot, 'get_conversation_history'):
+                    alternative_history = alternative_chatbot.get_conversation_history()
+                    logger.info(f"[ORCHESTRATOR] ConnectionEngine에서 발견한 대화 이력: {len(alternative_history)}개 메시지")
+                    if alternative_history:
+                        conversation_history = alternative_history
+                        conversation_data["messages"] = [
+                            {"role": msg.get("role", "user"), "content": msg.get("content", "")}
+                            for msg in conversation_history
+                        ]
+                        conversation_data["total_turns"] = len(conversation_history)
+                        conversation_data["source"] = "connection_engine_recovery"
+                        logger.info(f"[ORCHESTRATOR] ConnectionEngine에서 대화 데이터 복구 성공!")
+            
+            # 여전히 비어있으면 기본값 사용
+            if not conversation_history:
+                conversation_data = {
+                    "messages": [
+                        {"role": "user", "content": f"안녕하세요! 저는 {child_name}이에요."},
+                        {"role": "assistant", "content": f"안녕, {child_name}! 만나서 반가워요!"},
+                        {"role": "user", "content": f"재미있는 이야기를 듣고 싶어요."},
+                        {"role": "assistant", "content": "정말 좋은 아이디어네요! 어떤 모험을 하고 싶나요?"},
+                        {"role": "user", "content": f"친구들과 함께 신나는 모험을 하고 싶어요!"}
+                    ],
+                    "child_name": child_name,
+                    "interests": interests_list,
+                    "total_turns": 5,
+                    "source": "websocket_generated_default",
+                    "summary": f"{child_name}이가 친구들과 함께 모험하는 이야기를 원함"
+                }
         
         # 3. ChildProfile 생성
         child_profile = ChildProfile(

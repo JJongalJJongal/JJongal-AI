@@ -40,6 +40,7 @@ from chatbot.workflow.story_schema import ChildProfile, AgeGroup
 
 # Integration API 컴포넌트
 from chatbot.workflow.integration_api import integration_manager, init_orchestrator_for_integration
+from chatbot.models.voice_ws.core.session_manager import global_session_store
 
 # Integration API 모델들 (로컬에서 정의)
 from chatbot.models.voice_ws.processors.auth_processor import AuthProcessor
@@ -1118,24 +1119,36 @@ async def create_story(
     conversation_data = story_request.conversation_data
     logger.info(f"수신된 conversation_data: {conversation_data}")
     
-    # conversation_data가 빈 경우 기본값 생성
+    # conversation_data가 빈 경우 글로벌 세션 스토어에서 조회 시도
     if not conversation_data or not conversation_data.get("messages"):
-        logger.warning("conversation_data가 비어있음. 기본값으로 대체합니다.")
-        conversation_data = {
-            "messages": [
-                {"role": "user", "content": f"안녕하세요! 저는 {story_request.child_profile.name}이에요."},
-                {"role": "assistant", "content": f"안녕, {story_request.child_profile.name}! 만나서 반가워요!"},
-                {"role": "user", "content": f"재미있는 이야기를 듣고 싶어요. {', '.join(story_request.child_profile.interests) if story_request.child_profile.interests else '모험 이야기'}가 좋겠어요."},
-                {"role": "assistant", "content": "정말 좋은 아이디어네요! 어떤 모험을 하고 싶나요?"},
-                {"role": "user", "content": f"친구들과 함께 신나는 모험을 하고 싶어요!"}
-            ],
-            "child_name": story_request.child_profile.name,
-            "interests": story_request.child_profile.interests,
-            "total_turns": 5,
-            "source": "api_generated_default",
-            "summary": f"{story_request.child_profile.name}이가 친구들과 함께 모험하는 이야기를 원함"
-        }
-        logger.info(f"생성된 기본 conversation_data: {conversation_data}")
+        logger.warning("conversation_data가 비어있음. 글로벌 세션 스토어에서 조회 시도...")
+        
+        # 글로벌 세션 스토어에서 대화 데이터 조회
+        stored_conversation_data = global_session_store.get_conversation_data(story_request.child_profile.name)
+        
+        if stored_conversation_data and stored_conversation_data.get("messages"):
+            logger.info(f"[GLOBAL_STORE] 저장된 대화 데이터 발견: {story_request.child_profile.name} ({len(stored_conversation_data.get('messages', []))}개 메시지)")
+            conversation_data = stored_conversation_data
+            conversation_data["source"] = "global_session_store"
+        else:
+            logger.warning("글로벌 세션 스토어에도 대화 데이터 없음. 기본값으로 대체합니다.")
+            conversation_data = {
+                "messages": [
+                    {"role": "user", "content": f"안녕하세요! 저는 {story_request.child_profile.name}이에요."},
+                    {"role": "assistant", "content": f"안녕, {story_request.child_profile.name}! 만나서 반가워요!"},
+                    {"role": "user", "content": f"재미있는 이야기를 듣고 싶어요. {', '.join(story_request.child_profile.interests) if story_request.child_profile.interests else '모험 이야기'}가 좋겠어요."},
+                    {"role": "assistant", "content": "정말 좋은 아이디어네요! 어떤 모험을 하고 싶나요?"},
+                    {"role": "user", "content": f"친구들과 함께 신나는 모험을 하고 싶어요!"}
+                ],
+                "child_name": story_request.child_profile.name,
+                "interests": story_request.child_profile.interests,
+                "total_turns": 5,
+                "source": "api_generated_default",
+                "summary": f"{story_request.child_profile.name}이가 친구들과 함께 모험하는 이야기를 원함"
+            }
+            logger.info(f"생성된 기본 conversation_data: {conversation_data}")
+    else:
+        logger.info(f"[API] 요청에서 제공된 conversation_data 사용: {len(conversation_data.get('messages', []))}개 메시지")
     
     try:
         logger.info("오케스트레이터 상태 확인 중...")
