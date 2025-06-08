@@ -11,7 +11,6 @@ import asyncio
 from ..conversation_manager import ConversationManager
 
 # New modular imports
-from .conversation_engine import ConversationEngine
 from .langchain_conversation_engine import LangChainConversationEngine
 from .story_engine import StoryEngine
 from .rag_engine import RAGSystem
@@ -23,7 +22,7 @@ logger = get_module_logger(__name__)
 
 class LegacyConversationManagerAdapter:
     """
-    ConversationManager를 새로운 ConversationEngine으로 연결하는 어댑터
+    ConversationManager를 새로운 LangChain 기능으로 연결하는 어댑터
     """
     
     def __init__(self, token_limit: int = 10000, use_langchain: bool = True, openai_client=None, rag_engine=None):
@@ -46,8 +45,8 @@ class LegacyConversationManagerAdapter:
                 rag_engine=rag_engine
             )
         else:
-            # 기본 엔진 사용
-            self.engine = ConversationEngine(token_limit)
+            # 기본 ConversationManager 사용
+            self.engine = ConversationManager(token_limit)
         
         # 레거시 호환성을 위한 속성들
         self.conversation_history = []

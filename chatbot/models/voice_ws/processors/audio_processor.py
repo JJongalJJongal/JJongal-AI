@@ -77,7 +77,70 @@ class AudioProcessor:
         self.elevenlabs_api_key = elevenlabs_api_key
         self.whisper_model = whisper_model
         self.bugi_voice_config = BUGI_VOICE_CONFIG
+        
+        # 클라이언트별 음성 매핑 지원 추가
+        self.user_voice_mappings = {}  # {client_id: {"voice_id": str, "voice_settings": dict}}
+        
         logger.info(f"AudioProcessor 초기화 완료 (ElevenLabs API: {'확인' if elevenlabs_api_key else '불가능'})")
+
+    def set_user_voice_mapping(self, client_id: str, voice_id: str, voice_settings: dict = None):
+        """
+        클라이언트별 음성 매핑 설정
+        
+        Args:
+            client_id (str): 클라이언트 식별자
+            voice_id (str): 사용할 음성 ID (클론 음성 ID 포함)
+            voice_settings (dict): 음성 설정 (옵션)
+        """
+        # 기본 음성 설정 사용 (클론 음성에 최적화)
+        default_voice_settings = {
+            "stability": 0.7,  # 클론 음성을 위한 안정성 증가
+            "similarity_boost": 0.8,  # 유사성 증대
+            "style": 0.3,  # 약간의 스타일
+            "use_speaker_boost": True
+        }
+        
+        # 사용자 설정이 있으면 기본값과 병합
+        final_voice_settings = default_voice_settings.copy()
+        if voice_settings:
+            final_voice_settings.update(voice_settings)
+        
+        self.user_voice_mappings[client_id] = {
+            "voice_id": voice_id,
+            "voice_settings": final_voice_settings
+        }
+        
+        logger.info(f"클라이언트 {client_id}의 음성 매핑 설정: {voice_id}")
+    
+    def get_user_voice_config(self, client_id: str) -> dict:
+        """
+        클라이언트별 음성 설정 반환
+        
+        Args:
+            client_id (str): 클라이언트 식별자
+            
+        Returns:
+            dict: 음성 설정 (voice_id, voice_settings 포함)
+        """
+        if client_id in self.user_voice_mappings:
+            return self.user_voice_mappings[client_id]
+        
+        # 기본 부기 음성 설정 반환
+        return {
+            "voice_id": self.bugi_voice_config["voice_id"],
+            "voice_settings": self.bugi_voice_config["voice_settings"]
+        }
+    
+    def remove_user_voice_mapping(self, client_id: str):
+        """
+        클라이언트의 음성 매핑 제거
+        
+        Args:
+            client_id (str): 클라이언트 식별자
+        """
+        if client_id in self.user_voice_mappings:
+            del self.user_voice_mappings[client_id]
+            logger.info(f"클라이언트 {client_id}의 음성 매핑 제거됨")
 
     async def transcribe_audio(self, file_path: str, language: str = "ko"):
         """
@@ -88,11 +151,11 @@ class AudioProcessor:
             language (str): 인식할 언어 코드 (기본값: 'ko' - 한국어)
         
         Returns:
-            tuple: (텍스트, 오류 메시지, 오류 코드)
+            tuple: (텍스트, 오류 메시지, 오류 코드, 품질 정보)
         """
         if self.whisper_model is None:
             logger.error("Whisper 모델이 초기화되지 않았습니다")
-            return "", "Whisper 모델이 초기화되지 않았습니다", "whisper_not_initialized"
+            return "", "Whisper 모델이 초기화되지 않았습니다", "whisper_not_initialized", None
             
         try:
             file_size = os.path.getsize(file_path)
@@ -102,7 +165,7 @@ class AudioProcessor:
             
             if file_size < 1000:  # 1KB 미만
                 logger.warning("오디오 파일이 너무 작습니다")
-                return "", "오디오 파일이 너무 작습니다", "audio_too_small"
+                return "", "오디오 파일이 너무 작습니다", "audio_too_small", None
             
             # 지원되는 오디오 형식 확인
             supported_formats = ['.wav', '.mp3', '.m4a', '.ogg', '.webm', '.flac']
@@ -119,34 +182,187 @@ class AudioProcessor:
             )
             
             text = result.get("text", "").strip()
-            confidence = result.get("confidence", 0.0)  # 일부 Whisper 버전에서 제공
+            
+            # 강화된 품질 검증
+            quality_info = self._analyze_stt_quality(result, text, file_size)
             
             logger.info(f"Whisper 변환 결과: '{text}' (길이: {len(text)}자)")
+            logger.info(f"품질 분석: {quality_info}")
+            
             if hasattr(result, 'segments') and result.segments:
                 logger.info(f"세그먼트 수: {len(result.segments)}")
             
-            if not text:
-                logger.warning("Whisper가 텍스트를 인식하지 못했습니다")
-                return "", "음성을 인식하지 못했습니다. 더 명확하게 말씀해주세요.", "no_speech_detected"
+            # 다단계 검증
+            validation_result = self._validate_stt_result(text, quality_info)
             
-            # 매우 짧은 텍스트 경고 (노이즈일 가능성)
-            if len(text) < 3:
-                logger.warning(f"인식된 텍스트가 매우 짧습니다: '{text}'")
-                
-            return text, None, None
+            if not validation_result["is_valid"]:
+                logger.warning(f"STT 결과 품질 부족: {validation_result['reason']}")
+                return "", validation_result["reason"], validation_result["error_code"], quality_info
+            
+            return text, None, None, quality_info
             
         except Exception as e:
             error_detail = traceback.format_exc()
             logger.error(f"Whisper 오류: {e}\n{error_detail}")
-            return "", f"Whisper 오류: {e}", "whisper_error"
+            return "", f"Whisper 오류: {e}", "whisper_error", None
+    
+    def _analyze_stt_quality(self, whisper_result: dict, text: str, file_size: int) -> dict:
+        """
+        Whisper STT 결과의 품질 분석
+        
+        Args:
+            whisper_result (dict): Whisper 결과 딕셔너리
+            text (str): 인식된 텍스트
+            file_size (int): 원본 오디오 파일 크기
+            
+        Returns:
+            dict: 품질 분석 정보
+        """
+        quality_info = {
+            "text_length": len(text),
+            "word_count": len(text.split()) if text else 0,
+            "file_size_kb": file_size / 1024,
+            "segments_count": 0,
+            "avg_confidence": 0.0,
+            "min_confidence": 1.0,
+            "has_no_speech_segments": False,
+            "quality_score": 0.0
+        }
+        
+        # 세그먼트 분석 (Whisper segments 정보 활용)
+        segments = whisper_result.get("segments", [])
+        if segments:
+            quality_info["segments_count"] = len(segments)
+            
+            confidences = []
+            no_speech_count = 0
+            
+            for segment in segments:
+                # 세그먼트별 신뢰도 추출 (일부 Whisper 버전에서 제공)
+                if "avg_logprob" in segment:
+                    # avg_logprob을 신뢰도로 변환 (대략적)
+                    confidence = max(0.0, min(1.0, (segment["avg_logprob"] + 1.0)))
+                    confidences.append(confidence)
+                
+                # no_speech_prob 체크
+                if segment.get("no_speech_prob", 0.0) > 0.7:
+                    no_speech_count += 1
+            
+            if confidences:
+                quality_info["avg_confidence"] = sum(confidences) / len(confidences)
+                quality_info["min_confidence"] = min(confidences)
+            
+            quality_info["has_no_speech_segments"] = no_speech_count > 0
+        
+        # 전체 품질 점수 계산 (0.0 ~ 1.0)
+        score = 0.0
+        
+        # 텍스트 길이 점수 (30%)
+        if quality_info["text_length"] >= 3:
+            text_score = min(1.0, quality_info["text_length"] / 50.0)  # 50자 기준
+            score += text_score * 0.3
+        
+        # 단어 수 점수 (20%)
+        if quality_info["word_count"] >= 1:
+            word_score = min(1.0, quality_info["word_count"] / 10.0)  # 10단어 기준
+            score += word_score * 0.2
+        
+        # 신뢰도 점수 (40%)
+        if quality_info["avg_confidence"] > 0:
+            score += quality_info["avg_confidence"] * 0.4
+        else:
+            # 신뢰도 정보가 없으면 기본 점수
+            score += 0.6 * 0.4
+        
+        # 파일 크기 점수 (10%)
+        if quality_info["file_size_kb"] >= 10:  # 10KB 이상
+            size_score = min(1.0, quality_info["file_size_kb"] / 100.0)  # 100KB 기준
+            score += size_score * 0.1
+        
+        # no_speech 세그먼트가 있으면 점수 감점
+        if quality_info["has_no_speech_segments"]:
+            score *= 0.8
+        
+        quality_info["quality_score"] = score
+        
+        return quality_info
+    
+    def _validate_stt_result(self, text: str, quality_info: dict) -> dict:
+        """
+        STT 결과 다단계 검증
+        
+        Args:
+            text (str): 인식된 텍스트
+            quality_info (dict): 품질 분석 정보
+            
+        Returns:
+            dict: 검증 결과
+        """
+        # 기본 검증
+        if not text:
+            return {
+                "is_valid": False,
+                "reason": "음성을 인식하지 못했어. 더 명확하게 말해줄 수 있어?",
+                "error_code": "no_speech_detected"
+            }
+        
+        # 매우 짧은 텍스트 검증 (강화)
+        if len(text) < 2:
+            return {
+                "is_valid": False,
+                "reason": f"인식된 텍스트가 너무 짧습니다: '{text}'. 더 많이 말해줄 수 있어?",
+                "error_code": "text_too_short"
+            }
+        
+        # 품질 점수 기반 검증
+        if quality_info["quality_score"] < 0.3:
+            return {
+                "is_valid": False,
+                "reason": "잘 안들려. 더 크게 말해줄 수 있어?",
+                "error_code": "low_quality_audio"
+            }
+        
+        # 신뢰도 기반 검증
+        if quality_info["avg_confidence"] > 0 and quality_info["avg_confidence"] < 0.4:
+            return {
+                "is_valid": False,
+                "reason": "잘 안들려. 더 크게 말해줄 수 있어?",
+                "error_code": "low_confidence"
+            }
+        
+        # no_speech 세그먼트 검증
+        if quality_info["has_no_speech_segments"] and quality_info["segments_count"] > 0:
+            speech_ratio = 1.0 - (quality_info["segments_count"] * 0.1)  # 대략적 계산
+            if speech_ratio < 0.5:
+                return {
+                    "is_valid": False,
+                    "reason": "잘 안들려. 더 크게 말해줄 수 있어?",
+                    "error_code": "too_much_silence"
+                }
+        
+        # 단어 수 검증 (중간 품질일 때)
+        if quality_info["quality_score"] < 0.7 and quality_info["word_count"] < 2:
+            return {
+                "is_valid": False,
+                "reason": "조금 더 길게 말해줄 수 있어?",
+                "error_code": "insufficient_words"
+            }
+        
+        # 모든 검증 통과
+        return {
+            "is_valid": True,
+            "reason": None,
+            "error_code": None
+        }
 
-    async def synthesize_tts(self, text: str, voice: str = None):
+    async def synthesize_tts(self, text: str, voice: str = None, client_id: str = None):
         """
         ElevenLabs API를 사용한 텍스트를 TTS로 변환
         
         Args:
             text (str): 텍스트 응답
-            voice (str): 사용할 음성 (기본값: None - 부기 기본 음성 사용)
+            voice (str): 사용할 음성 (직접 지정, 옵션)
+            client_id (str): 클라이언트 식별자 (클론 음성 사용을 위해 추가)
         
         Returns:
             tuple: (base64 인코딩된 오디오, 상태, 오류 메시지, 오류 코드)
@@ -165,11 +381,30 @@ class AudioProcessor:
             if not self.elevenlabs_api_key:
                 return "", "error", "ElevenLabs API 키가 설정되지 않았습니다", "elevenlabs_api_key_not_set"
             
-            # 음성 ID 결정 (텍스트 내용에 따른 지능적 선택 또는 직접 지정)
+            # 음성 설정 결정 (우선순위: 직접 지정 > 클라이언트별 설정 > 기본 설정)
             if voice:
-                voice_id = voice  # 직접 지정된 음성 사용
+                # 직접 지정된 음성 사용
+                voice_id = voice
+                voice_settings = self.bugi_voice_config["voice_settings"]
+                model_id = self.bugi_voice_config["model_id"]
+                logger.info(f"직접 지정된 음성 사용: {voice_id}")
+            elif client_id:
+                # 클라이언트별 음성 설정 사용 (클론 음성 포함)
+                user_config = self.get_user_voice_config(client_id)
+                voice_id = user_config["voice_id"]
+                voice_settings = user_config["voice_settings"]
+                model_id = self.bugi_voice_config["model_id"]  # 모델은 기본값 사용
+                
+                if client_id in self.user_voice_mappings:
+                    logger.info(f"클라이언트 {client_id}의 클론 음성 사용: {voice_id}")
+                else:
+                    logger.info(f"클라이언트 {client_id}의 기본 부기 음성 사용: {voice_id}")
             else:
-                voice_id = self.get_voice_for_content(text)  # 텍스트 내용에 따라 선택
+                # 텍스트 내용에 따른 지능적 선택 (기본 동작)
+                voice_id = self.get_voice_for_content(text)
+                voice_settings = self.bugi_voice_config["voice_settings"]
+                model_id = self.bugi_voice_config["model_id"]
+                logger.info(f"텍스트 내용 기반 음성 선택: {voice_id}")
             
             # 텍스트 정리 (음성 생성에 적합하게)
             cleaned_text = self._clean_text_for_speech(text)
@@ -183,8 +418,8 @@ class AudioProcessor:
                 # ElevenLabs API 요청 데이터
                 data = {
                     "text": cleaned_text,
-                    "model_id": self.bugi_voice_config["model_id"],
-                    "voice_settings": self.bugi_voice_config["voice_settings"],
+                    "model_id": model_id,
+                    "voice_settings": voice_settings,
                     "output_format": "wav_44100"
                 }
                 

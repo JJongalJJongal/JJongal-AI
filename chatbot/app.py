@@ -7,7 +7,7 @@ import asyncio
 import os
 import sys
 from contextlib import asynccontextmanager
-from typing import Optional
+from typing import Optional, Dict, Any
 from datetime import datetime
 from fastapi import FastAPI, WebSocket, HTTPException, Response, Query, status, Depends, Request
 from fastapi.responses import FileResponse
@@ -37,11 +37,56 @@ from chatbot.data.vector_db.core import VectorDB
 from chatbot.workflow.orchestrator import WorkflowOrchestrator
 from chatbot.workflow.story_schema import ChildProfile, AgeGroup
 
-# Integration API 모델들
-from chatbot.workflow.integration_api import (
-    StoryCreationRequest, StoryResponse, StandardResponse, HealthResponse,
-    verify_auth
-)
+# Integration API 컴포넌트
+from chatbot.workflow.integration_api import integration_manager, init_orchestrator_for_integration
+
+# Integration API 모델들 (로컬에서 정의)
+from chatbot.models.voice_ws.processors.auth_processor import AuthProcessor
+_auth_processor = AuthProcessor()
+
+# 인증 검증 함수
+async def verify_auth(credentials = None):
+    """API 인증 검증"""
+    # 개발 환경에서는 간단한 인증 사용
+    return {"user_id": "development_user", "token_type": "development"}
+
+# Pydantic 모델들
+from pydantic import BaseModel, Field
+from typing import List
+
+class ChildProfileRequest(BaseModel):
+    """아이 프로필 요청 모델"""
+    name: str = Field(..., description="아이 이름")
+    age: int = Field(..., description="아이 나이")
+    interests: List[str] = Field(default=[], description="관심사 목록")
+    language_level: str = Field(default="basic", description="언어 수준")
+    special_needs: List[str] = Field(default=[], description="특별한 요구사항")
+
+class StoryCreationRequest(BaseModel):
+    """이야기 생성 요청 모델"""
+    child_profile: ChildProfileRequest
+    conversation_data: Optional[Dict[str, Any]] = Field(None, description="기존 대화 데이터")
+    story_preferences: Optional[Dict[str, Any]] = Field(None, description="이야기 선호도")
+    enable_multimedia: bool = Field(True, description="멀티미디어 생성 활성화")
+
+class StandardResponse(BaseModel):
+    """표준 응답 모델"""
+    success: bool = Field(..., description="성공 여부")
+    message: str = Field(..., description="응답 메시지")
+    data: Optional[Dict[str, Any]] = Field(None, description="응답 데이터")
+    error_code: Optional[str] = Field(None, description="에러 코드")
+
+class StoryResponse(StandardResponse):
+    """이야기 응답 모델"""
+    story_id: Optional[str] = Field(None, description="이야기 ID")
+
+class HealthResponse(BaseModel):
+    """헬스체크 응답 모델"""
+    status: str
+    timestamp: str
+    version: str
+    active_stories: int
+    total_stories: int
 
 logger = get_module_logger(__name__)
 logger.info("=== CHATBOT.APP.PY Module Loaded ===")
@@ -101,7 +146,10 @@ async def lifespan_manager(app: FastAPI):
             enable_multimedia=os.getenv("ENABLE_MULTIMEDIA", "true").lower() == "true"
         )
         
-        logger.info("워크플로우 시스템 초기화 완료")
+        # IntegrationManager에 오케스트레이터 설정
+        integration_manager.set_orchestrator(orchestrator)
+        
+        logger.info("워크플로우 시스템 및 통합 관리자 초기화 완료")
         
     except Exception as e:
         logger.error(f"워크플로우 시스템 초기화 실패: {e}")
@@ -142,7 +190,7 @@ def ensure_required_directories():
     base_output_dir = os.getenv("MULTIMEDIA_OUTPUT_DIR", "/app/output")
     
     # 통일된 벡터DB 경로 설정
-    vector_db_base = os.getenv("CHROMA_DB_PATH", "/app/chatbot/data/vector_db")
+    vector_db_base = os.getenv("CHROMA_DB_PATH", "chatbot/data/vector_db")
     
     required_directories = [
         base_output_dir,                                                  # /app/output
@@ -373,33 +421,21 @@ async def _create_story_with_orchestrator(
     conversation_data: Optional[dict],
     story_preferences: Optional[dict]
 ) -> str:
-    """Orchestrator를 통해 이야기 생성하고 실제 story_id 반환"""
+    """IntegrationManager를 통해 이야기 생성하고 story_id 반환"""
     try:
-        if not orchestrator:
-            raise RuntimeError("오케스트레이터가 초기화되지 않았습니다")
-        
         logger.info("이야기 생성 시작")
         logger.info(f"아이 프로필: {child_profile.name}, 나이: {child_profile.age}")
         logger.info(f"관심사: {child_profile.interests}")
         
-        # Orchestrator가 story_id를 생성하고 실제 이야기 생성을 백그라운드에서 시작
-        logger.info("오케스트레이터 create_story 호출 중...")
-        story_schema = await orchestrator.create_story(
+        # IntegrationManager를 통한 이야기 생성
+        story_id = await integration_manager.create_story_with_id(
             child_profile=child_profile,
             conversation_data=conversation_data,
             story_preferences=story_preferences
         )
         
-        logger.info(f"오케스트레이터 create_story 반환됨: {story_schema is not None}")
-        if story_schema:
-            logger.info(f"스토리 스키마 단계: {story_schema.current_stage}")
-            logger.info(f"생성된 스토리 내용 길이: {len(story_schema.generated_story.content) if story_schema.generated_story else 'None'}")
-        
-        # Orchestrator가 생성한 실제 story_id 반환
-        actual_story_id = story_schema.metadata.story_id
-        logger.info(f"이야기 생성 완료: {actual_story_id}")
-        
-        return actual_story_id
+        logger.info(f"이야기 생성 완료: {story_id}")
+        return story_id
         
     except Exception as e:
         logger.error(f"이야기 생성 실패: {e}", exc_info=True)

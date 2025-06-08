@@ -43,7 +43,7 @@ async def save_conversation(chatbot: Any, child_name: str, client_id: str):
         
         # 디렉토리 안전하게 생성
         try:
-            os.makedirs(output_dir, exist_ok=True) # 저장 경로 생성
+        os.makedirs(output_dir, exist_ok=True) # 저장 경로 생성
             logger.debug(f"[SAVE_CONV] 대화 저장 디렉토리 확인/생성: {output_dir}")
         except PermissionError as e:
             logger.error(f"[SAVE_CONV] 디렉토리 생성 권한 오류: {output_dir} - {e}")

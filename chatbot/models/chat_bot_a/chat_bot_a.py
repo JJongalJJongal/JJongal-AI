@@ -285,8 +285,16 @@ class ChatBotA:
             if self.conversation.is_token_limit_reached():
                 return self.message_processor.get_token_limit_message()
             
-            # 사용자 입력 추가
-            self.add_to_conversation("user", user_input)
+            # 사용자 입력 추가 (중복 체크)
+            conversation_history = self.conversation.get_conversation_history()
+            last_message = conversation_history[-1] if conversation_history else None
+            
+            # 마지막 메시지가 동일한 사용자 입력이 아닌 경우에만 추가
+            if not last_message or last_message.get("role") != "user" or last_message.get("content") != user_input:
+                self.add_to_conversation("user", user_input)
+                logger.info(f"사용자 입력 저장: '{user_input[:50]}...' (대화 길이: {len(self.conversation.get_conversation_history())})")
+            else:
+                logger.info(f"중복 사용자 입력 감지, 저장 생략: '{user_input[:30]}...')")
             
             # Enhanced 분석 수행
             analysis_result = self.story_engine.analyze_input(

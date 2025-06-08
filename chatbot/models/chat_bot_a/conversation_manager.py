@@ -35,8 +35,8 @@ class ConversationManager:
         # 토큰 제한
         self.token_limit = token_limit
         
-        # 토큰 제한 도달 시 메시지
-        self.token_limit_reached_message = "토큰 제한에 걸렸으니 그만 써라 좀..."
+        # 토큰 제한 도달 시 메시지 
+        self.token_limit_reached_message = "미안해. 오늘 대화가 너무 길어져서 여기서 마무리해야 할 것 같아. 다음에 또 재미있는 이야기를 만들어보자!"
     
     def add_message(self, role: str, content: str) -> None:
         """
@@ -46,10 +46,22 @@ class ConversationManager:
             role: 메시지 역할 (user, assistant, system)
             content: 메시지 내용
         """
-        self.conversation_history.append({
+        # 입력 검증 
+        if not isinstance(role, str) or role not in ['user', 'assistant', 'system']:
+            logger.warning(f"잘못된 역할: {role}. 'user', 'assistant', 'system' 중 하나여야 합니다.")
+            return
+            
+        if not isinstance(content, str) or not content.strip():
+            logger.warning("메시지 내용이 비어있거나 문자열이 아닙니다.")
+            return
+            
+        message = {
             "role": role,
-            "content": content
-        })
+            "content": content.strip()
+        }
+        
+        self.conversation_history.append(message)
+        logger.debug(f"메시지 추가됨: {role} - {content[:50]}...")
     
     def get_conversation_history(self) -> List[Dict[str, str]]:
         """
@@ -70,6 +82,9 @@ class ConversationManager:
         Returns:
             List[Dict[str, str]]: 최근 대화 내역
         """
+        # 입력 검증 추가 (ConversationEngine의 기능 통합)
+        if count <= 0:
+            return []
         return self.conversation_history[-count:] if len(self.conversation_history) >= count else self.conversation_history
     
     def update_token_usage(self, prompt_tokens: int, completion_tokens: int) -> bool:
@@ -185,4 +200,33 @@ class ConversationManager:
             "total_completion": 0,
             "total": 0
         }
-        logger.info("대화 내역 초기화 완료") 
+        logger.info("대화 내역 초기화 완료")
+    
+    def get_remaining_tokens(self) -> int:
+        """
+        남은 토큰 수 반환 (ConversationEngine 기능 통합)
+        
+        Returns:
+            int: 남은 토큰 수
+        """
+        return max(0, self.token_limit - self.token_usage["total"])
+    
+    def get_conversation_stats(self) -> Dict[str, Any]:
+        """
+        대화 통계 정보 반환 (ConversationEngine 기능 통합)
+        
+        Returns:
+            Dict[str, Any]: 대화 통계 정보
+        """
+        user_messages = [msg for msg in self.conversation_history if msg["role"] == "user"]
+        assistant_messages = [msg for msg in self.conversation_history if msg["role"] == "assistant"]
+        
+        return {
+            "total_messages": len(self.conversation_history),
+            "user_messages": len(user_messages),
+            "assistant_messages": len(assistant_messages),
+            "token_usage": self.token_usage,
+            "token_limit": self.token_limit,
+            "remaining_tokens": self.get_remaining_tokens(),
+            "token_usage_percentage": (self.token_usage["total"] / self.token_limit) * 100
+        } 

@@ -161,18 +161,77 @@ class StoryEngine:
             return {"title": "파싱 오류", "summary": response_text}
 
     def _extract_user_info_from_conversation(self, conversation_history: List[Dict]) -> Tuple[int, List[str]]:
-        """대화 기록에서 사용자 정보(나이, 관심사) 추출"""
+        """대화 기록에서 사용자 정보(나이, 관심사) 추출 - 대폭 확장"""
         age_group = self.user_data.get("age_group", 5) 
         interests = self.user_data.get("interests", [])
+
+        # 관심사 카테고리별 키워드 확장
+        interest_categories = {
+            "동물": ["강아지", "고양이", "토끼", "곰", "사자", "호랑이", "코끼리", "기린", "원숭이", 
+                    "새", "물고기", "용", "유니콘", "공룡", "펭귄", "돌고래", "나비", "말"],
+            "색깔": ["빨강", "파랑", "노랑", "초록", "분홍", "보라", "주황", "하얀", "검정", 
+                    "빨간색", "파란색", "노란색", "초록색", "분홍색", "보라색"],
+            "음식": ["사탕", "케이크", "아이스크림", "과자", "초콜릿", "쿠키", "피자", "햄버거", 
+                    "과일", "사과", "바나나", "딸기", "포도", "우유", "주스"],
+            "놀이": ["축구", "농구", "블록", "레고", "인형", "자동차", "기차", "비행기", 
+                    "그림", "색칠", "노래", "춤", "숨바꼭질", "술래잡기"],
+            "장소": ["공원", "바다", "산", "숲", "집", "학교", "놀이터", "도서관", "박물관", 
+                    "동물원", "마을", "도시", "성", "동굴", "섬", "하늘", "우주"],
+            "감정": ["기쁘다", "즐겁다", "행복하다", "신나다", "재미있다", "슬프다", "무섭다", 
+                    "걱정하다", "화나다", "놀라다", "용감하다", "자신감"],
+            "스포츠": ["축구", "농구", "야구", "배구", "수영", "달리기", "자전거", "스케이트", "태권도"],
+            "학습": ["책", "공부", "숫자", "글자", "영어", "과학", "실험", "컴퓨터", "로봇"],
+            "가족": ["엄마", "아빠", "할머니", "할아버지", "형", "누나", "동생", "언니", "가족"],
+            "계절": ["봄", "여름", "가을", "겨울", "꽃", "눈", "비", "바람", "태양", "달"]
+        }
 
         for message in conversation_history:
             if message.get("role") == "user":
                 text = message.get("content", "").lower()
-                if "공룡" in text and "공룡" not in interests:
-                    interests.append("공룡")
-                if "우주" in text and "우주" not in interests:
-                    interests.append("우주")
+                
+                # 나이 정보 추출 (숫자 + 살/세)
+                import re
+                age_matches = re.findall(r'(\d+)(?:살|세)', text)
+                if age_matches:
+                    try:
+                        extracted_age = int(age_matches[0])
+                        if 3 <= extracted_age <= 12:  # 합리적인 나이 범위
+                            age_group = extracted_age
+                            self.user_data["age_group"] = age_group
+                            logger.info(f"사용자 나이 추출: {age_group}세")
+                    except ValueError:
+                        pass
+                
+                # 관심사 카테고리별 추출
+                for category, keywords in interest_categories.items():
+                    for keyword in keywords:
+                        if keyword in text:
+                            if category not in interests:
+                                interests.append(category)
+                                logger.info(f"새로운 관심사 카테고리 발견: {category} (키워드: {keyword})")
+                            # 구체적인 키워드도 저장
+                            specific_key = f"{category}_{keyword}"
+                            if specific_key not in interests:
+                                interests.append(specific_key)
+                
+                # 이름 패턴 추출 (내 이름은/나는 + 한글 이름)
+                name_patterns = [
+                    r'(?:내 이름은|나는|제 이름은)\s*([가-힣]{2,4})',
+                    r'([가-힣]{2,4})(?:이야|예요|입니다|이에요)'
+                ]
+                
+                for pattern in name_patterns:
+                    name_matches = re.findall(pattern, text)
+                    if name_matches:
+                        potential_name = name_matches[0]
+                        # 일반적인 단어가 아닌 경우에만 이름으로 간주
+                        common_words = {'아니야', '맞아', '좋아', '싫어', '그래', '안녕'}
+                        if potential_name not in common_words:
+                            self.user_data["name"] = potential_name
+                            logger.info(f"사용자 이름 추출: {potential_name}")
         
+        # interests를 user_data에도 업데이트
+        self.user_data["interests"] = interests
         return age_group, interests
 
     def update_story_element(self, element_type: str, new_value: Any) -> Dict:
@@ -273,16 +332,50 @@ class StoryEngine:
         client = openai_client or self.openai_client
         self.total_interactions += 1
         
+        # STT 품질 검증 (Phase 2 추가)
+        stt_quality = self._validate_stt_quality(user_input)
+        if not stt_quality["is_valid"]:
+            logger.warning(f"STT 품질 검증 실패: {stt_quality['issues']}")
+            return {
+                "keywords": [],
+                "quality_score": 0.1,
+                "stage": self.story_stage,
+                "suggestions": ["다시 말해주세요. 잘 들리지 않았어요."],
+                "stt_quality": stt_quality
+            }
+        
         analysis_result = {
             "keywords": [],
-            "quality_score": 0.5,
+            "quality_score": stt_quality["base_quality_score"],  # STT 품질 점수를 기본값으로 사용
             "stage": self.story_stage,
-            "suggestions": []
+            "suggestions": [],
+            "stt_quality": stt_quality
         }
         
         if not client:
-            # 클라이언트가 없는 경우 기본 처리
+            # 클라이언트가 없는 경우 향상된 기본 처리
+            logger.warning("OpenAI 클라이언트가 없어 기본 분석 모드로 처리")
+            
+            # 기본 키워드 추출 (한국어 명사 추출)
+            basic_keywords = self._extract_basic_keywords(user_input)
+            stage_keywords = self._extract_stage_specific_keywords(user_input)
+            emotion_keywords = self._extract_emotion_keywords(user_input)
+            
+            # 통합 키워드
+            all_keywords = basic_keywords + stage_keywords + emotion_keywords
+            analysis_result["keywords"] = list(set(all_keywords))[:10]  # 중복 제거, 최대 10개
+            
+            # 기본 품질 점수 (텍스트 길이와 키워드 수 기반)
+            text_length_score = min(len(user_input) / 50, 1.0)  # 50자 기준
+            keyword_score = min(len(analysis_result["keywords"]) / 5, 1.0)  # 5개 키워드 기준
+            analysis_result["quality_score"] = (text_length_score + keyword_score) / 2
+            
+            # 현재 단계 요소 업데이트
             self.story_elements[self.story_stage]["count"] += 1
+            for keyword in analysis_result["keywords"]:
+                self.story_elements[self.story_stage]["topics"].add(keyword)
+            
+            logger.info(f"기본 분석 완료: {len(analysis_result['keywords'])}개 키워드, 품질점수: {analysis_result['quality_score']:.2f}")
             return analysis_result
         
         try:
@@ -402,6 +495,138 @@ class StoryEngine:
         
         return analysis_result
     
+    def _extract_basic_keywords(self, text: str) -> List[str]:
+        """기본 키워드 추출 - 한국어 명사, 형용사, 동사 추출"""
+        import re
+        
+        keywords = []
+        
+        # 1. 한글 명사 패턴 (2-4글자, 조사가 붙은 형태도 포함)
+        noun_patterns = [
+            r'[가-힣]{2,4}(?=[이가을를은는과와에서의로])',  # 조사 앞 명사
+            r'[가-힣]{2,4}(?=\s|$|[\.!?])',              # 공백이나 문장 끝의 명사
+        ]
+        
+        for pattern in noun_patterns:
+            nouns = re.findall(pattern, text)
+            keywords.extend(nouns)
+        
+        # 2. 의미있는 동사/형용사 (어간 + 다)
+        verb_adj_pattern = r'[가-힣]{1,3}[다](?=\s|$|[\.!?])'
+        verbs_adjs = re.findall(verb_adj_pattern, text)
+        keywords.extend(verbs_adjs)
+        
+        # 3. 불용어 제거
+        stop_words = {
+            '그것', '이것', '저것', '여기', '거기', '저기', '때문', '경우', '정도',
+            '그런데', '그리고', '하지만', '그래서', '그러면', '그러니까', '그런',
+            '이런', '저런', '어떤', '무슨', '어느', '누구', '언제', '어디',
+            '이렇게', '그렇게', '저렇게', '어떻게', '왜냐하면', '따라서',
+            '있다', '없다', '되다', '하다', '가다', '오다', '보다', '말하다'
+        }
+        
+        # 중복 제거 및 필터링
+        filtered_keywords = []
+        for keyword in keywords:
+            if (len(keyword) >= 2 and 
+                keyword not in stop_words and 
+                keyword not in filtered_keywords):
+                filtered_keywords.append(keyword)
+        
+        return filtered_keywords[:8]  # 최대 8개
+    
+    def _validate_stt_quality(self, text: str) -> Dict[str, Any]:
+        """STT 결과 품질 검증 (Phase 2 추가)"""
+        import re
+        
+        validation_result = {
+            "is_valid": True,
+            "base_quality_score": 0.5,
+            "issues": [],
+            "confidence": 1.0
+        }
+        
+        # 1. 기본 길이 검증
+        if len(text.strip()) < 2:
+            validation_result["is_valid"] = False
+            validation_result["issues"].append("텍스트가 너무 짧음")
+            validation_result["base_quality_score"] = 0.1
+            return validation_result
+        
+        # 2. 한글 포함 여부 확인
+        korean_chars = re.findall(r'[가-힣]', text)
+        if len(korean_chars) < 2:
+            validation_result["is_valid"] = False
+            validation_result["issues"].append("의미있는 한글 내용 부족")
+            validation_result["base_quality_score"] = 0.2
+            return validation_result
+        
+        # 3. 노이즈 패턴 감지
+        noise_patterns = [
+            r'^[ㅋㅎㅠㅜㅗㅏㅓㅡㅣ]+$',  # 자음/모음만
+            r'^[음아어으]+$',              # 무의미한 소리
+            r'(.)\1{3,}',                  # 같은 글자 4번 이상 반복
+            r'^[.,!?\s]+$'                 # 구두점만
+        ]
+        
+        for pattern in noise_patterns:
+            if re.search(pattern, text.strip()):
+                validation_result["is_valid"] = False
+                validation_result["issues"].append("노이즈 패턴 감지")
+                validation_result["base_quality_score"] = 0.1
+                return validation_result
+        
+        # 4. 문장 완성도 검사
+        sentence_completeness = self._check_sentence_completeness(text)
+        validation_result["confidence"] = sentence_completeness
+        
+        # 5. 품질 점수 계산
+        korean_ratio = len(korean_chars) / len(text) if len(text) > 0 else 0
+        length_score = min(len(text.strip()) / 20, 1.0)  # 20자 기준
+        
+        validation_result["base_quality_score"] = (
+            korean_ratio * 0.4 +           # 한글 비율 40%
+            length_score * 0.3 +           # 길이 점수 30% 
+            sentence_completeness * 0.3    # 문장 완성도 30%
+        )
+        
+        # 6. 최종 검증
+        if validation_result["base_quality_score"] < 0.3:
+            validation_result["is_valid"] = False
+            validation_result["issues"].append("전체 품질 점수 부족")
+        
+        return validation_result
+    
+    def _check_sentence_completeness(self, text: str) -> float:
+        """문장 완성도 검사"""
+        import re
+        
+        completeness_score = 0.5  # 기본 점수
+        
+        # 1. 조사 사용 확인 (자연스러운 한국어)
+        josa_patterns = [r'[가-힣]+[이가을를은는과와에서의로도]', r'[가-힣]+[다요어]']
+        josa_count = 0
+        for pattern in josa_patterns:
+            josa_count += len(re.findall(pattern, text))
+        
+        if josa_count > 0:
+            completeness_score += 0.2
+        
+        # 2. 동사/형용사 어미 확인
+        verb_endings = [r'[가-힣]+[다요어서지](?:\s|$)', r'[가-힣]+[해해요했어](?:\s|$)']
+        verb_count = 0
+        for pattern in verb_endings:
+            verb_count += len(re.findall(pattern, text))
+        
+        if verb_count > 0:
+            completeness_score += 0.2
+        
+        # 3. 문장 부호 확인
+        if re.search(r'[.!?]', text):
+            completeness_score += 0.1
+        
+        return min(completeness_score, 1.0)
+    
     def _extract_keywords_fallback(self, text: str) -> List[str]:
         """JSON 파싱 실패 시 키워드 추출 폴백"""
         keywords = []
@@ -492,19 +717,56 @@ class StoryEngine:
         return keywords
     
     def _extract_emotion_keywords(self, text: str) -> List[str]:
-        """감정 키워드 추출"""
-        emotion_words = [
-            "기쁘다", "슬프다", "화나다", "무섭다", "신나다", "걱정하다",
-            "행복하다", "부끄럽다", "놀라다", "용감하다", "자신감", "희망",
-            "사랑", "미워", "즐겁다", "심심하다", "외롭다", "따뜻하다"
-        ]
+        """감정 키워드 추출 - Phase 3에서 확장"""
+        # 기본 감정 카테고리별로 확장
+        emotion_categories = {
+            "기쁨": ["기쁘다", "행복하다", "즐겁다", "신나다", "재미있다", "좋아", "웃다", "반가운", "기분좋다"],
+            "슬픔": ["슬프다", "우울하다", "울다", "눈물", "안타깝다", "아쉽다", "그립다"],
+            "분노": ["화나다", "짜증나다", "열받다", "속상하다", "억울하다", "화"], 
+            "두려움": ["무섭다", "두렵다", "걱정하다", "불안하다", "떨다", "무서워"],
+            "놀람": ["놀라다", "깜짝", "와", "어", "헉", "우와", "대박"],
+            "사랑": ["사랑하다", "좋아하다", "아끼다", "소중하다", "따뜻하다", "포근하다"],
+            "자신감": ["용감하다", "자신감", "당당하다", "멋지다", "훌륭하다", "대단하다"],
+            "부끄러움": ["부끄럽다", "창피하다", "수줍다", "민망하다"],
+            "외로움": ["외롭다", "쓸쓸하다", "혼자", "심심하다"],
+            "흥미": ["궁금하다", "신기하다", "관심", "호기심", "재미", "흥미"],
+            "만족": ["만족하다", "뿌듯하다", "성취감", "기특하다", "자랑스럽다"]
+        }
+        
+        # 문맥적 감정 표현도 인식
+        contextual_emotions = {
+            "웃음": ["하하", "히히", "크크", "깔깔", "킥킥"],
+            "탄성": ["와", "우와", "어머", "헉", "어"],
+            "애정": ["귀여운", "예쁜", "멋진", "좋은", "최고"],
+            "긍정": ["그래", "맞아", "좋아", "응", "네"],
+            "부정": ["싫어", "안돼", "아니야", "별로", "그만"]
+        }
         
         found_emotions = []
-        for emotion in emotion_words:
-            if emotion in text:
-                found_emotions.append(emotion)
         
-        return found_emotions
+        # 1. 기본 감정 카테고리에서 추출
+        for category, emotions in emotion_categories.items():
+            for emotion in emotions:
+                if emotion in text:
+                    found_emotions.append(f"{category}_{emotion}")
+                    if category not in found_emotions:  # 카테고리도 추가
+                        found_emotions.append(category)
+        
+        # 2. 문맥적 감정 표현 추출
+        for context, expressions in contextual_emotions.items():
+            for expr in expressions:
+                if expr in text:
+                    found_emotions.append(f"표현_{context}")
+                    if context not in found_emotions:
+                        found_emotions.append(context)
+        
+        # 3. 감정 강도 표현 인식
+        intensity_markers = ["정말", "너무", "완전", "엄청", "많이", "조금", "약간"]
+        for marker in intensity_markers:
+            if marker in text:
+                found_emotions.append(f"강도_{marker}")
+        
+        return list(set(found_emotions))[:10]  # 중복 제거, 최대 10개
     
     def should_transition_to_next_stage(self, conversation_length: int) -> bool:
         """
@@ -691,7 +953,9 @@ class StoryEngine:
         Returns:
             Dict: 이야기 주제 및 구조
         """
-        if len(conversation_history) < 2:
+        # 최소 대화 조건을 완화 (빈 대화가 아니면 분석 시도)
+        if len(conversation_history) < 1:
+            logger.warning(f"대화 기록이 없어 기본 구조 반환: {child_name}")
             return self._get_default_story_structure(child_name, age_group)
         
         # RAG 시스템을 통한 주제 풍부화
@@ -841,18 +1105,34 @@ class StoryEngine:
         return " | ".join(info_parts) if info_parts else "수집된 세부 정보 없음"
     
     def _get_default_story_structure(self, child_name: str, age_group: int) -> Dict:
-        """기본 이야기 구조 반환"""
-        return {
-            "title": f"{child_name}의 모험",
-            "theme": "우정과 모험",
-            "characters": [child_name, "친구들"],
-            "setting": "마법의 숲",
-            "plot_summary": "더 많은 이야기를 들려줘!",
-            "educational_value": "우정과 협력의 중요성",
-            "target_age": age_group,
-            "estimated_length": "짧음",
-            "key_scenes": ["만남", "모험", "해결"]
-        }
+        """개선된 기본 이야기 구조 반환"""
+        logger.info(f"기본 이야기 구조 생성: {child_name} ({age_group}세)")
+        
+        # 연령대별 맞춤 기본 구조
+        if age_group <= 5:
+            return {
+                "title": f"{child_name}와 마법 친구들",
+                "theme": "우정과 함께하는 모험",
+                "characters": [child_name, "토끼", "곰돌이"],
+                "setting": "색깔 무지개 마을",
+                "plot_summary": f"{child_name}이가 마법 친구들과 함께 신나는 모험을 떠나는 이야기예요!",
+                "educational_value": "친구와 함께하는 즐거움",
+                "target_age": age_group,
+                "estimated_length": "짧음",
+                "key_scenes": ["새로운 친구 만나기", "함께 놀기", "도움 주고받기"]
+            }
+        else:
+            return {
+                "title": f"{child_name}의 용기있는 모험",
+                "theme": "용기와 성장",
+                "characters": [child_name, "지혜로운 현자", "용감한 동료"],
+                "setting": "신비로운 모험의 세계",
+                "plot_summary": f"{child_name}이가 용기를 내어 어려움을 헤쳐나가며 성장하는 모험 이야기예요!",
+                "educational_value": "용기와 끈기의 중요성",
+                "target_age": age_group,
+                "estimated_length": "중간",
+                "key_scenes": ["도전 시작", "어려움 극복", "성장과 깨달음"]
+            }
     
     def _get_error_story_structure(self, error_msg: str, age_group: int) -> Dict:
         """오류 시 기본 구조 반환"""

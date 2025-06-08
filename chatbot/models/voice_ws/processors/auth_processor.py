@@ -100,17 +100,17 @@ class AuthProcessor:
         logger.info(f"쿼리 파라미터: {dict(websocket.query_params)}")
         
         try:
-            token = await self.extract_token_from_header(websocket)
-            
-            if not token:
-                logger.warning("validate_connection: 토큰 없음. 연결 거부.")
+        token = await self.extract_token_from_header(websocket)
+        
+        if not token:
+            logger.warning("validate_connection: 토큰 없음. 연결 거부.")
                 # WebSocket을 이미 수락하기 전에 닫으려고 하면 오류 발생 가능
-                return False
-            
+            return False
+        
             logger.info(f"validate_connection: 토큰 ('{token[:20]}...') 검증 시작")
-            is_valid = self.validate_token(token)
-            
-            if not is_valid:
+        is_valid = self.validate_token(token)
+        
+        if not is_valid:
                 logger.warning(f"validate_connection: 토큰 유효하지 않음. 연결 거부.")
                 return False
             

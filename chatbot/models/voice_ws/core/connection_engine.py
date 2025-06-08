@@ -23,6 +23,7 @@ class ConnectionEngine:
     - 세션 상태 추적
     - 비활성 연결 정리
     - ChatBot 인스턴스 관리
+    - 음성 정보 공유 및 동기화
     """
     
     def __init__(self, connection_timeout: int = 30 * 60):
@@ -37,7 +38,11 @@ class ConnectionEngine:
         self.connection_timeout = connection_timeout
         self.shutdown_event = asyncio.Event()
         
-        logger.info("연결 엔진 초기화 완료")
+        # 음성 정보 공유를 위한 새로운 데이터 구조 추가
+        self.voice_mappings: Dict[str, Dict[str, Any]] = {}  # {client_id: voice_info}
+        self.audio_processors: Dict[str, Any] = {}  # {client_id: audio_processor_ref}
+        
+        logger.info("연결 엔진 초기화 완료 (음성 정보 공유 기능 포함)")
     
     # ==========================================
     # 기본 연결 관리
@@ -66,6 +71,16 @@ class ConnectionEngine:
         """클라이언트 연결 제거"""
         if client_id in self.active_connections:
             del self.active_connections[client_id]
+            
+            # 관련된 음성 정보도 함께 정리
+            if client_id in self.voice_mappings:
+                del self.voice_mappings[client_id]
+                logger.info(f"클라이언트 {client_id}의 음성 매핑 정보 제거")
+                
+            if client_id in self.audio_processors:
+                del self.audio_processors[client_id]
+                logger.info(f"클라이언트 {client_id}의 AudioProcessor 참조 제거")
+            
             logger.info(f"클라이언트 제거: {client_id} (총 {len(self.active_connections)}개 연결)")
     
     async def close_all_connections(self) -> None:
@@ -123,7 +138,7 @@ class ConnectionEngine:
                 del self.chatbot_b_instances[client_id]
                 logger.info(f"ChatBot B 인스턴스 정리: {client_id}")
             
-            # 연결 정보 삭제
+            # 연결 정보 삭제 (음성 정보도 함께 정리됨)
             self.remove_client(client_id)
             logger.info(f"클라이언트 연결 종료 처리 완료: {client_id}")
             
@@ -149,6 +164,122 @@ class ConnectionEngine:
         """ChatBot B 활동 시간 업데이트"""
         if client_id in self.chatbot_b_instances:
             self.chatbot_b_instances[client_id]["last_activity"] = time.time()
+    
+    # ==========================================
+    # 음성 정보 공유 기능
+    # ==========================================
+    
+    def set_client_voice_mapping(self, client_id: str, voice_id: str, voice_settings: dict = None, user_name: str = None) -> None:
+        """
+        클라이언트의 음성 매핑 정보 설정
+        
+        Args:
+            client_id (str): 클라이언트 식별자
+            voice_id (str): 음성 ID (클론 음성 포함)
+            voice_settings (dict): 음성 설정 (옵션)
+            user_name (str): 사용자 이름 (옵션)
+        """
+        self.voice_mappings[client_id] = {
+            "voice_id": voice_id,
+            "voice_settings": voice_settings or {},
+            "user_name": user_name,
+            "created_at": time.time(),
+            "last_used": time.time()
+        }
+        
+        logger.info(f"클라이언트 {client_id}의 음성 매핑 설정: {voice_id} (사용자: {user_name})")
+        
+        # 등록된 AudioProcessor에 자동으로 음성 매핑 적용
+        self._sync_voice_mapping_to_audio_processor(client_id, voice_id, voice_settings)
+    
+    def get_client_voice_mapping(self, client_id: str) -> Optional[Dict[str, Any]]:
+        """
+        클라이언트의 음성 매핑 정보 조회
+        
+        Args:
+            client_id (str): 클라이언트 식별자
+            
+        Returns:
+            Optional[Dict]: 음성 매핑 정보 또는 None
+        """
+        voice_info = self.voice_mappings.get(client_id)
+        if voice_info:
+            # 마지막 사용 시간 업데이트
+            voice_info["last_used"] = time.time()
+        return voice_info
+    
+    def remove_client_voice_mapping(self, client_id: str) -> None:
+        """
+        클라이언트의 음성 매핑 정보 제거
+        
+        Args:
+            client_id (str): 클라이언트 식별자
+        """
+        if client_id in self.voice_mappings:
+            del self.voice_mappings[client_id]
+            logger.info(f"클라이언트 {client_id}의 음성 매핑 제거")
+            
+            # AudioProcessor에서도 제거
+            if client_id in self.audio_processors:
+                audio_processor = self.audio_processors[client_id]
+                if hasattr(audio_processor, 'remove_user_voice_mapping'):
+                    audio_processor.remove_user_voice_mapping(client_id)
+    
+    def register_audio_processor(self, client_id: str, audio_processor) -> None:
+        """
+        클라이언트의 AudioProcessor 등록
+        
+        Args:
+            client_id (str): 클라이언트 식별자
+            audio_processor: AudioProcessor 인스턴스
+        """
+        self.audio_processors[client_id] = audio_processor
+        logger.info(f"클라이언트 {client_id}의 AudioProcessor 등록")
+        
+        # 기존 음성 매핑이 있다면 자동 적용
+        if client_id in self.voice_mappings:
+            voice_info = self.voice_mappings[client_id]
+            self._sync_voice_mapping_to_audio_processor(
+                client_id, 
+                voice_info["voice_id"], 
+                voice_info["voice_settings"]
+            )
+    
+    def _sync_voice_mapping_to_audio_processor(self, client_id: str, voice_id: str, voice_settings: dict = None) -> None:
+        """
+        음성 매핑 정보를 AudioProcessor에 동기화
+        
+        Args:
+            client_id (str): 클라이언트 식별자
+            voice_id (str): 음성 ID
+            voice_settings (dict): 음성 설정
+        """
+        if client_id in self.audio_processors:
+            audio_processor = self.audio_processors[client_id]
+            if hasattr(audio_processor, 'set_user_voice_mapping'):
+                audio_processor.set_user_voice_mapping(client_id, voice_id, voice_settings)
+                logger.info(f"AudioProcessor에 음성 매핑 동기화 완료: {client_id} -> {voice_id}")
+            else:
+                logger.warning(f"AudioProcessor에 set_user_voice_mapping 메서드가 없습니다: {client_id}")
+    
+    def get_all_voice_mappings(self) -> Dict[str, Dict[str, Any]]:
+        """
+        모든 클라이언트의 음성 매핑 정보 반환
+        
+        Returns:
+            Dict: 모든 음성 매핑 정보
+        """
+        return self.voice_mappings.copy()
+    
+    def update_voice_mapping_usage(self, client_id: str) -> None:
+        """
+        음성 매핑 사용 시간 업데이트
+        
+        Args:
+            client_id (str): 클라이언트 식별자
+        """
+        if client_id in self.voice_mappings:
+            self.voice_mappings[client_id]["last_used"] = time.time()
     
     # ==========================================
     # 비활성 연결 정리
@@ -235,7 +366,7 @@ class ConnectionEngine:
         
         # 끊어진 연결들 정리
         for client_id in disconnected_clients:
-            logger.info(f"건강성 체크로 인한 연결 정리: {client_id}")
+            logger.info(f"헬스 체크로 인한 연결 정리: {client_id}")
             await self.handle_disconnect(client_id)
     
     # ==========================================

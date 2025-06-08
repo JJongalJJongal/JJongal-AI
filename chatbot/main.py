@@ -1,7 +1,9 @@
 #!/usr/bin/env python3
 """
 부기와 꼬기 - Enhanced 아동 상호작용 챗봇 시스템 v2.0
-CLI 인터페이스
+CLI 인터페이스 (개발/테스트용)
+
+개발 및 테스트 목적
 
 부기(Chat-bot A): Enhanced 연령별 특화 대화 및 이야기 주제 추출
 꼬기(Chat-bot B): Enhanced 상세 동화, 이미지, 음성 생성 (연령별 최적화)

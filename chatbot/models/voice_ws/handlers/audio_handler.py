@@ -111,6 +111,10 @@ async def handle_audio_websocket(
         # 연결 상태 전송
         await ws_engine.send_status(websocket, "connected", f"안녕 {child_name}! 부기와 함께 재미있는 이야기를 만들어보자!")
         
+        # ConnectionEngine에 AudioProcessor 등록 (음성 정보 공유를 위해)
+        connection_engine.register_audio_processor(client_id, audio_processor)
+        logger.info(f"AudioProcessor 등록 완료: {client_id}")
+
         while True:
             try:
                 # WebSocket 메시지 수신 (10초 타임아웃)
@@ -158,17 +162,21 @@ async def handle_audio_websocket(
                                             
                                             logger.debug(f"[AUDIO_END] 임시 파일 생성: {temp_file_path}")
                                             
-                                            # STT 처리
-                                            text, error_msg, error_code = await audio_processor.transcribe_audio(temp_file_path)
+                                            # STT 처리 (강화된 품질 검증 포함)
+                                            text, error_msg, error_code, quality_info = await audio_processor.transcribe_audio(temp_file_path)
                                             
                                             # STT 결과를 기존 형식에 맞게 변환
                                             if text and not error_msg:
-                                                stt_result = {"text": text, "confidence": 0.95}  # confidence는 기본값
+                                                user_text = text.strip()  # 변수명 통일
+                                                
+                                                # 품질 정보에서 실제 신뢰도 사용
+                                                confidence = quality_info.get("quality_score", 0.95) if quality_info else 0.95
+                                                stt_result = {"text": user_text, "confidence": confidence, "quality_info": quality_info}
                                                 
                                                 # === 음성 클로닝용 샘플 수집 ===
                                                 try:
                                                     # 음성 품질 체크 (3초 이상, 의미있는 텍스트)
-                                                    if len(combined_audio) > 48000 and len(text.strip()) > 5:  # ~3초 이상 + 의미있는 텍스트
+                                                    if len(combined_audio) > 10000 and len(text.strip()) > 2:  # ~3초 이상 + 의미있는 텍스트
                                                         sample_saved = await voice_cloning_processor.collect_user_audio_sample(
                                                             user_id=child_name,
                                                             audio_data=combined_audio
@@ -197,7 +205,7 @@ async def handle_audio_websocket(
                                                                 
                                                                 # 백그라운드에서 음성 클론 생성
                                                                 asyncio.create_task(create_voice_clone_background(
-                                                                    voice_cloning_processor, child_name, websocket, ws_engine
+                                                                    voice_cloning_processor, child_name, websocket, ws_engine, audio_processor, client_id, connection_engine
                                                                 ))
                                                 except Exception as clone_error:
                                                     logger.warning(f"[VOICE_CLONE] 샘플 수집 실패: {clone_error}")
@@ -213,7 +221,7 @@ async def handle_audio_websocket(
                                                 logger.info(f"[STT] 변환 완료: '{user_text}' (신뢰도: {confidence:.2f})")
                                                 
                                                 # ChatBot A 응답 처리
-                                                ai_response, tts_result, conversation_length = await handle_chat_a_response(chatbot_a, user_text, audio_processor)
+                                                ai_response, tts_result, conversation_length = await handle_chat_a_response(chatbot_a, user_text, audio_processor, client_id)
                                                 
                                                 # 응답 패킷 구성
                                                 response_packet = {
@@ -460,7 +468,7 @@ async def handle_audio_websocket(
                 logger.error(f"예상치 못한 데이터 수신 오류: {client_id}, 오류: {e}")
                 logger.error(f"오류 세부사항: {traceback.format_exc()}")
                 break
-    
+            
     except WebSocketDisconnect:
         logger.info(f"오디오 WebSocket 연결 종료됨: {client_id}")
     except Exception as e:
@@ -872,15 +880,16 @@ async def check_story_completion(story_engine, conversation_length: int, child_n
         bool: 이야기 생성 준비 완료 여부
     """
     try:
-        # 최소 대화 턴 수 확인 (5턴 이상)
-        if conversation_length < 10:  # user + assistant = 2턴이므로 최소 5회 대화
+        # 최소 대화 턴 수 확인 (3턴 이상으로 완화)
+        if conversation_length < 4:  # user + assistant = 2턴이므로 최소 2회 대화
+            logger.info(f"[STORY_CHECK] 대화 길이 부족: {conversation_length} < 4")
             return False
         
         # 이야기 요소별 수집 상태 확인
         story_elements = story_engine.get_story_elements()
         
-        # 각 단계별 충분한 정보 수집 여부 체크
-        character_ready = story_elements.get("character", {}).get("count", 0) >= 2
+        # 각 단계별 충분한 정보 수집 여부 체크 (조건 완화)
+        character_ready = story_elements.get("character", {}).get("count", 0) >= 1  # 2→1로 완화
         setting_ready = story_elements.get("setting", {}).get("count", 0) >= 1
         problem_ready = story_elements.get("problem", {}).get("count", 0) >= 1
         
@@ -927,51 +936,74 @@ async def check_story_completion(story_engine, conversation_length: int, child_n
         # 오류 시 긴 대화면 종료하도록 처리
         return conversation_length >= 40
 
-async def handle_chat_a_response(chatbot_a: ChatBotA, user_text: str, audio_processor: AudioProcessor) -> tuple:
+async def handle_chat_a_response(chatbot_a: ChatBotA, user_text: str, audio_processor: AudioProcessor, client_id: str = None) -> tuple:
     """
     ChatBot A 응답 처리
     
     Args:
         chatbot_a: ChatBot A 인스턴스
         user_text: 사용자 입력 텍스트
+        audio_processor: 오디오 프로세서
+        client_id: 클라이언트 식별자 (클론 음성 사용)
         
     Returns:
         tuple: (ai_response, tts_result, conversation_length)
     """
     try:
-        # ChatBot A 응답 생성
-        ai_response = await asyncio.to_thread(chatbot_a.get_response, user_text)
-        logger.info(f"[CHAT_A] 부기 응답 생성 완료: {ai_response[:50]}...")
+        logger.info(f"[CHAT_A] 사용자 입력 처리 시작: '{user_text[:50]}...'")
         
-        # TTS 처리 (음성 생성)
+        # 1. 사용자 입력을 대화 기록에 명시적으로 저장 (중복 방지)
+        current_history = chatbot_a.get_conversation_history()
+        logger.info(f"[CHAT_A] 현재 대화 기록 길이: {len(current_history)}")
+        
+        # 2. ChatBot A 응답 생성 (get_response 내부에서 이미 add_to_conversation 호출)
+        ai_response = await asyncio.to_thread(chatbot_a.get_response, user_text)
+        logger.info(f"[CHAT_A] 부기 응답 생성 완료: '{ai_response[:50]}...'")
+        
+        # 3. 대화 기록 업데이트 확인
+        updated_history = chatbot_a.get_conversation_history()
+        conversation_length = len(updated_history)
+        logger.info(f"[CHAT_A] 업데이트된 대화 기록 길이: {conversation_length}")
+        
+        # 4. StoryEngine 상태 확인 (디버깅)
+        if hasattr(chatbot_a, 'story_engine'):
+            story_elements = chatbot_a.story_engine.get_story_elements()
+            logger.info(f"[CHAT_A] 수집된 이야기 요소: {story_elements}")
+            logger.info(f"[CHAT_A] 현재 이야기 단계: {chatbot_a.story_engine.story_stage}")
+        
+        # 5. TTS 처리 (음성 생성)
         tts_result = None
         try:
-            # AudioProcessor의 synthesize_tts 메서드 사용
-            audio_data, status, error_msg, error_code = await audio_processor.synthesize_tts(ai_response)
+            logger.info(f"[TTS] 음성 생성 시작: '{ai_response[:30]}...' (client_id: {client_id})")
+            audio_data, status, error_msg, error_code = await audio_processor.synthesize_tts(
+                ai_response, 
+                client_id=client_id  # 클라이언트별 클론 음성 사용
+            )
             if status != "error" and audio_data:
                 tts_result = {"audio_data": audio_data}
-                logger.info(f"[TTS] 음성 생성 완료: {len(audio_data)} bytes")
+                logger.info(f"[TTS] 음성 생성 완료: {len(audio_data)} chars (base64)")
             else:
-                logger.warning(f"[TTS] 음성 생성 실패: {error_msg}")
+                logger.warning(f"[TTS] 음성 생성 실패: {error_msg} (code: {error_code})")
                 tts_result = None
         except Exception as tts_error:
-            logger.warning(f"[TTS] 음성 생성 실패: {tts_error}")
+            logger.warning(f"[TTS] 음성 생성 중 예외: {tts_error}")
             tts_result = None
-        
-        # 대화 길이 확인
-        conversation_length = len(chatbot_a.conversation.get_conversation_history())
         
         return ai_response, tts_result, conversation_length
         
     except Exception as e:
         logger.error(f"[CHAT_A] ChatBot A 응답 처리 중 오류: {e}")
+        logger.error(f"[CHAT_A] 오류 스택 트레이스: {traceback.format_exc()}")
         raise
 
 async def create_voice_clone_background(
     voice_cloning_processor: VoiceCloningProcessor,
     child_name: str,
     websocket: WebSocket,
-    ws_engine: WebSocketEngine
+    ws_engine: WebSocketEngine,
+    audio_processor: AudioProcessor = None,
+    client_id: str = None,
+    connection_engine: ConnectionEngine = None
 ):
     """백그라운드에서 음성 클론 생성"""
     try:
@@ -986,12 +1018,41 @@ async def create_voice_clone_background(
         if voice_id:
             logger.info(f"[VOICE_CLONE] 음성 클론 생성 성공: {child_name} -> {voice_id}")
             
+            # 클론 음성 설정
+            clone_voice_settings = {
+                "stability": 0.8,  # 클론 음성을 위한 안정성 증가
+                "similarity_boost": 0.9,  # 유사성 최대화
+                "style": 0.2,  # 자연스러운 스타일
+                "use_speaker_boost": True
+            }
+            
+            # ConnectionEngine을 통한 음성 정보 공유 (우선 방법)
+            if connection_engine and client_id:
+                connection_engine.set_client_voice_mapping(
+                    client_id=client_id,
+                    voice_id=voice_id,
+                    voice_settings=clone_voice_settings,
+                    user_name=child_name
+                )
+                logger.info(f"[VOICE_CLONE] ConnectionEngine을 통한 음성 매핑 설정 완료: {client_id} -> {voice_id}")
+            
+            # 직접 AudioProcessor 설정 (백업 방법)
+            elif audio_processor and client_id:
+                audio_processor.set_user_voice_mapping(
+                    client_id=client_id,
+                    voice_id=voice_id,
+                    voice_settings=clone_voice_settings
+                )
+                logger.info(f"[VOICE_CLONE] AudioProcessor에 직접 클론 음성 매핑 설정 완료: {client_id} -> {voice_id}")
+            
             # 성공 알림
             await ws_engine.send_json(websocket, {
                 "type": "voice_clone_created",
-                "message": f"🎉 {child_name}님의 목소리가 성공적으로 복제되었어요! 동화에서 주인공의 목소리로 사용됩니다.",
+                "message": f"🎉 {child_name}님의 목소리가 성공적으로 복제되었어요! 이제 부기가 {child_name}님의 목소리로 대화할 수 있습니다.",
                 "voice_id": voice_id,
                 "child_name": child_name,
+                "realtime_enabled": (connection_engine and client_id) or (audio_processor and client_id),
+                "sync_method": "connection_engine" if (connection_engine and client_id) else "direct",
                 "timestamp": datetime.now().isoformat()
             })
         else:
@@ -1012,7 +1073,7 @@ async def create_voice_clone_background(
         try:
             await ws_engine.send_json(websocket, {
                 "type": "voice_clone_failed",
-                "message": "음성 복제 중 오류가 발생했어요. 기본 목소리로 동화를 만들어드릴게요!",
+                "message": "음성 복제 중 오류가 발생했어요. 기본 목소리로 동화를 만들어드릴게요!", 
                 "error": str(e),
                 "timestamp": datetime.now().isoformat()
             })

@@ -18,17 +18,17 @@ except ImportError:
 from langchain_core.runnables import RunnablePassthrough
 
 # Project imports
-from .conversation_engine import ConversationEngine
+from ..conversation_manager import ConversationManager
 from .rag_engine import RAGSystem
 from shared.utils.logging_utils import get_module_logger
 
 logger = get_module_logger(__name__)
 
-class LangChainConversationEngine(ConversationEngine):
+class LangChainConversationEngine(ConversationManager):
     """
     LangChain 기반 대화 엔진
     
-    기존 ConversationEngine을 확장하여 LangChain의 체인 기능을 활용한
+    기존 ConversationManager를 확장하여 LangChain의 체인 기능을 활용한
     더 정교한 대화 생성 기능을 제공
     """
     
@@ -471,7 +471,7 @@ class LangChainConversationEngine(ConversationEngine):
     async def health_check(self) -> bool:
         """LangChain 대화 엔진 상태 확인"""
         try:
-            # 기본 ConversationEngine 상태 확인
+            # 기본 ConversationManager 상태 확인
             if self.is_token_limit_reached():
                 logger.warning("토큰 제한에 도달함")
                 return False
