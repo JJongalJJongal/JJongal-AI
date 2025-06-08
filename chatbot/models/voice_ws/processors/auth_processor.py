@@ -95,24 +95,31 @@ class AuthProcessor:
 
     async def validate_connection(self, websocket: WebSocket) -> bool:
         """WebSocket 연결 유효성 검증 (토큰 포함)"""
-        logger.info("validate_connection 호출됨.")
-        token = await self.extract_token_from_header(websocket)
+        logger.info("=== WebSocket 연결 검증 시작 ===")
+        logger.info(f"클라이언트 IP: {websocket.client.host if websocket.client else 'Unknown'}")
+        logger.info(f"쿼리 파라미터: {dict(websocket.query_params)}")
         
-        if not token:
-            logger.warning("validate_connection: 토큰 없음. 연결 거부.")
-            await websocket.close(code=status.WS_1008_POLICY_VIOLATION, reason="토큰 없음")
+        try:
+            token = await self.extract_token_from_header(websocket)
+            
+            if not token:
+                logger.warning("validate_connection: 토큰 없음. 연결 거부.")
+                # WebSocket을 이미 수락하기 전에 닫으려고 하면 오류 발생 가능
+                return False
+            
+            logger.info(f"validate_connection: 토큰 ('{token[:20]}...') 검증 시작")
+            is_valid = self.validate_token(token)
+            
+            if not is_valid:
+                logger.warning(f"validate_connection: 토큰 유효하지 않음. 연결 거부.")
+                return False
+            
+            logger.info("validate_connection: 토큰 유효함. 연결 허용.")
+            return True
+            
+        except Exception as e:
+            logger.error(f"validate_connection 중 오류: {e}")
             return False
-        
-        logger.info(f"validate_connection: 토큰 ('{token}')에 대해 validate_token 호출 예정.")
-        is_valid = self.validate_token(token)
-        
-        if not is_valid:
-            logger.warning(f"validate_connection: validate_token이 False 반환. 토큰 ('{token}') 유효하지 않음. 연결 거부.")
-            await websocket.close(code=status.WS_1008_POLICY_VIOLATION, reason="유효하지 않은 토큰")
-            return False
-        
-        logger.info("validate_connection: 토큰 유효함. True 반환.")
-        return True
 
     def get_test_token(self) -> Dict[str, Optional[str]]:
         """테스트용 JWT 토큰 생성"""

@@ -198,7 +198,15 @@ app = FastAPI(
 # CORS 설정
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000", "http://localhost:8080", "*"],
+    allow_origins=[
+        "http://localhost:3000", 
+        "http://localhost:8080", 
+        "http://52.78.92.115",      # AWS 고정 IP HTTP
+        "https://52.78.92.115",     # AWS 고정 IP HTTPS
+        "ws://52.78.92.115",        # AWS 고정 IP WebSocket
+        "wss://52.78.92.115",       # AWS 고정 IP Secure WebSocket
+        "*"                         # 개발 단계에서 모든 origin 허용
+    ],
     allow_credentials=True,
     allow_methods=["GET", "POST", "PUT", "DELETE"],
     allow_headers=["*"],
@@ -241,23 +249,47 @@ async def audio_endpoint(
     interests: Optional[str] = Query(None),
 ):
     """WebSocket 오디오 처리 엔드포인트"""
-    logger.info(f"/ws/audio 엔드포인트 호출됨")
+    logger.info(f"=== 웹소켓 연결 시도 ===")
+    logger.info(f"클라이언트 IP: {websocket.client.host if websocket.client else 'Unknown'}")
     logger.info(f"요청 파라미터: child_name={child_name}, age={age}, interests={interests}")
-    logger.info(f"WebSocket 클라이언트: {websocket.client}")
+    logger.info(f"Headers: {dict(websocket.headers) if hasattr(websocket, 'headers') else 'None'}")
     
-    if not await auth_processor.validate_connection(websocket):
-        logger.warning(f"인증 실패로 연결 거부")
+    # 파라미터 검증
+    if not child_name:
+        logger.warning("필수 파라미터 누락: child_name")
+        await websocket.close(code=1003, reason="Missing child_name parameter")
         return
         
-    logger.info(f"인증 성공, audio_handler로 전달")
-    await handle_audio_websocket(
-        websocket,
-        child_name,
-        age,
-        interests,
-        connection_engine=connection_engine,
-        audio_processor=audio_processor
-    )
+    if not age or not (4 <= age <= 9):
+        logger.warning(f"잘못된 age 파라미터: {age}")
+        await websocket.close(code=1003, reason="Invalid age parameter (4-9)")
+        return
+    
+    try:
+        # 인증 확인
+        if not await auth_processor.validate_connection(websocket):
+            logger.warning(f"인증 실패로 연결 거부")
+            await websocket.close(code=1008, reason="Authentication failed")
+            return
+            
+        logger.info(f"인증 성공, audio_handler로 전달")
+        
+        # 오디오 핸들러로 전달
+        await handle_audio_websocket(
+            websocket,
+            child_name,
+            age,
+            interests,
+            connection_engine=connection_engine,
+            audio_processor=audio_processor
+        )
+        
+    except Exception as e:
+        logger.error(f"웹소켓 엔드포인트 오류: {e}")
+        try:
+            await websocket.close(code=1011, reason="Internal server error")
+        except:
+            pass
 
 @app.websocket("/ws/story_generation")
 async def story_generation_endpoint(
