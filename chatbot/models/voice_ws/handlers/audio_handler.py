@@ -73,6 +73,15 @@ async def handle_audio_websocket(
         logger.info(f"WebSocket 상태: {websocket.client_state}")
         logger.info(f"==========================================") # 로깅
         
+        # 연결 확인을 위한 초기 핑 전송
+        try:
+            await ws_engine.send_status(websocket, "connected", "WebSocket 연결 성공")
+            logger.info(f"초기 상태 메시지 전송 완료: {client_id}")
+        except Exception as e:
+            logger.error(f"초기 상태 메시지 전송 실패: {client_id}, 오류: {e}")
+            await websocket.close(code=status.WS_1011_INTERNAL_ERROR, reason="초기 통신 실패")
+            return
+        
         # 사전 로드된 VectorDB 인스턴스 가져오기
         vector_db_instance = websocket.app.state.vector_db
         if vector_db_instance is None: # VectorDB 인스턴스 누락 시
@@ -102,13 +111,16 @@ async def handle_audio_websocket(
         connection_engine.add_client(client_id, connection_info) # 연결 정보 추가
 
         # 초기 인사말 전송
+        logger.info(f"[GREETING] 인사말 생성 시작: {client_id}")
         greeting = await asyncio.to_thread(
             chatbot_a.initialize_chat, # 부기 챗봇 인스턴스 초기화
             child_name=child_name, # 아이 이름
             age=age, # 아이 연령대
             interests=interests_list, # 관심사 목록
             chatbot_name="부기" # 챗봇 이름
-        ) 
+        )
+        
+        logger.info(f"[GREETING] TTS 음성 생성 시작: {client_id}")
         greeting_audio_b64, tts_status, tts_error, tts_code = await audio_processor.synthesize_tts(greeting) # ElevenLabs로 인사말 음성 생성
         
         greeting_packet = {
@@ -122,8 +134,18 @@ async def handle_audio_websocket(
             "error_message": tts_error,
             "error_code": tts_code
         }
-        await ws_engine.send_json(websocket, greeting_packet) # 인사말 전송
-        logger.info(f"인사말 전송 완료: {client_id}") # 로깅
+        
+        # 인사말 전송 및 확인
+        send_success = await ws_engine.send_json(websocket, greeting_packet) # 인사말 전송
+        if not send_success:
+            logger.error(f"인사말 전송 실패: {client_id}")
+            await websocket.close(code=status.WS_1011_INTERNAL_ERROR, reason="인사말 전송 실패")
+            return
+        
+        logger.info(f"[GREETING] 인사말 전송 완료: {client_id}") # 로깅
+        
+        # 준비 상태 알림
+        await ws_engine.send_status(websocket, "ready", "음성 대화 준비 완료")
 
         # 메인 대화 루프
         audio_chunks = [] # 오디오 chunk 목록
@@ -131,6 +153,8 @@ async def handle_audio_websocket(
         chunk_collection_start_time = time.time() # 오디오 chunk 수집 시작 시간
         last_ping_time = time.time() # 마지막 ping 시간
         ping_interval = 30.0 # ping 간격 (30초)
+
+        logger.info(f"[MAIN_LOOP] 메인 대화 루프 시작: {client_id}")
 
         while True:
             try:
