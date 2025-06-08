@@ -373,7 +373,6 @@ class WorkflowOrchestrator:
                 content=generated_content["content"],
                 chapters=generated_content.get("chapters", []),
                 word_count=len(generated_content["content"].split()),
-                reading_level=story_schema.child_profile.language_level,
                 generation_model="gpt-4o-mini",
                 quality_score=generated_content.get("quality_score", 0.8)
             )

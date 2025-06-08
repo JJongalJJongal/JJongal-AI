@@ -32,7 +32,7 @@
             "안녕 {name}! 오늘 기분이 어때? 네가 좋아하는 게 뭐야?"
         ],
         
-        "story_collection_prompt_template": "아이의 이름: {child_name}\n아이의 연령: {age_group}\n아이의 관심사: {interests}\n\n{child_name}와/과의 대화를 바탕으로 동화 줄거리를 수집해주세요.\n\n고려해야 할 것:\n1. 아이의 관심사: {interests}\n2. 최근 대화 토픽\n3. 아이의 연령에 맞는 주제\n4. 교육적 가치\n5. 이야기의 일관성과 완성도\n6. 아이가 자주 언급한 캐릭터나 요소\n\nReturn a JSON with:\n- theme: 동화의 주제\n- characters: 주요 캐릭터 (최소 1명, 최대 3명)\n- setting: 배경 설정\n- plot_summary: 간략한 줄거리 (5-7문장)\n- educational_value: 교육적 가치\n- target_age: 적합한 연령대",
+        "story_collection_prompt_template": "아이의 이름: {child_name}\n아이의 연령: {age_group}\n아이의 관심사: {interests}\n\n{child_name}와/과의 대화를 바탕으로 동화 줄거리를 수집해줘.\n\n고려해야 할 것:\n1. 아이의 관심사: {interests}\n2. 최근 대화 토픽\n3. 아이의 연령에 맞는 주제\n4. 교육적 가치\n5. 이야기의 일관성과 완성도\n6. 아이가 자주 언급한 캐릭터나 요소\n\nReturn a JSON with:\n- theme: 동화의 주제\n- characters: 주요 캐릭터 (최소 1명, 최대 3명)\n- setting: 배경 설정\n- plot_summary: 간략한 줄거리 (5-7문장)\n- educational_value: 교육적 가치\n- target_age: 적합한 연령대",
         
         "follow_up_questions": [
             "아 그랬구나! 그래서 어떻게 됐어?",

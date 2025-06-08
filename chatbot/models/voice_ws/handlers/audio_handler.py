@@ -9,7 +9,7 @@ import traceback
 import json
 import os
 from datetime import datetime
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, List
 from fastapi import WebSocket, status
 from fastapi.websockets import WebSocketDisconnect, WebSocketState
 import tempfile
@@ -584,11 +584,32 @@ async def handle_automatic_story_generation(
     logger.info(f"[AUTO_STORY_GEN] 자동 동화 생성 시작: {client_id}")
     
     try:
-        # 1. 부기에서 이야기 개요 추출
-        logger.info(f"[AUTO_STORY_GEN] 부기에서 이야기 개요 추출 중...")
+        # 1. 실제 수집된 정보를 바탕으로 이야기 개요 구성
+        logger.info(f"[AUTO_STORY_GEN] 수집된 정보를 바탕으로 이야기 개요 구성 중...")
         
-        story_outline = chatbot_a.get_story_outline_for_chatbot_b()
-        logger.info(f"[AUTO_STORY_GEN] 이야기 개요 추출 완료: {story_outline.get('title', 'Unknown')}")
+        # 대화 기록에서 정보 추출
+        conversation_history = chatbot_a.get_conversation_history()
+        
+        # STT 내용에서 실제 정보 추출
+        extracted_info = await _extract_story_info_from_conversation(conversation_history, child_name, interests_list)
+        
+        # 이야기 개요 구성 (추출된 정보 기반)
+        story_outline = {
+            "theme": extracted_info.get("theme", f"{child_name}의 모험"),
+            "plot_summary": extracted_info.get("plot_summary", f"{child_name}이가 겪는 특별한 이야기"),
+            "educational_value": extracted_info.get("educational_value", "호기심과 탐구심, 친구와의 협력" if age <= 7 else "문제 해결 능력, 창의적 사고, 공감 능력"),
+            "target_age": age,
+            "setting": extracted_info.get("setting", "신비로운 장소"),
+            "characters": extracted_info.get("characters", [child_name]),
+            "child_profile": {
+                "name": child_name,
+                "age": age,
+                "interests": interests_list
+            }
+        }
+        
+        logger.info(f"[AUTO_STORY_GEN] 추출된 정보: 캐릭터 {len(extracted_info.get('characters', []))}개, 설정: {extracted_info.get('setting', 'None')}")
+        logger.info(f"[AUTO_STORY_GEN] 이야기 개요 구성 완료: {story_outline.get('theme', 'Unknown')}")
         
         # 2. 꼬기(ChatBot B) 인스턴스 생성
         from chatbot.models.chat_bot_b import ChatBotB
@@ -633,7 +654,7 @@ async def handle_automatic_story_generation(
             "type": "story_generation_started",
             "message": "동화 생성을 시작합니다...",
             "has_cloned_voice": cloned_voice_id is not None,
-            "story_title": story_outline.get('title', '멋진 이야기'),
+            "story_title": story_outline.get('theme', '멋진 이야기'),
             "timestamp": datetime.now().isoformat()
         })
         
@@ -656,7 +677,7 @@ async def handle_automatic_story_generation(
             "result": result,
             "cloned_voice_used": cloned_voice_id is not None,
             "generation_time": generation_time,
-            "story_title": story_outline.get('title', '멋진 이야기'),
+            "story_title": story_outline.get('theme', '멋진 이야기'),
             "chapters_count": len(result.get('story_data', {}).get('chapters', [])),
             "timestamp": datetime.now().isoformat()
         }
@@ -687,6 +708,155 @@ async def handle_automatic_story_generation(
         })
         
         raise
+
+async def _extract_story_info_from_conversation(conversation_history: List[Dict], child_name: str, interests_list: List[str]) -> Dict[str, Any]:
+    """
+    STT 대화 내용에서 실제 스토리 정보 추출
+    
+    Args:
+        conversation_history: 대화 기록
+        child_name: 아이 이름  
+        interests_list: 관심사 목록
+        
+    Returns:
+        Dict: 추출된 스토리 정보
+    """
+    try:
+        import re
+        
+        # 사용자 발화만 추출
+        user_messages = [msg.get("content", "") for msg in conversation_history if msg.get("role") == "user"]
+        conversation_text = " ".join(user_messages).lower()
+        
+        logger.info(f"[EXTRACT] 분석할 대화 내용: {conversation_text[:200]}...")
+        
+        extracted_info = {
+            "characters": [child_name],  # 기본적으로 아이 이름 포함
+            "setting": "",
+            "theme": "",
+            "plot_summary": "",
+            "educational_value": ""
+        }
+        
+        # 1. 캐릭터/등장인물 추출
+        character_patterns = [
+            r'([가-힣]{2,4})(?:이라는|라는|이름의|이가|가|이는|는|이를|를|와|과|하고)',  # 한국어 이름 + 조사
+            r'([가-힣]{2,4})\s*(?:친구|동물|캐릭터)',  # 이름 + 친구/동물
+            r'(?:친구|동물|캐릭터)\s*([가-힣]{2,4})',  # 친구/동물 + 이름
+        ]
+        
+        for pattern in character_patterns:
+            matches = re.findall(pattern, conversation_text)
+            for match in matches:
+                if len(match) >= 2 and match != child_name and match not in extracted_info["characters"]:
+                    extracted_info["characters"].append(match)
+        
+        # 2. 설정/배경 추출
+        setting_keywords = {
+            "숲": ["숲", "나무", "정글", "산"],
+            "바다": ["바다", "물", "해변", "물속", "바닷속"],
+            "하늘": ["하늘", "구름", "날아", "하늘"],
+            "도시": ["도시", "건물", "거리", "마을"],
+            "집": ["집", "방", "침실", "거실"],
+            "학교": ["학교", "교실", "선생님"],
+            "공원": ["공원", "놀이터", "그네"],
+            "우주": ["우주", "별", "행성", "로켓"],
+            "공룡세계": ["공룡", "티렉스", "브라키오", "쥬라기"],
+            "로봇세계": ["로봇", "기계", "컴퓨터", "미래"]
+        }
+        
+        setting_scores = {}
+        for setting, keywords in setting_keywords.items():
+            score = sum(1 for keyword in keywords if keyword in conversation_text)
+            if score > 0:
+                setting_scores[setting] = score
+        
+        if setting_scores:
+            best_setting = max(setting_scores, key=setting_scores.get)
+            extracted_info["setting"] = f"{best_setting}"
+        
+        # 3. 문제/갈등 추출
+        problem_keywords = [
+            "문제", "어려움", "걱정", "무서워", "힘들어", "도와줘", "찾아야", "잃어버렸", 
+            "사라졌", "도움", "해결", "방법", "어떻게", "모르겠어"
+        ]
+        
+        problems_found = [keyword for keyword in problem_keywords if keyword in conversation_text]
+        
+        # 4. 감정/톤 분석
+        positive_emotions = ["기뻐", "행복", "신나", "좋아", "재미", "웃어", "기분 좋", "즐거"]
+        adventure_words = ["모험", "탐험", "여행", "발견", "찾기", "새로운"]
+        
+        emotion_score = sum(1 for emotion in positive_emotions if emotion in conversation_text)
+        adventure_score = sum(1 for word in adventure_words if word in conversation_text)
+        
+        # 5. 테마 생성
+        if adventure_score > 0:
+            extracted_info["theme"] = f"{child_name}의 신나는 모험"
+        elif emotion_score > 0:
+            extracted_info["theme"] = f"{child_name}의 행복한 이야기"
+        elif extracted_info["setting"]:
+            extracted_info["theme"] = f"{child_name}와 {extracted_info['setting']}에서의 모험"
+        else:
+            extracted_info["theme"] = f"{child_name}의 특별한 이야기"
+        
+        # 6. 줄거리 생성
+        plot_elements = []
+        if extracted_info["characters"]:
+            other_chars = [char for char in extracted_info["characters"] if char != child_name]
+            if other_chars:
+                plot_elements.append(f"{', '.join(other_chars[:2])}와 함께")
+        
+        if extracted_info["setting"]:
+            plot_elements.append(f"{extracted_info['setting']}에서")
+        
+        if problems_found:
+            plot_elements.append("작은 문제를 해결하며")
+        elif adventure_score > 0:
+            plot_elements.append("신나는 모험을 하며")
+        else:
+            plot_elements.append("재미있는 경험을 하며")
+        
+        plot_elements.append("성장하는 이야기")
+        
+        extracted_info["plot_summary"] = f"{child_name}이가 " + " ".join(plot_elements)
+        
+        # 7. 교육적 가치 추론
+        if problems_found:
+            extracted_info["educational_value"] = "문제 해결 능력과 끈기"
+        elif len(extracted_info["characters"]) > 1:
+            extracted_info["educational_value"] = "우정과 협력의 소중함"
+        elif adventure_score > 0:
+            extracted_info["educational_value"] = "호기심과 탐구심"
+        else:
+            extracted_info["educational_value"] = "자신감과 용기"
+        
+        # 관심사 정보도 반영
+        if interests_list:
+            for interest in interests_list[:2]:  # 상위 2개 관심사만
+                if interest.lower() in conversation_text or any(interest.lower() in char.lower() for char in extracted_info["characters"]):
+                    if not extracted_info["setting"]:
+                        extracted_info["setting"] = f"{interest}와 관련된 신비한 세계"
+                    extracted_info["characters"].append(f"{interest} 친구")
+        
+        # 중복 제거
+        extracted_info["characters"] = list(dict.fromkeys(extracted_info["characters"]))  # 순서 보존하며 중복 제거
+        
+        logger.info(f"[EXTRACT] 추출 완료 - 캐릭터: {extracted_info['characters']}, 설정: {extracted_info['setting']}")
+        logger.info(f"[EXTRACT] 테마: {extracted_info['theme']}")
+        
+        return extracted_info
+        
+    except Exception as e:
+        logger.error(f"[EXTRACT] 정보 추출 중 오류: {e}")
+        # 오류 시 기본값 반환
+        return {
+            "characters": [child_name],
+            "setting": f"{', '.join(interests_list[:2]) if interests_list else '신비로운 장소'}와 관련된 곳",
+            "theme": f"{child_name}의 모험",
+            "plot_summary": f"{child_name}이가 겪는 특별한 이야기",
+            "educational_value": "호기심과 탐구심"
+        }
 
 async def check_story_completion(story_engine, conversation_length: int, child_name: str, age: int) -> bool:
     """

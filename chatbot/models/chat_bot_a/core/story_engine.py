@@ -691,7 +691,7 @@ class StoryEngine:
         Returns:
             Dict: 이야기 주제 및 구조
         """
-        if len(conversation_history) < 4:
+        if len(conversation_history) < 2:
             return self._get_default_story_structure(child_name, age_group)
         
         # RAG 시스템을 통한 주제 풍부화
@@ -699,9 +699,8 @@ class StoryEngine:
         if self.rag_system and interests:
             base_theme = f"{interests[0]}와 관련된 모험" if interests else "모험과 우정"
             try:
-                # RAG 시스템의 enhance_story_context는 비동기이므로 여기서는 기본 처리
                 logger.info(f"RAG 시스템 사용: {base_theme} (연령: {age_group})")
-                enriched_context = base_theme  # 동기 처리를 위해 임시로 기본값 사용
+                enriched_context = base_theme
             except Exception as e:
                 logger.warning(f"RAG 시스템 사용 중 오류: {e}")
         
@@ -709,41 +708,32 @@ class StoryEngine:
         conversation_summary = self.get_conversation_summary(conversation_history, child_name, age_group)
         elements_info = self._get_detailed_elements_info()
         
-        system_message = f"""
-        당신은 {age_group}세 아이를 위한 동화 구성 전문가입니다.
+        # 프롬프트 파일의 story_collection_prompt_template 사용
+        from shared.configs.prompts_config import load_chatbot_a_prompts
+        prompts = load_chatbot_a_prompts()
+        prompt_template = prompts.get("story_collection_prompt_template", "")
         
-        다음 정보를 바탕으로 완전한 이야기 구조를 제안해주세요:
-        - 아이 이름: {child_name}
-        - 관심사: {', '.join(interests) if interests else '다양한 주제'}
-        - 수집된 이야기 요소: {elements_info}
-        
-        JSON 형식으로 응답해주세요:
-        {{
-            "title": "이야기 제목",
-            "theme": "주요 주제",
-            "characters": ["등장인물1", "등장인물2"],
-            "setting": "배경 설명",
-            "plot_summary": "줄거리 요약",
-            "educational_value": "교육적 가치",
-            "target_age": {age_group},
-            "estimated_length": "예상 길이",
-            "key_scenes": ["주요 장면1", "주요 장면2"]
-        }}
-        """
+        # 프롬프트 템플릿 포맷팅
+        formatted_prompt = prompt_template.format(
+            child_name=child_name or "친구",
+            age_group=age_group,
+            interests=", ".join(interests) if interests else "다양한 주제"
+        )
         
         try:
             # OpenAI 클라이언트가 없으면 기본 구조 반환
             if not self.openai_client:
-                logger.warning("OpenAI 클라이언트가 없어 기본 이야기 구조를 반환합니다. OpenAI API를 사용하려면 'pip install openai'를 실행하고 API 키를 설정하세요.")
+                logger.warning("OpenAI 클라이언트가 없어 기본 이야기 구조를 반환합니다")
                 return self._get_default_story_structure(child_name, age_group)
             
-            prompt_content = story_collection_prompt
+            # 대화 요약을 추가로 제공
+            prompt_content = formatted_prompt
             if enriched_context:
                 prompt_content += f"\n\n참고 정보:\n{enriched_context}"
             prompt_content += f"\n\n대화 요약:\n{conversation_summary}"
+            prompt_content += f"\n\n수집된 요소 정보:\n{elements_info}"
             
             messages = [
-                {"role": "system", "content": system_message},
                 {"role": "user", "content": prompt_content}
             ]
             

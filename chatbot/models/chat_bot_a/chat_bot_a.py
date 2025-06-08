@@ -442,14 +442,22 @@ class ChatBotA:
             
             # Enhanced 스토리 수집
             if self.enhanced_mode:
-                story_outline = self.story_engine.create_enhanced_story_outline(
+                story_outline = self.story_engine.suggest_story_theme(
                     conversation_history=self.conversation.get_conversation_history(),
-                    child_age=self.age_group,
-                    child_interests=self.interests,
-                    child_name=self.child_name
+                    child_name=self.child_name,
+                    age_group=self.age_group,
+                    interests=self.interests,
+                    story_collection_prompt="수집된 대화를 바탕으로 이야기 구조를 생성해줘."
                 )
             else:
-                story_outline = self.story_engine.create_story_outline()
+                # 기본 모드에서도 suggest_story_theme 사용
+                story_outline = self.story_engine.suggest_story_theme(
+                    conversation_history=self.conversation.get_conversation_history(),
+                    child_name=self.child_name or "친구",
+                    age_group=self.age_group or 5,
+                    interests=self.interests or [],
+                    story_collection_prompt="기본 이야기 구조를 생성해줘."
+                )
             
             # Chat Bot B 호환성 메타데이터 추가
             story_outline.update({

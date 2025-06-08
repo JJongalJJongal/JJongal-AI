@@ -564,23 +564,53 @@ class ImageGenerator(BaseGenerator):
         filtered_characters = [char for char in characters 
                              if char not in exclude_words and len(char) >= 2]
         
-        # 4. 기본값 설정
-        if not filtered_characters:
+        # 4. 한국어 조사 제거 (영어 프롬프트용)
+        cleaned_characters = []
+        for char in filtered_characters:
+            # 조사가 붙었을 가능성이 있는 이름들을 정리
+            cleaned_name = self._remove_korean_particles(char)
+            if cleaned_name and len(cleaned_name) >= 2:
+                cleaned_characters.append(cleaned_name)
+        
+        # 5. 기본값 설정
+        if not cleaned_characters:
             # 스토리 데이터에서 메인 캐릭터 정보 가져오기
             main_characters = story_data.get("main_characters", [])
             if main_characters:
                 if isinstance(main_characters, list):
-                    filtered_characters = main_characters[:2]
+                    # 메인 캐릭터도 조사 제거
+                    cleaned_main = [self._remove_korean_particles(char) for char in main_characters[:2]]
+                    cleaned_characters = [char for char in cleaned_main if char]
                 else:
-                    filtered_characters = [str(main_characters)]
-            else:
+                    cleaned_name = self._remove_korean_particles(str(main_characters))
+                    if cleaned_name:
+                        cleaned_characters = [cleaned_name]
+            
+            if not cleaned_characters:
                 # JSON 설정에서 기본값 사용
                 default_chars = self.fallback_templates.get("character_extraction_failed", "friendly characters")
-                filtered_characters = [default_chars]
+                cleaned_characters = [default_chars]
         
-        result = ", ".join(filtered_characters[:3])  # 최대 3개
+        result = ", ".join(cleaned_characters[:3])  # 최대 3개
         logger.info(f"추출된 캐릭터: {result}")
         return result
+    
+    def _remove_korean_particles(self, name: str) -> str:
+        """한국어 조사 제거 메서드"""
+        if not name:
+            return ""
+        
+        # 일반적인 조사들 제거
+        particles = ['이라', '라고', '라는', '라며', '이가', '가', '이는', '는', '이를', '를', 
+                    '이와', '와', '과', '에게', '한테', '께서', '에서', '으로', '로', '이야', '야']
+        
+        cleaned_name = name
+        for particle in particles:
+            if cleaned_name.endswith(particle):
+                cleaned_name = cleaned_name[:-len(particle)]
+                break
+        
+        return cleaned_name.strip()
 
     def _extract_setting_improved(self, chapter: Dict[str, Any]) -> str:
         """개선된 배경 추출 로직 - JSON 설정 사용""" 

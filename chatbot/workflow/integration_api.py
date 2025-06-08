@@ -28,7 +28,7 @@ try:
     FASTAPI_AVAILABLE = True
 except ImportError:
     FASTAPI_AVAILABLE = False
-    logging.warning("FastAPI not available. API endpoints will not be functional.")
+    logging.warning("FastAPI 라이브러리가 없습니다. API 엔드포인트가 비활성화됩니다.")
 
 from .story_schema import ChildProfile, AgeGroup
 
@@ -52,7 +52,7 @@ else:
 # 보안 설정
 security = HTTPBearer(auto_error=True) if FASTAPI_AVAILABLE else None
 
-# Pydantic 모델들 (FastAPI가 사용 가능한 경우에만)
+# Pydantic 모델들 
 if FASTAPI_AVAILABLE:
     class ChildProfileRequest(BaseModel):
         """아이 프로필 요청 모델"""
