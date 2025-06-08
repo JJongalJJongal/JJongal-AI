@@ -15,6 +15,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.websockets import WebSocketDisconnect, WebSocketState
 from fastapi.staticfiles import StaticFiles
 from dotenv import load_dotenv
+import urllib.parse
 
 # 경로 설정
 current_dir = os.path.dirname(os.path.abspath(__file__))
@@ -1113,6 +1114,29 @@ async def create_story(
     logger.info("=== 스토리 생성 API 호출됨 ===")
     logger.info(f"요청 데이터: 아이 이름={story_request.child_profile.name}, 나이={story_request.child_profile.age}")
     
+    # conversation_data 검증 및 로깅
+    conversation_data = story_request.conversation_data
+    logger.info(f"수신된 conversation_data: {conversation_data}")
+    
+    # conversation_data가 빈 경우 기본값 생성
+    if not conversation_data or not conversation_data.get("messages"):
+        logger.warning("conversation_data가 비어있음. 기본값으로 대체합니다.")
+        conversation_data = {
+            "messages": [
+                {"role": "user", "content": f"안녕하세요! 저는 {story_request.child_profile.name}이에요."},
+                {"role": "assistant", "content": f"안녕, {story_request.child_profile.name}! 만나서 반가워요!"},
+                {"role": "user", "content": f"재미있는 이야기를 듣고 싶어요. {', '.join(story_request.child_profile.interests) if story_request.child_profile.interests else '모험 이야기'}가 좋겠어요."},
+                {"role": "assistant", "content": "정말 좋은 아이디어네요! 어떤 모험을 하고 싶나요?"},
+                {"role": "user", "content": f"친구들과 함께 신나는 모험을 하고 싶어요!"}
+            ],
+            "child_name": story_request.child_profile.name,
+            "interests": story_request.child_profile.interests,
+            "total_turns": 5,
+            "source": "api_generated_default",
+            "summary": f"{story_request.child_profile.name}이가 친구들과 함께 모험하는 이야기를 원함"
+        }
+        logger.info(f"생성된 기본 conversation_data: {conversation_data}")
+    
     try:
         logger.info("오케스트레이터 상태 확인 중...")
         if not orchestrator:
@@ -1142,7 +1166,7 @@ async def create_story(
         logger.info("_create_story_with_orchestrator 호출 중...")
         story_id = await _create_story_with_orchestrator(
             child_profile,
-            story_request.conversation_data,
+            conversation_data,  # 검증된 conversation_data 전달
             story_request.story_preferences
         )
         
@@ -1154,7 +1178,8 @@ async def create_story(
             message="이야기 생성이 시작되었습니다",
             data={
                 "child_name": child_profile.name,
-                "estimated_completion_time": "3-5분"
+                "estimated_completion_time": "3-5분",
+                "conversation_source": conversation_data.get("source", "user_provided")
             }
         )
         
@@ -1170,6 +1195,10 @@ async def create_story(
 async def get_story_status(story_id: str, auth: dict = Depends(verify_auth)):
     """이야기 상태 조회"""
     try:
+        # URL 디코딩 추가
+        decoded_story_id = urllib.parse.unquote(story_id)
+        logger.info(f"상태 조회 요청: 원본={story_id}, 디코딩={decoded_story_id}")
+        
         if not orchestrator:
             return StandardResponse(
                 success=False,
@@ -1177,9 +1206,10 @@ async def get_story_status(story_id: str, auth: dict = Depends(verify_auth)):
                 error_code="ORCHESTRATOR_NOT_INITIALIZED"
             )
         
-        # 이야기 상태 조회
-        status = await orchestrator.get_story_status(story_id)
+        # 이야기 상태 조회 (디코딩된 ID 사용)
+        status = await orchestrator.get_story_status(decoded_story_id)
         if not status:
+            logger.warning(f"이야기를 찾을 수 없음: {decoded_story_id}")
             return StandardResponse(
                 success=False,
                 message="이야기를 찾을 수 없습니다",
