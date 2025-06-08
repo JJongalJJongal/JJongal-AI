@@ -53,12 +53,13 @@ class IntegrationManager:
         if not self.orchestrator:
             raise RuntimeError("오케스트레이터가 초기화되지 않았습니다")
         
-        # 고유한 story_id 생성
-        story_id = f"story_{child_profile.name.replace(' ', '_')}_{int(datetime.now().timestamp())}"
-            
-            # 상태 초기화
-        self.story_states[story_id] = {
-            "story_id": story_id,
+        # 사용자 친화적인 story_id 생성
+        friendly_story_id = f"story_{child_profile.name.replace(' ', '_')}_{int(datetime.now().timestamp())}"
+        
+        # 상태 초기화
+        self.story_states[friendly_story_id] = {
+            "story_id": friendly_story_id,
+            "uuid_story_id": None,  # 실제 UUID가 여기에 저장됨
             "status": "initializing",
             "created_at": datetime.now().isoformat(),
             "child_profile": child_profile.model_dump() if hasattr(child_profile, 'model_dump') else child_profile.__dict__
@@ -66,10 +67,10 @@ class IntegrationManager:
         
         # 백그라운드에서 이야기 생성 시작
         asyncio.create_task(self._create_story_background(
-            story_id, child_profile, conversation_data, story_preferences
+            friendly_story_id, child_profile, conversation_data, story_preferences
         ))
             
-        return story_id
+        return friendly_story_id
     
     async def _create_story_background(
         self,
@@ -102,14 +103,19 @@ class IntegrationManager:
                 
                 self.logger.info(f"이야기 생성 완료 (ID: {story_id})")
                 
+                # 실제 UUID 저장
+                actual_uuid = story_schema.metadata.story_id if story_schema else None
+                self.logger.info(f"실제 UUID: {actual_uuid}")
+                
                 # 성공 상태 업데이트
                 self.story_states[story_id].update({
                     "status": "completed",
+                    "uuid_story_id": actual_uuid,  # 실제 UUID 저장
                     "completed_at": datetime.now().isoformat(),
                     "story_data": story_schema.to_dict() if story_schema else None
                 })
                 
-                self.logger.info(f"Background 이야기 생성 성공 (ID: {story_id})")
+                self.logger.info(f"Background 이야기 생성 성공 (ID: {story_id}, UUID: {actual_uuid})")
             else:
                 self.logger.error(f"Orchestrator가 초기화되지 않음 (ID: {story_id})")
                 self.story_states[story_id].update({
@@ -139,9 +145,27 @@ class IntegrationManager:
 
     async def get_story_status(self, story_id: str) -> Optional[Dict[str, Any]]:
         """이야기 상태 조회"""
+        # 먼저 로컬 상태에서 확인
         if story_id in self.story_states:
-            return self.story_states[story_id]
+            local_state = self.story_states[story_id]
+            
+            # 실제 UUID가 있으면 orchestrator에서도 조회
+            if local_state.get("uuid_story_id") and self.orchestrator:
+                try:
+                    orchestrator_status = await self.orchestrator.get_story_status(local_state["uuid_story_id"])
+                    if orchestrator_status:
+                        # orchestrator 상태와 로컬 상태 병합
+                        local_state.update({
+                            "current_stage": orchestrator_status.get("current_stage"),
+                            "completion_percentage": orchestrator_status.get("completion_percentage"),
+                            "errors": orchestrator_status.get("errors", [])
+                        })
+                except Exception as e:
+                    self.logger.warning(f"Orchestrator 상태 조회 실패: {e}")
+            
+            return local_state
         
+        # 로컬 상태에 없으면 orchestrator에서 직접 조회 (혹시 UUID일 수도 있음)
         if self.orchestrator:
             return await self.orchestrator.get_story_status(story_id)
         

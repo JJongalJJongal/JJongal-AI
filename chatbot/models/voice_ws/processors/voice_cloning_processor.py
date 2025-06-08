@@ -72,10 +72,12 @@ class VoiceCloningProcessor:
         self.max_sample_duration = 30  # 최대 샘플 길이 (초)
         self.min_sample_duration = 3   # 최소 샘플 길이 (초)
         
-        # 품질 기준 (새로 추가)
-        self.min_snr_db = 10.0  # 최소 SNR (Signal-to-Noise Ratio) 10dB
-        self.min_quality_score = 0.6  # 최소 품질 점수
-        self.max_noise_level = 0.3  # 최대 노이즈 레벨
+        # 품질 기준 (강화된 기준으로 업데이트)
+        self.min_snr_db = 20.0  # 최소 SNR 20dB (음성 클로닝에 적합한 수준)
+        self.min_quality_score = 0.7  # 최소 품질 점수 70% (기존 60%에서 상향)
+        self.max_noise_level = 0.15  # 최대 노이즈 레벨 15% (기존 30%에서 강화)
+        self.min_sample_rate = 16000  # 최소 샘플 레이트 16kHz (새로 추가)
+        self.preferred_sample_rate = 44100  # 권장 샘플 레이트 44.1kHz
         
         # 사용자별 음성 데이터 관리
         self.user_voice_data = {}
@@ -123,9 +125,13 @@ class VoiceCloningProcessor:
             # 고급 품질 분석 수행
             quality_analysis = await self._analyze_audio_quality(audio_file_path, audio_data)
             
-            # 품질 기준 검증
-            if not self._validate_audio_quality(quality_analysis):
-                logger.warning(f"사용자 {user_id} 음성 샘플 품질 부족: {quality_analysis}")
+            # 품질 기준 검증 (강화된 검증 및 상세 피드백)
+            validation_result = self._validate_audio_quality_detailed(quality_analysis)
+            if not validation_result["is_valid"]:
+                logger.warning(f"사용자 {user_id} 음성 샘플 품질 부족")
+                logger.warning(f"품질 분석: {quality_analysis}")
+                logger.warning(f"실패 이유: {validation_result['reasons']}")
+                
                 # 품질이 낮은 샘플은 삭제
                 os.remove(audio_file_path)
                 return False
@@ -335,7 +341,7 @@ class VoiceCloningProcessor:
     
     def _validate_audio_quality(self, quality_analysis: Dict[str, Any]) -> bool:
         """
-        오디오 품질 검증
+        오디오 품질 검증 (기본 검증 - 호환성 유지)
         
         Args:
             quality_analysis: 품질 분석 결과
@@ -343,39 +349,71 @@ class VoiceCloningProcessor:
         Returns:
             bool: 품질 기준 통과 여부
         """
+        result = self._validate_audio_quality_detailed(quality_analysis)
+        return result["is_valid"]
+    
+    def _validate_audio_quality_detailed(self, quality_analysis: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        오디오 품질 상세 검증 (강화된 기준 및 상세 피드백)
+        
+        Args:
+            quality_analysis: 품질 분석 결과
+            
+        Returns:
+            Dict: {"is_valid": bool, "reasons": List[str], "recommendations": List[str]}
+        """
+        reasons = []
+        recommendations = []
+        
         # 기본 크기 및 지속 시간 체크
         if quality_analysis["file_size_kb"] < 10:  # 10KB 미만
-            logger.debug("품질 검증 실패: 파일 크기 너무 작음")
-            return False
+            reasons.append("파일 크기가 너무 작음 (10KB 미만)")
+            recommendations.append("더 길게 말해주세요 (최소 3초 이상)")
         
         if quality_analysis["duration_seconds"] < self.min_sample_duration:
-            logger.debug(f"품질 검증 실패: 지속 시간 부족 ({quality_analysis['duration_seconds']}s < {self.min_sample_duration}s)")
-            return False
+            reasons.append(f"지속 시간 부족 ({quality_analysis['duration_seconds']:.1f}초 < {self.min_sample_duration}초)")
+            recommendations.append(f"최소 {self.min_sample_duration}초 이상 말해주세요")
         
         # 고급 분석이 가능한 경우
         if quality_analysis["analysis_method"] == "advanced":
-            # SNR 체크
-            if quality_analysis["snr_db"] < self.min_snr_db:
-                logger.debug(f"품질 검증 실패: SNR 부족 ({quality_analysis['snr_db']}dB < {self.min_snr_db}dB)")
-                return False
+            # 샘플 레이트 체크 (새로 추가)
+            if quality_analysis["sample_rate"] < self.min_sample_rate:
+                reasons.append(f"샘플 레이트 부족 ({quality_analysis['sample_rate']}Hz < {self.min_sample_rate}Hz)")
+                recommendations.append("더 좋은 마이크나 녹음 설정을 사용해주세요")
             
-            # 노이즈 레벨 체크
+            # SNR 체크 (강화된 기준)
+            if quality_analysis["snr_db"] < self.min_snr_db:
+                reasons.append(f"SNR 부족 ({quality_analysis['snr_db']:.1f}dB < {self.min_snr_db}dB)")
+                recommendations.append("조용한 곳에서 마이크에 더 가까이서 말해주세요")
+            
+            # 노이즈 레벨 체크 (강화된 기준)
             if quality_analysis["noise_level"] > self.max_noise_level:
-                logger.debug(f"품질 검증 실패: 노이즈 레벨 과다 ({quality_analysis['noise_level']} > {self.max_noise_level})")
-                return False
+                reasons.append(f"노이즈 레벨 과다 ({quality_analysis['noise_level']:.2f} > {self.max_noise_level})")
+                recommendations.append("배경 소음이 없는 조용한 곳에서 녹음해주세요")
             
             # 클리핑 체크
             if quality_analysis["has_clipping"]:
-                logger.debug("품질 검증 실패: 오디오 클리핑 감지")
-                return False
+                reasons.append("오디오 클리핑 감지 (너무 큰 소리)")
+                recommendations.append("마이크 볼륨을 줄이거나 조금 더 멀리서 말해주세요")
         
-        # 종합 품질 점수 체크
+        # 종합 품질 점수 체크 (강화된 기준)
         if quality_analysis["quality_score"] < self.min_quality_score:
-            logger.debug(f"품질 검증 실패: 품질 점수 부족 ({quality_analysis['quality_score']} < {self.min_quality_score})")
-            return False
+            reasons.append(f"종합 품질 점수 부족 ({quality_analysis['quality_score']:.2f} < {self.min_quality_score})")
+            recommendations.append("더 명확하고 또렷하게 말해주세요")
         
-        logger.debug("품질 검증 통과")
-        return True
+        is_valid = len(reasons) == 0
+        
+        if is_valid:
+            logger.debug("품질 검증 통과")
+        else:
+            logger.debug(f"품질 검증 실패: {', '.join(reasons)}")
+        
+        return {
+            "is_valid": is_valid,
+            "reasons": reasons,
+            "recommendations": recommendations,
+            "quality_analysis": quality_analysis
+        }
     
     async def create_instant_voice_clone(self, user_id: str, voice_name: str = None) -> Tuple[Optional[str], Optional[str]]:
         """

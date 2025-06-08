@@ -201,6 +201,12 @@ class StateManager:
             
             if not os.path.exists(state_file):
                 self.logger.warning(f"상태 파일을 찾을 수 없음: {story_id}")
+                # 디버깅을 위해 해당 디렉토리의 파일 목록 출력
+                if os.path.exists(self.state_dir):
+                    existing_files = os.listdir(self.state_dir)
+                    self.logger.info(f"기존 상태 파일들: {existing_files}")
+                else:
+                    self.logger.warning(f"상태 디렉토리가 존재하지 않음: {self.state_dir}")
                 return None
             
             # 이야기 스키마 로드
@@ -224,7 +230,7 @@ class StateManager:
             return story_schema
             
         except Exception as e:
-            self.logger.error(f"이야기 상태 로드 실패: {e}")
+            self.logger.error(f"이야기 상태 로드 실패 ({story_id}): {e}")
             return None
     
     async def get_story_status(self, story_id: str) -> Optional[Dict[str, Any]]:
@@ -246,15 +252,15 @@ class StateManager:
         try:
             story_schema = await self.load_story_state(story_id)
             if story_schema:
-                return {
-                    "story_id": story_id,
-                    "workflow_state": self._map_story_stage_to_workflow_state(story_schema.current_stage).value,
-                    "story_stage": story_schema.current_stage.value,
-                    "progress_percentage": story_schema.get_completion_percentage(),
-                    "error_count": len(story_schema.errors),
-                    "created_at": story_schema.metadata.created_at.isoformat(),
-                    "updated_at": story_schema.metadata.updated_at.isoformat()
-                }
+                                 return {
+                     "story_id": story_id,
+                     "workflow_state": self._map_story_stage_to_workflow_state(story_schema.current_stage).value,
+                     "story_stage": story_schema.current_stage.value,
+                     "progress_percentage": story_schema.get_completion_percentage(),
+                     "error_count": len(story_schema.errors),
+                     "created_at": story_schema.metadata.created_at.isoformat(),
+                     "updated_at": story_schema.metadata.updated_at.isoformat()
+                 }
         except Exception as e:
             self.logger.error(f"상태 정보 조회 실패: {e}")
         

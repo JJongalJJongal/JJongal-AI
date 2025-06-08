@@ -1199,15 +1199,8 @@ async def get_story_status(story_id: str, auth: dict = Depends(verify_auth)):
         decoded_story_id = urllib.parse.unquote(story_id)
         logger.info(f"상태 조회 요청: 원본={story_id}, 디코딩={decoded_story_id}")
         
-        if not orchestrator:
-            return StandardResponse(
-                success=False,
-                message="오케스트레이터가 초기화되지 않았습니다",
-                error_code="ORCHESTRATOR_NOT_INITIALIZED"
-            )
-        
-        # 이야기 상태 조회 (디코딩된 ID 사용)
-        status = await orchestrator.get_story_status(decoded_story_id)
+        # IntegrationManager를 통한 상태 조회 (ID 매핑 지원)
+        status = await integration_manager.get_story_status(decoded_story_id)
         if not status:
             logger.warning(f"이야기를 찾을 수 없음: {decoded_story_id}")
             return StandardResponse(
@@ -1216,6 +1209,7 @@ async def get_story_status(story_id: str, auth: dict = Depends(verify_auth)):
                 error_code="STORY_NOT_FOUND"
             )
         
+        logger.info(f"상태 조회 성공: {decoded_story_id} -> {status.get('status', 'unknown')}")
         return StandardResponse(
             success=True,
             message="이야기 상태 조회 성공",
