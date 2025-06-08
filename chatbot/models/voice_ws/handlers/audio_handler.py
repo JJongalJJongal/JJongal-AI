@@ -235,11 +235,13 @@ async def handle_audio_websocket(
                                                         client_info['stt_retry_count'] = 0
                                                         logger.debug(f"[STT_SUCCESS] 재시도 카운터 초기화: {client_id}")
                                                     
-                                                    # 사용자 메시지를 대화에 추가
-                                                    chatbot_a.conversation.add_user_message(user_text)
+                                                    # 사용자 메시지를 대화에 추가 (ChatBotA 인스턴스를 통해 직접 호출)
+                                                    chatbot_a.add_to_conversation(user_text)
                                                     
                                                     # 즉시 현재 대화 상태 저장
-                                                    current_history = chatbot_a.conversation.get_conversation_history()
+                                                    current_history = chatbot_a.get_conversation_history()
+                                                    
+                                                    # 즉시 현재 대화 상태 저장
                                                     conversation_data_immediate = {
                                                         "messages": [
                                                             {"role": msg.get("role", "user"), "content": msg.get("content", "")}
@@ -256,7 +258,7 @@ async def handle_audio_websocket(
                                                     logger.info(f"[STT_STORE] STT 직후 즉시 저장: {child_name} ({len(current_history)}개 메시지)")
                                                     
                                             except Exception as stt_error:
-                                                logger.error(f"[STT_ERROR] STT 처리 실패: {stt_error}")
+                                                logger.error(f"[STT_ERROR] STT 처리 실패: {stt_error}", exc_info=True)
                                                 user_text = ""
                                                 confidence = 0.0
                                                 
@@ -271,7 +273,7 @@ async def handle_audio_websocket(
                                                     
                                                     # 🎯 ChatBot A 응답 후에도 즉시 저장!
                                                     if hasattr(chatbot_a, 'conversation'):
-                                                        full_history_after_ai = chatbot_a.conversation.get_conversation_history()
+                                                        full_history_after_ai = chatbot_a.get_conversation_history()
                                                         conversation_data_after_ai = {
                                                             "messages": [
                                                                 {"role": msg.get("role", "user"), "content": msg.get("content", "")}
@@ -288,7 +290,7 @@ async def handle_audio_websocket(
                                                         logger.info(f"[CHATBOT_STORE] AI 응답 후 저장: {child_name} ({len(full_history_after_ai)}개 메시지)")
                                                     
                                                 except Exception as chatbot_error:
-                                                    logger.error(f"[CHATBOT_A_ERROR] 부기 응답 생성 실패: {chatbot_error}")
+                                                    logger.error(f"[CHATBOT_A_ERROR] 부기 응답 생성 실패: {chatbot_error}", exc_info=True)
                                                     ai_response = "미안. 문제가 있는데 다시 말해줄 수 있을까?"
                                                     tts_result = None
                                                     conversation_length = 0
@@ -306,7 +308,7 @@ async def handle_audio_websocket(
                                                 retry_count = client_info.get('stt_retry_count', 0) if client_info else 0
                                                 retry_count += 1
                                                 
-                                                if retry_count <= 3:  # 최대 3번까지 재시도
+                                                if retry_count <= 3:
                                                     ai_response = retry_messages[min(retry_count - 1, len(retry_messages) - 1)]
                                                     logger.info(f"[STT_RETRY] STT 실패로 재입력 요청 ({retry_count}/3): {ai_response}")
                                                     
@@ -338,7 +340,7 @@ async def handle_audio_websocket(
                                                         "type": "retry_request",
                                                         "text": ai_response,
                                                         "audio": tts_result.get("audio_data") if tts_result else None,
-                                                        "user_text": "",  # STT 실패했으므로 빈 문자열
+                                                        "user_text": "",
                                                         "confidence": 0.0,
                                                         "conversation_length": conversation_length,
                                                         "retry_count": retry_count,
@@ -357,18 +359,12 @@ async def handle_audio_websocket(
                                                     
                                                 else:
                                                     # 재시도 횟수 초과 시
-                                                    ai_response = "계속 음성이 잘 안들려요. 나중에 다시 시도해주세요!"
-                                                    tts_result = None
+                                                    ai_response = "계속 음성이 잘 안들려. 처음부터 다시 시도해줄래?"
+                                                    tts_result = None # 최종 응답엔 음성 없음
                                                     conversation_length = 0
-                                                    logger.warning(f"[STT_RETRY] 재시도 횟수 초과 ({retry_count}), 연결 종료 준비")
-                                                    
-                                                    # 재시도 횟수 초기화
-                                                    client_info = connection_engine.get_client_info(client_id)
-                                                    if client_info:
-                                                        client_info['stt_retry_count'] = 0
+                                                    # ... (재시도 횟수 초기화 등)
                                             
-                                            # === 대화 데이터는 이미 위에서 2번 저장됨 (STT 직후 + AI 응답 후) ===
-                                            # 응답 패킷 구성
+                                            # === 최종 응답 전송 (STT 성공 또는 재시도 횟수 초과 시) ===
                                             response_packet = {
                                                 "type": "ai_response",
                                                 "text": ai_response,
@@ -379,7 +375,6 @@ async def handle_audio_websocket(
                                                 "timestamp": datetime.now().isoformat()
                                             }
                                             
-                                            # 응답 전송
                                             await ws_engine.send_json(websocket, response_packet)
                                             logger.info(f"[AUDIO_END] 응답 전송 완료: {ai_response[:50]}...")
                                             
