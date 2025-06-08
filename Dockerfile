@@ -16,6 +16,11 @@ RUN apt-get update && apt-get install -y \
     g++ \
     git \
     curl \
+    # 오디오 라이브러리 개발 헤더 (librosa, soundfile 컴파일용)
+    libsndfile1-dev \
+    libasound2-dev \
+    portaudio19-dev \
+    pkg-config \
     && rm -rf /var/lib/apt/lists/*
 
 # Python 의존성 설치를 위한 가상환경 생성
@@ -46,6 +51,11 @@ LABEL version="1.0.0"
 RUN apt-get update && apt-get install -y \
     # FFmpeg (음성 처리용)
     ffmpeg \
+    # 오디오 라이브러리 (librosa, soundfile용)
+    libsndfile1 \
+    libsndfile1-dev \
+    libasound2-dev \
+    portaudio19-dev \
     # 네트워킹 도구
     curl \
     && apt-get clean \
