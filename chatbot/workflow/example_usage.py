@@ -11,7 +11,7 @@ from typing import Dict, Any
 
 from .orchestrator import WorkflowOrchestrator
 from .story_schema import ChildProfile, AgeGroup, StoryElement, ElementType
-from .integration_api import IntegrationAPI
+from .integration_api import IntegrationManager
 from .state_manager import StateManager
 from .pipeline_manager import PipelineManager, PipelineConfig
 
@@ -119,7 +119,7 @@ async def example_api_usage():
     # 1. 통합 API 초기화
     print("1. 통합 API 초기화...")
     orchestrator = WorkflowOrchestrator(output_dir="output")
-    integration_api = IntegrationAPI(orchestrator)
+    integration_api = IntegrationManager(orchestrator)
     
     # 2. 아이 프로필 생성
     child_profile = ChildProfile(

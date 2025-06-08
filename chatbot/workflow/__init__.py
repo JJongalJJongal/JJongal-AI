@@ -8,7 +8,7 @@ CCB_AI Workflow Integration System
 주요 구성 요소:
 - WorkflowOrchestrator: 전체 파이프라인 관리 
 - StoryDataSchema: 표준화된 이야기 데이터 형식
-- IntegrationAPI: 시스템 간 통신 API 
+- IntegrationManager: 시스템 간 통신 관리 
 - PipelineManager: 단계별 이야기 생성 관리
 - StateManager: 진행 상태 추적 및 관리
 - MultimediaCoordinator: 멀티미디어 생성 조정
@@ -23,7 +23,7 @@ CCB_AI Workflow Integration System
 
 from .orchestrator import WorkflowOrchestrator
 from .story_schema import StoryDataSchema, StoryElement, StoryMetadata
-from .integration_api import IntegrationAPI, APIEndpoints
+from .integration_api import IntegrationManager
 from .pipeline_manager import PipelineManager, PipelineStage
 from .state_manager import StateManager, WorkflowState
 from .multimedia_coordinator import MultimediaCoordinator
@@ -38,8 +38,7 @@ __all__ = [
     "StoryMetadata",
     
     # API integration
-    "IntegrationAPI",
-    "APIEndpoints",
+    "IntegrationManager",
     
     # Pipeline management
     "PipelineManager",

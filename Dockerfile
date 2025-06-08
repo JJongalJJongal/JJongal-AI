@@ -20,6 +20,10 @@ RUN apt-get update && apt-get install -y \
     libsndfile1-dev \
     libasound2-dev \
     portaudio19-dev \
+    libflac-dev \
+    libvorbis-dev \
+    libopus-dev \
+    libmpg123-dev \
     pkg-config \
     && rm -rf /var/lib/apt/lists/*
 
@@ -56,6 +60,10 @@ RUN apt-get update && apt-get install -y \
     libsndfile1-dev \
     libasound2-dev \
     portaudio19-dev \
+    libflac12 \
+    libvorbis0a \
+    libopus0 \
+    libmpg123-0 \
     # 네트워킹 도구
     curl \
     && apt-get clean \
@@ -111,6 +119,11 @@ ENV LOG_LEVEL=INFO
 ENV TORCH_NUM_THREADS=4 
 ENV OMP_NUM_THREADS=4
 ENV TOKENIZERS_PARALLELISM=false
+
+# 오디오 라이브러리 설정
+ENV LIBROSA_CACHE_DIR=/tmp/librosa_cache
+ENV NUMBA_CACHE_DIR=/tmp/numba_cache
+ENV PYTHONWARNINGS="ignore:FutureWarning,ignore:UserWarning:librosa"
 
 # 포트 노출
 EXPOSE 8000
