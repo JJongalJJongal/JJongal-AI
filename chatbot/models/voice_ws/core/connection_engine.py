@@ -155,13 +155,13 @@ class ConnectionEngine:
     # ==========================================
     
     async def cleanup_inactive_clients(self) -> None:
-        """비활성 클라이언트 정리 함수"""
+        """비활성 클라이언트 정리 함수 (연결 상태 강화)"""
         logger.info("비활성 클라이언트 정리 태스크 시작")
         
         while not self.shutdown_event.is_set():
             try:
-                # 5분마다 실행하되, 1초마다 종료 이벤트 확인
-                for _ in range(300):
+                # 2분마다 실행하되, 1초마다 종료 이벤트 확인 (더 빈번한 체크)
+                for _ in range(120):
                     await asyncio.sleep(1)
                     if self.shutdown_event.is_set():
                         break
@@ -172,6 +172,7 @@ class ConnectionEngine:
                     
                 await self._cleanup_inactive_connections()
                 await self._cleanup_inactive_chatbot_b_instances()
+                await self._check_websocket_health()  # 새로운 연결 상태 체크 추가
             
             except Exception as e:
                 logger.error(f"비활성 클라이언트 정리 중 오류 발생: {str(e)}")
@@ -205,6 +206,37 @@ class ConnectionEngine:
         for client_id in inactive_chatbot_bs:
             del self.chatbot_b_instances[client_id]
             logger.info(f"비활성 ChatBot B 인스턴스 정리: {client_id}")
+    
+    async def _check_websocket_health(self) -> None:
+        """WebSocket 연결 상태 건강성 체크"""
+        from fastapi.websockets import WebSocketState
+        
+        disconnected_clients = []
+        
+        for client_id, connection_info in self.active_connections.items():
+            websocket = connection_info.get("websocket")
+            if not websocket:
+                continue
+                
+            try:
+                # WebSocket 상태 체크
+                if websocket.client_state != WebSocketState.CONNECTED:
+                    logger.warning(f"끊어진 WebSocket 연결 감지: {client_id} (상태: {websocket.client_state})")
+                    disconnected_clients.append(client_id)
+                    continue
+                
+                # 가벼운 ping 전송으로 실제 연결 테스트
+                ping_data = {"type": "ping", "message": "health_check"}
+                await websocket.send_json(ping_data)
+                
+            except Exception as e:
+                logger.warning(f"WebSocket 상태 체크 실패, 연결 종료 예정: {client_id}, 오류: {e}")
+                disconnected_clients.append(client_id)
+        
+        # 끊어진 연결들 정리
+        for client_id in disconnected_clients:
+            logger.info(f"건강성 체크로 인한 연결 정리: {client_id}")
+            await self.handle_disconnect(client_id)
     
     # ==========================================
     # 종료 관리

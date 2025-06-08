@@ -107,7 +107,7 @@ class MultimediaCoordinator:
         if CHATBOT_B_AVAILABLE:
             try:
                 # 환경변수에서 vector_db_path 가져오기
-                vector_db_path = os.getenv("VECTOR_DB_PATH", "/app/chatbot/data/vector_db")
+                vector_db_path = os.getenv("VECTOR_DB_PATH", "/app/chatbot/data/vector_db/main")
                 self.chat_bot_b = ChatBotB(
                     output_dir=self.output_dir,  # temp 제외한 기본 경로만 전달
                     vector_db_path=vector_db_path,

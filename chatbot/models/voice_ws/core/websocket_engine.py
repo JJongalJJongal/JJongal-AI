@@ -9,6 +9,7 @@ import asyncio
 from typing import Dict, Any, Optional
 from fastapi import WebSocket, WebSocketDisconnect as FastAPIWebSocketDisconnect
 from fastapi.websockets import WebSocketState
+from websockets.exceptions import ConnectionClosedOK, ConnectionClosedError
 
 from shared.utils.logging_utils import get_module_logger
 
@@ -76,17 +77,18 @@ class WebSocketEngine:
             logger.debug(f"JSON 메시지 전송 성공: {data.get('type', 'unknown')}")
             return True
             
-        except FastAPIWebSocketDisconnect:
-            logger.warning("WebSocket 연결이 끊어져 메시지 전송 실패")
-            raise WebSocketDisconnect(1000, "Connection closed")
+        except (FastAPIWebSocketDisconnect, ConnectionClosedOK, ConnectionClosedError) as e:
+            logger.warning(f"WebSocket 연결 끊어짐: {e}")
+            return False
         except RuntimeError as e:
-            if "websocket.send" in str(e) and "websocket.close" in str(e):
-                logger.warning("이미 닫힌 WebSocket에 메시지 전송 시도")
+            error_msg = str(e).lower()
+            if any(keyword in error_msg for keyword in ["websocket", "close", "send", "cannot call"]):
+                logger.warning(f"WebSocket 상태 오류 (정상 처리): {e}")
                 return False
             logger.error(f"WebSocket 런타임 오류: {e}")
             return False
         except Exception as e:
-            logger.error(f"JSON 메시지 전송 중 오류: {e}")
+            logger.warning(f"WebSocket 메시지 전송 중 연결 문제 (재시도 가능): {e}")
             return False
 
     async def receive_json(self, websocket: WebSocket, timeout: float = 30.0) -> Optional[Dict[str, Any]]:

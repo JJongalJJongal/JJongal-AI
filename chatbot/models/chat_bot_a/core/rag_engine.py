@@ -216,7 +216,11 @@ async def main_test():
         return
 
     # 시스템 초기화
-    vector_db = VectorDB(persist_directory=str(db_path))
+    vector_db = VectorDB(
+        persist_directory=str(db_path), 
+        embedding_model='nlpai-lab/KURE-v1', 
+        use_hybrid_mode=True
+    )
     vector_db.get_collection("fairy_tales")
 
     # TODO: 프롬프트 로더 구현 후 수정 필요

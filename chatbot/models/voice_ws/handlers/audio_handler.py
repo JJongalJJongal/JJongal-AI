@@ -197,10 +197,21 @@ async def handle_audio_websocket(
             # 데이터 수신이 활발하면 ping 시간 업데이트 (불필요한 ping 방지)
             last_ping_time = time.time()
 
-            if elapsed_chunk_time >= 1.0 or audio_bytes_accumulated >= 64 * 1024: # 오디오 chunk 수집 시간이 1초 이상이거나 오디오 byte 누적 값이 64KB 이상일 경우
+            # 개선된 오디오 청크 수집 조건
+            # - 시간: 1.5초 (음성 완료 대기)
+            # - 크기: 32KB (WAV 품질 고려)
+            # - 최소 청크 수: 3개 이상 (연속성 보장)
+            should_process = (
+                elapsed_chunk_time >= 1.5 or 
+                audio_bytes_accumulated >= 32 * 1024 or
+                (len(audio_chunks) >= 3 and elapsed_chunk_time >= 0.8)
+            )
+            
+            if should_process: # 오디오 처리 조건 충족 시
                 temp_file_path = None # 임시 파일 경로 초기화
                 processing_start_time = time.time()
-                logger.info(f"[AUDIO_PROCESS] 오디오 처리 시작 - client_id: {client_id}, 누적크기: {audio_bytes_accumulated}바이트, 누적시간: {elapsed_chunk_time:.2f}초")
+                logger.info(f"[AUDIO_PROCESS] 오디오 처리 시작 - client_id: {client_id}")
+                logger.info(f"[AUDIO_PROCESS] 수집 정보 - 청크수: {len(audio_chunks)}, 크기: {audio_bytes_accumulated}바이트, 시간: {elapsed_chunk_time:.2f}초")
                 
                 try:
                     # === 1단계: 오디오 청크 결합 ===
@@ -315,6 +326,13 @@ async def handle_audio_websocket(
                     # === 기존 2단계: 오디오 파일 처리 ===
                     step2_start = time.time()
                     logger.info(f"[AUDIO_PROCESS] 2단계: 오디오 파일 처리 시작")
+                    
+                    # 연결 상태 체크 및 진행 상황 알림
+                    if websocket.client_state != WebSocketState.CONNECTED:
+                        logger.warning(f"[AUDIO_PROCESS] 2단계 전 연결 끊어짐 감지: {client_id}")
+                        break
+                    
+                    await ws_engine.send_status(websocket, "processing", "음성을 분석하고 있어요...")
                     temp_file_path, proc_error, proc_code = await audio_processor.process_audio_chunk(full_audio_data, client_id)
                     step2_time = time.time() - step2_start
                     logger.info(f"[AUDIO_PROCESS] 2단계 완료: {step2_time:.2f}초 소요, temp_file: {temp_file_path}")
@@ -329,6 +347,13 @@ async def handle_audio_websocket(
                     # === 3단계: STT (음성→텍스트) ===
                     step3_start = time.time()
                     logger.info(f"[AUDIO_PROCESS] 3단계: STT 처리 시작")
+                    
+                    # 연결 상태 체크 및 진행 상황 알림
+                    if websocket.client_state != WebSocketState.CONNECTED:
+                        logger.warning(f"[AUDIO_PROCESS] 3단계 전 연결 끊어짐 감지: {client_id}")
+                        break
+                    
+                    await ws_engine.send_status(websocket, "transcribing", "음성을 텍스트로 변환하고 있어요...")
                     user_text, stt_error, stt_code = await audio_processor.transcribe_audio(temp_file_path) # 오디오 파일 텍스트 변환
                     step3_time = time.time() - step3_start
                     logger.info(f"[AUDIO_PROCESS] 3단계 완료: {step3_time:.2f}초 소요, 인식결과: '{user_text}'")
@@ -383,6 +408,13 @@ async def handle_audio_websocket(
                     # === 6단계: 챗봇 응답 생성 ===
                     step6_start = time.time()
                     logger.info(f"[AUDIO_PROCESS] 6단계: 챗봇 응답 생성 시작 - 입력텍스트: '{user_text}'")
+                    
+                    # 연결 상태 체크 및 진행 상황 알림
+                    if websocket.client_state != WebSocketState.CONNECTED:
+                        logger.warning(f"[AUDIO_PROCESS] 6단계 전 연결 끊어짐 감지: {client_id}")
+                        break
+                    
+                    await ws_engine.send_status(websocket, "thinking", "답변을 준비하고 있어요...")
                     try:
                         start_time = time.time()
                         response = await asyncio.to_thread(chatbot_a.get_response, user_text)
@@ -404,6 +436,13 @@ async def handle_audio_websocket(
                     # === 7단계: TTS (텍스트→음성) ===
                     step7_start = time.time()
                     logger.info(f"[AUDIO_PROCESS] 7단계: TTS 처리 시작 - 텍스트: '{response[:50]}...'")
+                    
+                    # 연결 상태 체크 및 진행 상황 알림
+                    if websocket.client_state != WebSocketState.CONNECTED:
+                        logger.warning(f"[AUDIO_PROCESS] 7단계 전 연결 끊어짐 감지: {client_id}")
+                        break
+                    
+                    await ws_engine.send_status(websocket, "generating_voice", "음성을 생성하고 있어요...")
                     try:
                         bot_audio_b64, bot_tts_status, bot_tts_error, bot_tts_code = await audio_processor.synthesize_tts(response) # ElevenLabs로 챗봇 응답 음성 생성
                         step7_time = time.time() - step7_start

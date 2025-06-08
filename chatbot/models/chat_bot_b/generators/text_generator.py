@@ -153,7 +153,11 @@ class TextGenerator(BaseGenerator):
         logger.info(f"VectorDB 경로 확인됨: {self.vector_db_path}")
         
         try:
-            self.vector_store = VectorDB(persist_directory=self.vector_db_path)
+            self.vector_store = VectorDB(
+                persist_directory=self.vector_db_path, 
+                embedding_model='nlpai-lab/KURE-v1', 
+                use_hybrid_mode=True
+            )
             logger.info(f"VectorDB 객체 생성 완료")
             
             # 컬렉션 존재 확인

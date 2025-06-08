@@ -96,12 +96,21 @@ class AudioProcessor:
             
         try:
             file_size = os.path.getsize(file_path)
-            logger.info(f"오디오 파일 변환 시작: {file_path}, 크기: {file_size} 바이트")
+            file_ext = os.path.splitext(file_path)[1].lower()
+            logger.info(f"오디오 파일 변환 시작: {file_path}")
+            logger.info(f"파일 정보 - 크기: {file_size} 바이트, 확장자: {file_ext}")
             
             if file_size < 1000:  # 1KB 미만
                 logger.warning("오디오 파일이 너무 작습니다")
                 return "", "오디오 파일이 너무 작습니다", "audio_too_small"
             
+            # 지원되는 오디오 형식 확인
+            supported_formats = ['.wav', '.mp3', '.m4a', '.ogg', '.webm', '.flac']
+            if file_ext not in supported_formats:
+                logger.warning(f"지원되지 않는 오디오 형식: {file_ext}")
+                # Whisper는 대부분의 형식을 지원하므로 경고만 출력하고 계속 진행
+            
+            logger.info(f"Whisper 모델({whisper_model_name})로 변환 시작...")
             result = await asyncio.to_thread(
                 self.whisper_model.transcribe, 
                 file_path, 
@@ -110,11 +119,19 @@ class AudioProcessor:
             )
             
             text = result.get("text", "").strip()
-            logger.info(f"Whisper 변환 결과: {text}")
+            confidence = result.get("confidence", 0.0)  # 일부 Whisper 버전에서 제공
+            
+            logger.info(f"Whisper 변환 결과: '{text}' (길이: {len(text)}자)")
+            if hasattr(result, 'segments') and result.segments:
+                logger.info(f"세그먼트 수: {len(result.segments)}")
             
             if not text:
                 logger.warning("Whisper가 텍스트를 인식하지 못했습니다")
                 return "", "음성을 인식하지 못했습니다. 더 명확하게 말씀해주세요.", "no_speech_detected"
+            
+            # 매우 짧은 텍스트 경고 (노이즈일 가능성)
+            if len(text) < 3:
+                logger.warning(f"인식된 텍스트가 매우 짧습니다: '{text}'")
                 
             return text, None, None
             
@@ -267,9 +284,45 @@ class AudioProcessor:
         else:
             return BUGI_VOICE_OPTIONS["default"]  # 기본 따뜻한 음성
     
+    def _detect_audio_format(self, audio_data: bytes) -> str:
+        """
+        오디오 데이터의 헤더를 분석해서 형식을 감지
+        
+        Args:
+            audio_data (bytes): 오디오 데이터
+        
+        Returns:
+            str: 파일 확장자 (.wav, .mp3, .webm, .ogg)
+        """
+        if len(audio_data) < 12:
+            return ".wav"  # 기본값
+        
+        # WAV 헤더 감지 (RIFF...WAVE)
+        if audio_data[:4] == b'RIFF' and audio_data[8:12] == b'WAVE':
+            return ".wav"
+        
+        # MP3 헤더 감지 (ID3 태그 또는 프레임 헤더)
+        if audio_data[:3] == b'ID3' or (audio_data[0:2] == b'\xff\xfb') or (audio_data[0:2] == b'\xff\xf3'):
+            return ".mp3"
+        
+        # WebM 헤더 감지
+        if audio_data[:4] == b'\x1a\x45\xdf\xa3':
+            return ".webm"
+        
+        # OGG 헤더 감지
+        if audio_data[:4] == b'OggS':
+            return ".ogg"
+        
+        # M4A/AAC 헤더 감지
+        if audio_data[4:8] == b'ftyp' and b'M4A' in audio_data[:20]:
+            return ".m4a"
+        
+        # 감지 실패 시 WAV 기본값 (Whisper가 잘 처리함)
+        return ".wav"
+
     async def process_audio_chunk(self, audio_data, client_id):
         """
-        오디오 청크 처리
+        오디오 청크 처리 (개선된 형식 감지 및 성능 최적화)
         
         Args:
             audio_data (bytes): 오디오 데이터
@@ -280,19 +333,47 @@ class AudioProcessor:
         """
         temp_file_path = None
         try:
-            with tempfile.NamedTemporaryFile(delete=False, suffix=".mp3") as temp_file:
+            # 기본 검증
+            if not audio_data or len(audio_data) < 100:
+                logger.warning(f"오디오 데이터가 너무 작습니다 ({client_id}): {len(audio_data) if audio_data else 0} bytes")
+                return None, "오디오 데이터가 너무 작습니다", "audio_data_too_small"
+            
+            # 오디오 형식 자동 감지
+            audio_format = self._detect_audio_format(audio_data)
+            
+            logger.info(f"오디오 형식 감지 결과 ({client_id}): {audio_format}, 크기: {len(audio_data)} bytes")
+            
+            # 임시 디렉토리 확인 및 생성
+            import tempfile
+            temp_dir = tempfile.gettempdir()
+            if not os.path.exists(temp_dir):
+                os.makedirs(temp_dir, exist_ok=True)
+            
+            # 감지된 형식에 맞는 확장자로 임시 파일 생성
+            with tempfile.NamedTemporaryFile(delete=False, suffix=audio_format, prefix=f"audio_{client_id[:8]}_") as temp_file:
                 temp_file.write(audio_data)
                 temp_file_path = temp_file.name
-                
+            
+            # 파일 생성 검증
+            if not os.path.exists(temp_file_path):
+                logger.error(f"임시 파일 생성 실패 ({client_id}): {temp_file_path}")
+                return None, "임시 파일 생성 실패", "temp_file_creation_failed"
+            
+            file_size = os.path.getsize(temp_file_path)
+            logger.info(f"오디오 임시 파일 생성 완료 ({client_id}): {temp_file_path} ({file_size} bytes)")
+            
             return temp_file_path, None, None
+            
         except Exception as e:
             error_detail = traceback.format_exc()
             logger.error(f"오디오 청크 처리 오류 ({client_id}): {e}\n{error_detail}")
             
+            # 실패 시 임시 파일 정리
             if temp_file_path and os.path.exists(temp_file_path):
                 try:
                     os.remove(temp_file_path)
-                except:
-                    pass
+                    logger.info(f"실패한 임시 파일 정리 완료: {temp_file_path}")
+                except Exception as cleanup_error:
+                    logger.warning(f"임시 파일 정리 실패: {cleanup_error}")
                     
             return None, f"오디오 처리 오류: {e}", "audio_processing_error" 

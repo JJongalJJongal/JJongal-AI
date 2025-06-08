@@ -99,7 +99,7 @@ class WorkflowOrchestrator:
         self.active_stories: Dict[str, StoryDataSchema] = {} # 활성 스토리 목록 (story_id -> StoryDataSchema)
         
         # 챗봇 초기화
-        self._initialize_chatbots()
+        self.initialize_chatbots()
         
         self.logger.info(f"WorkflowOrchestrator 초기화 완료 (output_dir: {output_dir})")
     
