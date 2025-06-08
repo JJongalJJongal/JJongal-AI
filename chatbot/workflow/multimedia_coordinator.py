@@ -183,8 +183,8 @@ class MultimediaCoordinator:
             
             for i, scene in enumerate(scenes[:self.image_config["max_images"]]):
                 try:
-                    # 이미지 생성
-                    image_info = await self._generate_single_image(scene, i, story_images_dir)
+                    # 이미지 생성 - 실제 story_id 전달
+                    image_info = await self._generate_single_image(scene, i, story_images_dir, story_id)
                     if image_info:
                         images.append(image_info)
                         
@@ -304,7 +304,8 @@ class MultimediaCoordinator:
         self,
         scene: Dict[str, str],
         index: int,
-        output_dir: str
+        output_dir: str,
+        actual_story_id: str = None
     ) -> Optional[Dict[str, str]]:
         """단일 이미지 생성 - ChatBotB ImageGenerator 사용"""
         try:
@@ -323,7 +324,7 @@ class MultimediaCoordinator:
                         }],
                         "metadata": {"target_age": "4-7세"}  # 기본 연령대
                     },
-                    "story_id": f"scene_{index}"
+                    "story_id": actual_story_id or f"scene_{index}"
                 }
                 
                 # ChatBotB ImageGenerator 사용 

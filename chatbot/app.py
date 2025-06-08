@@ -254,19 +254,23 @@ async def audio_endpoint(
     logger.info(f"요청 파라미터: child_name={child_name}, age={age}, interests={interests}")
     logger.info(f"Headers: {dict(websocket.headers) if hasattr(websocket, 'headers') else 'None'}")
     
-    # 파라미터 검증
-    if not child_name:
-        logger.warning("필수 파라미터 누락: child_name")
-        await websocket.close(code=1003, reason="Missing child_name parameter")
-        return
-        
-    if not age or not (4 <= age <= 9):
-        logger.warning(f"잘못된 age 파라미터: {age}")
-        await websocket.close(code=1003, reason="Invalid age parameter (4-9)")
-        return
-    
     try:
-        # 인증 확인
+        # WebSocket 연결 수락
+        await websocket.accept()
+        logger.info("WebSocket 연결 수락 완료")
+        
+        # 파라미터 검증
+        if not child_name:
+            logger.warning("필수 파라미터 누락: child_name")
+            await websocket.close(code=1003, reason="Missing child_name parameter")
+            return
+            
+        if not age or not (4 <= age <= 9):
+            logger.warning(f"잘못된 age 파라미터: {age}")
+            await websocket.close(code=1003, reason="Invalid age parameter (4-9)")
+            return
+        
+        # 인증 확인 (WebSocket 수락 후)
         if not await auth_processor.validate_connection(websocket):
             logger.warning(f"인증 실패로 연결 거부")
             await websocket.close(code=1008, reason="Authentication failed")
@@ -300,16 +304,29 @@ async def story_generation_endpoint(
     token: Optional[str] = Query(None)
 ):
     """WebSocket 스토리 생성 엔드포인트"""
-    if not await auth_processor.validate_connection(websocket):
-        return
+    try:
+        # WebSocket 연결 수락
+        await websocket.accept()
+        logger.info("WebSocket 스토리 생성 연결 수락 완료")
         
-    await handle_story_generation_websocket(
-        websocket,
-        child_name,
-        age,
-        interests,
-        token
-    )
+        # 인증 확인 (WebSocket 수락 후)
+        if not await auth_processor.validate_connection(websocket):
+            await websocket.close(code=1008, reason="Authentication failed")
+            return
+            
+        await handle_story_generation_websocket(
+            websocket,
+            child_name,
+            age,
+            interests,
+            token
+        )
+    except Exception as e:
+        logger.error(f"스토리 생성 웹소켓 엔드포인트 오류: {e}")
+        try:
+            await websocket.close(code=1011, reason="Internal server error")
+        except:
+            pass
 
 # ===========================================
 # HTTP API 엔드포인트

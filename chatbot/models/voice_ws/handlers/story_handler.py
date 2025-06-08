@@ -44,8 +44,7 @@ async def handle_story_generation_websocket(
     interests_list = interests_str.split(',') if interests_str else [] # 관심사 목록 처리
 
     try:
-        await websocket.accept() # WebSocket 연결 수락
-        logger.info(f"동화 생성 WebSocket 연결 수락: {client_id} ({child_name}, {age}세)") # 로깅
+        logger.info(f"동화 생성 WebSocket 핸들러 시작: {client_id} ({child_name}, {age}세)") # 로깅
 
         # ChatBot B 인스턴스 생성 및 관리 (ConnectionEngine 사용)
         chatbot_b = ChatBotB() # 꼬기 챗봇 인스턴스 생성
@@ -67,6 +66,12 @@ async def handle_story_generation_websocket(
         while True:
             try:
                 raw_message = await asyncio.wait_for(websocket.receive_text(), timeout=60.0) # 텍스트 메시지 수신
+                
+                # WebSocket disconnect 체크
+                if raw_message is None:
+                    logger.info(f"동화 생성 클라이언트 연결 종료 감지: {client_id}")
+                    break
+                    
                 message = json.loads(raw_message) # 메시지 파싱
                 message_type = message.get("type") # 메시지 타입
                 connection_engine.update_chatbot_b_activity(client_id) # 활동 시간 갱신
@@ -91,6 +96,13 @@ async def handle_story_generation_websocket(
             except WebSocketDisconnect: # WebSocket 연결 끊어진 경우
                 logger.info(f"동화 생성 클라이언트 연결 종료됨 (메시지 루프): {client_id}") # 로깅
                 raise
+            except RuntimeError as e:
+                if "Cannot call \"receive\" once a disconnect message has been received" in str(e):
+                    logger.info(f"동화 생성 클라이언트가 이미 연결을 끊었음: {client_id}")
+                    raise WebSocketDisconnect()
+                else:
+                    logger.error(f"동화 생성 RuntimeError 발생: {client_id}, 오류: {e}")
+                    await ws_engine.send_error(websocket, str(e), "story_runtime_error")
             except Exception as e: # 예외 처리
                 logger.error(f"동화 생성 메시지 루프 오류 ({client_id}): {e}\n{traceback.format_exc()}") # 로깅
                 await ws_engine.send_error(websocket, str(e), "story_loop_error") # 오류 메시지 전송

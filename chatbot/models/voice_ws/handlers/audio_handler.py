@@ -6,13 +6,11 @@
 import time
 import asyncio
 import traceback
-import os
 import json
 from datetime import datetime
 from typing import Optional, Dict, Any
 from fastapi import WebSocket, status
 from fastapi.websockets import WebSocketDisconnect, WebSocketState
-import uuid
 import tempfile
 
 from shared.utils.logging_utils import get_module_logger
@@ -52,11 +50,10 @@ async def handle_audio_websocket(
     # 연결 유지 관리
     ping_interval = 30.0  # 30초마다 ping
     last_ping_time = time.time()
-    chunk_collection_start_time = time.time()
     
     try:
-        await websocket.accept()
-        logger.info(f"오디오 WebSocket 연결 수락: {client_id} ({child_name}, {age}세)")
+        
+        logger.info(f"오디오 WebSocket 핸들러 시작: {client_id} ({child_name}, {age}세)") # 로깅
         
         # VectorDB 인스턴스 생성 (ChatBotA에 필요)
         try:
@@ -110,6 +107,11 @@ async def handle_audio_websocket(
             try:
                 # WebSocket 메시지 수신 (10초 타임아웃)
                 message = await asyncio.wait_for(websocket.receive(), timeout=10.0)
+                
+                # WebSocket disconnect 처리
+                if message.get("type") == "websocket.disconnect":
+                    logger.info(f"클라이언트 연결 종료: {client_id}")
+                    break
                 
                 if message.get("type") == "websocket.receive":
                     if "bytes" in message:
@@ -303,6 +305,9 @@ async def handle_audio_websocket(
                                         "timestamp": datetime.now().isoformat()
                                     })
                                 continue
+                            
+                        
+                            
                             elif control_message.get("type") == "conversation_finish":
                                 logger.info(f"[CONVERSATION_FINISH] 사용자가 대화 완료 요청: {client_id}")
                                 
@@ -332,6 +337,11 @@ async def handle_audio_websocket(
                         except json.JSONDecodeError as e:
                             logger.warning(f"텍스트 메시지가 JSON이 아님: {text_data[:50]}..., 오류: {e}")
                             continue
+                    elif control_message.get("type") == "websocket.disconnect":
+                        logger.info(f"[WEBSOCKET_DISCONNECT] 클라이언트 연결 종료: {client_id}")
+                        await connection_engine.handle_disconnect(client_id)
+                        await websocket.close(code=status.WS_1000_NORMAL_CLOSURE, reason="클라이언트 연결 종료")
+                        return
                     else:
                         logger.warning(f"알 수 없는 메시지 타입: {client_id}, 메시지: {message}")
                         continue
@@ -366,6 +376,13 @@ async def handle_audio_websocket(
             except WebSocketDisconnect:
                 logger.info(f"클라이언트 연결 종료됨 (메인 루프): {client_id}")
                 break
+            except RuntimeError as e:
+                if "Cannot call \"receive\" once a disconnect message has been received" in str(e):
+                    logger.info(f"클라이언트가 이미 연결을 끊었음: {client_id}")
+                    break
+                else:
+                    logger.error(f"RuntimeError 발생: {client_id}, 오류: {e}")
+                    break
             except Exception as e:
                 logger.error(f"예상치 못한 데이터 수신 오류: {client_id}, 오류: {e}")
                 logger.error(f"오류 세부사항: {traceback.format_exc()}")
