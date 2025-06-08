@@ -358,6 +358,16 @@ async def handle_audio_websocket(
                                                             "timestamp": datetime.now().isoformat()
                                                         })
                                                         
+                                                        # 🗑️ 동화 생성 시작 후 음성 샘플 정리 (보안)
+                                                        try:
+                                                            voice_cloning_processor = audio_processor.voice_cloning_processor if hasattr(audio_processor, 'voice_cloning_processor') else None
+                                                            if voice_cloning_processor:
+                                                                cleanup_success = await voice_cloning_processor.cleanup_user_samples(child_name)
+                                                                if cleanup_success:
+                                                                    logger.info(f"[STORY_CLEANUP] 동화 생성 시작 후 음성 샘플 정리: {child_name}")
+                                                        except Exception as cleanup_error:
+                                                            logger.warning(f"[STORY_CLEANUP] 동화 생성 후 샘플 정리 실패: {cleanup_error}")
+                                                        
                                                     except Exception as story_gen_error:
                                                         logger.error(f"[STORY_GEN] 자동 동화 생성 중 오류: {story_gen_error}")
                                                         await ws_engine.send_error(websocket, f"동화 생성 중 오류가 발생했습니다: {str(story_gen_error)}", "story_generation_failed")
@@ -1124,6 +1134,16 @@ async def create_voice_clone_background(
         
         if voice_id:
             logger.info(f"[VOICE_CLONE] 음성 클론 생성 성공: {child_name} -> {voice_id}")
+            
+            # 🗑️ 개인정보 보호: 음성 클로닝 완료 후 원본 샘플 삭제
+            try:
+                cleanup_success = await voice_cloning_processor.cleanup_user_samples(child_name)
+                if cleanup_success:
+                    logger.info(f"[VOICE_CLEANUP] 음성 샘플 정리 완료: {child_name}")
+                else:
+                    logger.warning(f"[VOICE_CLEANUP] 음성 샘플 정리 실패: {child_name}")
+            except Exception as cleanup_error:
+                logger.error(f"[VOICE_CLEANUP] 샘플 정리 중 오류: {cleanup_error}")
             
             # 클론 음성 설정
             clone_voice_settings = {

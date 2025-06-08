@@ -848,7 +848,7 @@ class VoiceCloningProcessor:
     
     async def cleanup_user_samples(self, user_id: str) -> bool:
         """
-        사용자 음성 샘플 정리
+        사용자 음성 샘플 정리 (개인정보 보호)
         
         Args:
             user_id: 사용자 식별자
@@ -857,20 +857,63 @@ class VoiceCloningProcessor:
             bool: 정리 성공 여부
         """
         try:
+            deleted_count = 0
+            
             # 파일 시스템에서 샘플 파일들 삭제
             if user_id in self.user_voice_data:
-                for file_path in self.user_voice_data[user_id]["samples"]:
+                samples = self.user_voice_data[user_id]["samples"]
+                
+                for sample_info in samples:
                     try:
-                        Path(file_path["path"]).unlink(missing_ok=True)
+                        # 파일 경로 추출 (딕셔너리인 경우와 문자열인 경우 처리)
+                        if isinstance(sample_info, dict):
+                            file_path = sample_info.get("path")
+                            original_path = sample_info.get("original_path")
+                        else:
+                            file_path = sample_info
+                            original_path = None
+                        
+                        # 메인 파일 삭제
+                        if file_path and Path(file_path).exists():
+                            Path(file_path).unlink()
+                            deleted_count += 1
+                            logger.debug(f"[CLEANUP] 삭제 완료: {file_path}")
+                        
+                        # 원본 파일도 있으면 삭제 (RNNoise 적용된 경우)
+                        if original_path and Path(original_path).exists():
+                            Path(original_path).unlink()
+                            deleted_count += 1
+                            logger.debug(f"[CLEANUP] 원본 삭제 완료: {original_path}")
+                            
                     except Exception as e:
-                        logger.warning(f"샘플 파일 삭제 실패: {file_path['path']} - {e}")
+                        logger.warning(f"[CLEANUP] 샘플 파일 삭제 실패: {sample_info} - {e}")
+                
+                # 사용자 폴더 전체 정리
+                user_audio_dir = self.temp_audio_dir / user_id
+                if user_audio_dir.exists():
+                    try:
+                        # 폴더 내 모든 파일 삭제
+                        for file in user_audio_dir.iterdir():
+                            if file.is_file():
+                                file.unlink()
+                                deleted_count += 1
+                        
+                        # 빈 폴더 삭제
+                        user_audio_dir.rmdir()
+                        logger.debug(f"[CLEANUP] 사용자 폴더 삭제 완료: {user_audio_dir}")
+                        
+                    except Exception as e:
+                        logger.warning(f"[CLEANUP] 사용자 폴더 정리 실패: {user_audio_dir} - {e}")
                 
                 # 메모리에서 제거
                 del self.user_voice_data[user_id]
-                logger.info(f"사용자 {user_id} 음성 샘플 정리 완료")
-            
-            return True
+                logger.info(f"[CLEANUP] 사용자 {user_id} 음성 샘플 정리 완료 (삭제된 파일: {deleted_count}개)")
+                
+                return True
+            else:
+                logger.warning(f"[CLEANUP] 정리할 샘플이 없음: {user_id}")
+                return True
             
         except Exception as e:
-            logger.error(f"사용자 샘플 정리 실패: {e}")
+            logger.error(f"[CLEANUP] 사용자 샘플 정리 실패: {e}")
             return False 
