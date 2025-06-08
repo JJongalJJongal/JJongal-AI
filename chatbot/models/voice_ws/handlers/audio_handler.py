@@ -311,7 +311,7 @@ async def handle_audio_websocket(
                                                     logger.info(f"[STT_RETRY] STT 실패로 재입력 요청 ({retry_count}/3): {ai_response}")
                                                     
                                                     # 재시도 횟수 업데이트
-                                                    client_info = connection_engine.get_client(client_id)
+                                                    client_info = connection_engine.get_client_info(client_id)
                                                     if client_info:
                                                         client_info['stt_retry_count'] = retry_count
                                                     
