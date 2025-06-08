@@ -152,7 +152,9 @@ class ChatBotB:
                 voice_id="xi3rF0t7dg7uN2M0WUhr", # Yuna (기본 내레이터 음성)
                 model_id="eleven_multilingual_v2", # 기본 모델 ID (한국어 지원)
                 voice_settings=None, # 음성 설정 (stability, similarity_boost, style, use_speaker_boost)
-                max_retries=3 # 최대 재시도 횟수
+                max_retries=3, # 최대 재시도 횟수
+                enable_chunking=True, # 텍스트 청킹 활성화 (큰 음성 파일 방지)
+                max_chunk_length=500 # 청크 최대 길이 (문자 수)
             )
             
             # 2. Enhanced 생성기들 초기화 (선택적)
@@ -334,10 +336,21 @@ class ChatBotB:
                 "chapters": len(story_data.get("chapters", []))
             })
         
-        image_data = await self.enhanced_image_generator.generate({
+        # 부기의 원본 분석 데이터를 이미지 생성기에도 전달
+        image_input_data = {
             "story_data": story_data,
-            "story_id": story_data.get("story_id")
-        }, progress_callback)
+            "story_id": story_data.get("story_id"),
+            # 부기의 분석 데이터 추가 전달
+            "conversation_summary": enhanced_outline.get("conversation_summary", ""),
+            "extracted_keywords": enhanced_outline.get("extracted_keywords", []),
+            "conversation_analysis": enhanced_outline.get("conversation_analysis", {}),
+            "child_profile": enhanced_outline.get("child_profile", {}),
+            "story_generation_method": enhanced_outline.get("story_generation_method", "enhanced")
+        }
+        
+        image_data = await self.enhanced_image_generator.generate(
+            image_input_data, progress_callback
+        )
         
         # 3. 음성 생성 (WebSocket 지원)
         if progress_callback:
@@ -347,10 +360,21 @@ class ChatBotB:
                 "websocket_enabled": use_websocket_voice
             })
         
-        voice_data = await self.voice_generator.generate({
+        # 부기의 원본 분석 데이터를 음성 생성기에도 전달
+        voice_input_data = {
             "story_data": story_data,
-            "story_id": story_data.get("story_id")
-        }, progress_callback, use_websocket=use_websocket_voice)
+            "story_id": story_data.get("story_id"),
+            # 부기의 분석 데이터 추가 전달
+            "conversation_summary": enhanced_outline.get("conversation_summary", ""),
+            "extracted_keywords": enhanced_outline.get("extracted_keywords", []),
+            "conversation_analysis": enhanced_outline.get("conversation_analysis", {}),
+            "child_profile": enhanced_outline.get("child_profile", {}),
+            "story_generation_method": enhanced_outline.get("story_generation_method", "enhanced")
+        }
+        
+        voice_data = await self.voice_generator.generate(
+            voice_input_data, progress_callback, use_websocket=use_websocket_voice
+        )
         
         # 4. 결과 통합
         return {

@@ -40,15 +40,15 @@ def get_elevenlabs_headers(api_key: str):
         "xi-api-key": api_key
     }
 
-# 부기(ChatBot A)용 음성 설정 - 아이와 대화하기 적합한 따뜻한 음성
+# 부기(ChatBot A) 전용 음성 설정 - 한국어 동화 최적화
 BUGI_VOICE_CONFIG = {
-    "voice_id": "AW5wrnG1jVizOYY7R1Oo",  # Jiyoung (따뜻하고 친근한 한국어 음성)
-    "model_id": "eleven_multilingual_v2",  # 한국어 지원 모델
+    "voice_id": "AW5wrnG1jVizOYY7R1Oo",  # Jiyoung - 한국어 지원 여성 음성
+    "model_id": "eleven_multilingual_v2",  # 한국어 최적화 모델
     "voice_settings": {
-        "stability": 0.6,  # 안정성 (0.0-1.0)
-        "similarity_boost": 0.8,  # 유사성 증가
-        "style": 0.2,  # 약간의 스타일
-        "use_speaker_boost": True  # 스피커 부스트
+        "stability": 0.50,  # 한국어: 안정성과 표현력의 균형
+        "similarity_boost": 0.85,  # 한국어 발음 명확성 강화
+        "style": 0.15,  # 한국어 동화 톤에 맞게 조정
+        "use_speaker_boost": True
     }
 }
 
@@ -289,7 +289,7 @@ class AudioProcessor:
     
     def _validate_stt_result(self, text: str, quality_info: dict) -> dict:
         """
-        STT 결과 다단계 검증
+        STT 결과 검증 (동화 프로젝트용 - 더 관대한 기준)
         
         Args:
             text (str): 인식된 텍스트
@@ -302,53 +302,35 @@ class AudioProcessor:
         if not text:
             return {
                 "is_valid": False,
-                "reason": "음성을 인식하지 못했어. 더 명확하게 말해줄 수 있어?",
+                "reason": "목소리가 잘 안 들려요. 더 크게 말해줄 수 있어요?",
                 "error_code": "no_speech_detected"
             }
         
-        # 매우 짧은 텍스트 검증 (강화)
-        if len(text) < 2:
+        # 매우 짧은 텍스트 검증 (완화됨)
+        if len(text) < 1:  # 1글자로 완화 (기존 2글자)
             return {
                 "is_valid": False,
-                "reason": f"인식된 텍스트가 너무 짧습니다: '{text}'. 더 많이 말해줄 수 있어?",
+                "reason": "조금 더 말해줄 수 있어요?",
                 "error_code": "text_too_short"
             }
         
-        # 품질 점수 기반 검증
-        if quality_info["quality_score"] < 0.3:
+        # 품질 점수 기반 검증 (매우 관대함)
+        if quality_info.get("quality_score", 1.0) < 0.1:  # 0.3 → 0.1로 완화
             return {
                 "is_valid": False,
-                "reason": "잘 안들려. 더 크게 말해줄 수 있어?",
+                "reason": "잘 안 들려요. 다시 말해줄 수 있어요?",
                 "error_code": "low_quality_audio"
             }
         
-        # 신뢰도 기반 검증
-        if quality_info["avg_confidence"] > 0 and quality_info["avg_confidence"] < 0.4:
+        # 신뢰도 기반 검증 (매우 관대함)
+        if quality_info.get("avg_confidence", 1.0) > 0 and quality_info["avg_confidence"] < 0.2:  # 0.4 → 0.2로 완화
             return {
                 "is_valid": False,
-                "reason": "잘 안들려. 더 크게 말해줄 수 있어?",
+                "reason": "잘 안 들려요. 다시 말해줄 수 있어요?",
                 "error_code": "low_confidence"
             }
         
-        # no_speech 세그먼트 검증
-        if quality_info["has_no_speech_segments"] and quality_info["segments_count"] > 0:
-            speech_ratio = 1.0 - (quality_info["segments_count"] * 0.1)  # 대략적 계산
-            if speech_ratio < 0.5:
-                return {
-                    "is_valid": False,
-                    "reason": "잘 안들려. 더 크게 말해줄 수 있어?",
-                    "error_code": "too_much_silence"
-                }
-        
-        # 단어 수 검증 (중간 품질일 때)
-        if quality_info["quality_score"] < 0.7 and quality_info["word_count"] < 2:
-            return {
-                "is_valid": False,
-                "reason": "조금 더 길게 말해줄 수 있어?",
-                "error_code": "insufficient_words"
-            }
-        
-        # 모든 검증 통과
+        # 모든 검증 통과 (대부분의 음성 허용)
         return {
             "is_valid": True,
             "reason": None,
@@ -400,14 +382,14 @@ class AudioProcessor:
                 else:
                     logger.info(f"클라이언트 {client_id}의 기본 부기 음성 사용: {voice_id}")
             else:
-                # 텍스트 내용에 따른 지능적 선택 (기본 동작)
-                voice_id = self.get_voice_for_content(text)
+                # 기본 부기 음성 설정 사용
+                voice_id = self.bugi_voice_config["voice_id"]
                 voice_settings = self.bugi_voice_config["voice_settings"]
                 model_id = self.bugi_voice_config["model_id"]
-                logger.info(f"텍스트 내용 기반 음성 선택: {voice_id}")
+                logger.info(f"기본 부기 음성 사용: {voice_id}")
             
-            # 텍스트 정리 (음성 생성에 적합하게)
-            cleaned_text = self._clean_text_for_speech(text)
+            # 텍스트 전처리 (부기 스타일)
+            cleaned_text = self._prepare_bugi_text_for_speech(text)
             
             # 정리된 텍스트 재검증
             if not cleaned_text or not cleaned_text.strip():
@@ -471,40 +453,39 @@ class AudioProcessor:
             logger.error(f"ElevenLabs TTS 오류: {e}\n{error_detail}")
             return "", "error", f"TTS 오류: {e}", "elevenlabs_tts_error"
     
-    def _clean_text_for_speech(self, text: str) -> str:
-        """음성 생성을 위한 텍스트 정리 (부기 전용)"""
+    def _prepare_bugi_text_for_speech(self, text: str) -> str:
+        """부기(ChatBot A) 전용 텍스트 전처리 - 동화 친화적 스타일"""
+        
         # 기본 정리
         text = text.strip()
+        if not text:
+            return ""
         
-        # 특수 문자 처리 (부기가 아이와 대화할 때 자연스럽게 하기 위해 추가)
-        replacements = {
-            "**": "",  # 마크다운 볼드 제거
-            "*": "",   # 마크다운 이탤릭 제거
-            "_": "",   # 언더스코어 제거
-            "#": "",   # 해시태그 제거
-            "`": "",   # 백틱 제거
-            "---": ". ",  # 구분선을 마침표로
-            "...": ".. ",  # 말줄임표 정리
-            "ㅋㅋ": "크크",  # 웃음 표현 자연스럽게
-            "ㅎㅎ": "하하",  # 웃음 표현 자연스럽게
-        }
+        # 부기의 친근한 말투 최적화
+        # 감정 표현 강화
+        if "안녕" in text:
+            text = f"[cheerful] {text}"
+        elif "미안" in text or "죄송" in text:
+            text = f"[apologetic] {text}"
+        elif "와!" in text or "우와" in text:
+            text = f"[excited] {text}"
+        elif "음..." in text or "글쎄" in text:
+            text = f"[thoughtful] {text}"
+        elif "?" in text:
+            text = f"[curious] {text}"
+        elif "!" in text and any(word in text for word in ["좋아", "재미", "신나", "멋져"]):
+            text = f"[enthusiastic] {text}"
+        elif "그래" in text or "맞아" in text:
+            text = f"[agreeing] {text}"
+        else:
+            # 기본적으로 친근한 톤
+            text = f"{text} (친근하게)"
         
-        for old, new in replacements.items():
-            text = text.replace(old, new)
+        # 길이 제한
+        if len(text) > 500:  # 부기는 짧고 명확하게
+            text = text[:497] + "..."
         
-        # 연속된 공백 정리
-        import re
-        text = re.sub(r'\s+', ' ', text)
-        
-        # 연속된 마침표 정리
-        text = re.sub(r'\.{3,}', '.. ', text)
-        
-        # ElevenLabs 텍스트 길이 제한 (5000자)
-        if len(text) > 4900:
-            logger.warning(f"텍스트가 너무 깁니다 ({len(text)}자). 4900자로 자릅니다.")
-            text = text[:4897] + "..."
-        
-        return text.strip()
+        return text
     
     def get_voice_for_content(self, text: str) -> str:
         """텍스트 내용에 따라 적절한 음성 선택 (부기 전용)"""

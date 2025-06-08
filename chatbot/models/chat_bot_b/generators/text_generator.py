@@ -442,13 +442,38 @@ class TextGenerator(BaseGenerator):
             return []
         
         try:
-            # 쿼리 구성 (더 정교한 검색)
+            # 부기의 분석 데이터를 우선 활용한 검색 쿼리 구성
+            extracted_keywords = input_data.get("extracted_keywords", [])
+            conversation_summary = input_data.get("conversation_summary", "")
+            conversation_topics = input_data.get("conversation_analysis", {}).get("conversation_topics", [])
+            
+            # 기본 정보
             theme = input_data.get("theme", "")
             educational_value = input_data.get("educational_value", "")
             interests = input_data.get("interests", [])
-            target_age = input_data.get("target_age", 7) # 기본 7세
+            target_age = input_data.get("target_age", 7)
             
-            query_text = f"{theme} {educational_value} {' '.join(interests)}"
+            # 부기 데이터가 있으면 우선 사용, 없으면 기본 정보 사용
+            if extracted_keywords or conversation_summary:
+                # 실제 대화 기반 검색 쿼리
+                query_parts = []
+                if conversation_summary:
+                    query_parts.append(conversation_summary[:100])  # 요약의 처음 100자
+                if extracted_keywords:
+                    query_parts.extend(extracted_keywords[:5])  # 상위 5개 키워드
+                if conversation_topics:
+                    query_parts.extend(conversation_topics[:3])  # 상위 3개 토픽
+                
+                query_text = " ".join(query_parts)
+                logger.info(f"부기 대화 분석 기반 RAG 검색: '{query_text[:50]}...'")
+            else:
+                # 기본 정보 기반 검색 쿼리 (폴백)
+                query_text = f"{theme} {educational_value} {' '.join(interests)}"
+                logger.info(f"기본 정보 기반 RAG 검색: '{query_text[:50]}...'")
+            
+            # 검색 쿼리가 비어있으면 기본값 사용
+            if not query_text.strip():
+                query_text = f"아이 동화 {target_age}세"
             
             # 연령대에 따른 age_group 문자열 생성
             def _get_age_group_for_filter(age: int) -> str:
@@ -486,27 +511,50 @@ class TextGenerator(BaseGenerator):
     def _prepare_enhanced_prompt_data(self, input_data: Dict[str, Any], 
                                     reference_stories: List[Dict[str, Any]], 
                                     age_group: str) -> Dict[str, Any]:
-        """Enhanced 프롬프트 데이터 준비"""
+        """Enhanced 프롬프트 데이터 준비 - 부기의 대화 분석 데이터 활용"""
         
-        # 기본 스토리 정보
+        # 부기에서 받은 실제 대화 분석 데이터 추출
+        conversation_summary = input_data.get("conversation_summary", "")
+        extracted_keywords = input_data.get("extracted_keywords", [])
+        conversation_analysis = input_data.get("conversation_analysis", {})
+        
+        logger.info(f"부기 대화 분석 데이터: keywords={len(extracted_keywords)}, summary={len(conversation_summary)}")
+        
+        # 기본 스토리 정보 (부기 데이터 우선 활용)
         story_outline = {
             "theme": input_data.get("theme", ""),
             "plot_summary": input_data.get("plot_summary", ""),
             "educational_value": input_data.get("educational_value", ""),
             "target_age": input_data.get("target_age", 7),
             "setting": input_data.get("setting", ""),
-            "characters": input_data.get("characters", [])
+            "characters": input_data.get("characters", []),
+            # 부기 분석 데이터 추가
+            "conversation_keywords": extracted_keywords,
+            "conversation_topics": conversation_analysis.get("conversation_topics", []),
+            "actual_conversation_length": input_data.get("actual_conversation_length", 0),
+            "story_generation_method": input_data.get("story_generation_method", "default")
         }
         
-        # 아이 정보
+        # 아이 정보 (child_profile 우선 사용)
+        child_profile = input_data.get("child_profile", {})
         child_info = {
-            "name": input_data.get("child_name", "친구"),
-            "age": input_data.get("target_age", 7),
-            "interests": input_data.get("interests", []),
+            "name": child_profile.get("name") or input_data.get("child_name", "친구"),
+            "age": child_profile.get("age") or input_data.get("target_age", 7),
+            "interests": child_profile.get("interests") or input_data.get("interests", []),
             "learning_preferences": input_data.get("learning_preferences", [])
         }
         
-        # 참고 스토리 포맷팅 (더 정교한 구조)
+        # 실제 대화 내용 기반 개인화
+        personalization_data = {
+            "conversation_summary": conversation_summary,
+            "user_mentioned_topics": extracted_keywords[:5],  # 상위 5개 키워드
+            "conversation_style": self._analyze_conversation_style(conversation_analysis),
+            "suggested_story_elements": self._extract_story_elements_from_conversation(
+                conversation_summary, extracted_keywords
+            )
+        }
+        
+        # 참고 스토리 포맷팅 (대화 키워드 기반으로 더 관련성 높게)
         formatted_references = []
         for story in reference_stories[:3]:  # 상위 3개만 사용
             formatted_references.append({
@@ -520,7 +568,59 @@ class TextGenerator(BaseGenerator):
         return {
             "story_outline": json.dumps(story_outline, ensure_ascii=False, indent=2),
             "reference_stories": json.dumps(formatted_references, ensure_ascii=False, indent=2),
-            "child_info": json.dumps(child_info, ensure_ascii=False, indent=2)
+            "child_info": json.dumps(child_info, ensure_ascii=False, indent=2),
+            "personalization_data": json.dumps(personalization_data, ensure_ascii=False, indent=2)
+        }
+    
+    def _analyze_conversation_style(self, conversation_analysis: Dict[str, Any]) -> str:
+        """대화 스타일 분석"""
+        user_messages = conversation_analysis.get("user_messages", 0)
+        total_words = conversation_analysis.get("total_words", 0)
+        
+        if user_messages == 0:
+            return "간단한 대화"
+        
+        avg_words_per_message = total_words / max(user_messages, 1)
+        
+        if avg_words_per_message > 15:
+            return "자세하고 표현력이 풍부한 대화"
+        elif avg_words_per_message > 8:
+            return "적당히 활발한 대화"
+        else:
+            return "간단하고 간결한 대화"
+    
+    def _extract_story_elements_from_conversation(self, conversation_summary: str, 
+                                                extracted_keywords: List[str]) -> Dict[str, List[str]]:
+        """대화 내용에서 스토리 요소 추출"""
+        
+        # 키워드 기반 카테고리 분류
+        character_keywords = []
+        setting_keywords = []
+        object_keywords = []
+        emotion_keywords = []
+        
+        # 간단한 키워드 분류 (실제로는 더 정교한 NLP 모델 사용 가능)
+        character_words = ["친구", "엄마", "아빠", "동물", "공주", "왕자", "마법사", "요정", "강아지", "고양이"]
+        setting_words = ["집", "학교", "숲", "바다", "산", "공원", "마을", "성", "하늘", "우주"]
+        object_words = ["장난감", "책", "공", "자동차", "꽃", "나무", "음식", "케이크", "선물"]
+        emotion_words = ["행복", "슬픔", "무서워", "신나", "재미", "즐거", "기쁨", "사랑"]
+        
+        for keyword in extracted_keywords:
+            keyword_lower = keyword.lower()
+            if any(char in keyword_lower for char in character_words):
+                character_keywords.append(keyword)
+            elif any(place in keyword_lower for place in setting_words):
+                setting_keywords.append(keyword)
+            elif any(obj in keyword_lower for obj in object_words):
+                object_keywords.append(keyword)
+            elif any(emotion in keyword_lower for emotion in emotion_words):
+                emotion_keywords.append(keyword)
+        
+        return {
+            "characters": character_keywords[:3],
+            "settings": setting_keywords[:3], 
+            "objects": object_keywords[:3],
+            "emotions": emotion_keywords[:3]
         }
     
     def _parse_enhanced_story(self, generated_text: str) -> Dict[str, Any]:

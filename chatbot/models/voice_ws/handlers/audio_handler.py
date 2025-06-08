@@ -13,6 +13,7 @@ from typing import Optional, Dict, Any, List
 from fastapi import WebSocket, status
 from fastapi.websockets import WebSocketDisconnect, WebSocketState
 import tempfile
+import base64
 
 from shared.utils.logging_utils import get_module_logger
 from chatbot.models.chat_bot_a import ChatBotA # 부기 챗봇 import
@@ -49,12 +50,13 @@ async def handle_audio_websocket(
     # 오디오 수집 상태
     audio_chunks = []
     
-    # 음성 클로닝 프로세서 초기화
-    voice_cloning_processor = VoiceCloningProcessor()
+    # 음성 클로닝 프로세서 제거 (간소화)
+    # voice_cloning_processor = VoiceCloningProcessor()
     
     # 연결 유지 관리
     ping_interval = 30.0  # 30초마다 ping
     last_ping_time = time.time()
+    chunk_collection_start_time = time.time()  # 오디오 청크 수집 시작 시간
     
     try:
         
@@ -184,300 +186,165 @@ async def handle_audio_websocket(
                                     logger.info(f"[AUDIO_END] 수집된 오디오 청크: {len(audio_chunks)}개")
                                     
                                     try:
-                                        # 오디오 데이터 병합
+                                        # 오디오 청크 결합
                                         combined_audio = b''.join(audio_chunks)
-                                        logger.info(f"[AUDIO_END] 병합된 오디오 크기: {len(combined_audio)} bytes")
-                                        
+                                        audio_chunks.clear()  # 처리 후 청크 초기화
+
+                                        if len(combined_audio) == 0:
+                                            await ws_engine.send_error(websocket, "빈 오디오 데이터", "empty_audio_data")
+                                            continue
+
                                         # 임시 파일로 저장
-                                        temp_file_path = None
+                                        with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as temp_file:
+                                            temp_file.write(combined_audio)
+                                            temp_file_path = temp_file.name
+
                                         try:
-                                            with tempfile.NamedTemporaryFile(suffix='.wav', delete=False) as temp_file:
-                                                temp_file.write(combined_audio)
-                                                temp_file_path = temp_file.name
+                                            # === 간소화된 STT 처리 ===
+                                            logger.info(f"[STT_START] 음성 인식 시작")
+                                            stt_result = await audio_processor.transcribe_audio(temp_file_path)
                                             
-                                            logger.debug(f"[AUDIO_END] 임시 파일 생성: {temp_file_path}")
-                                            
-                                            # === AWS 환경 진단 로깅 추가 ===
-                                            logger.info(f"[AWS_DIAG] 환경 정보 - 컨테이너: {os.environ.get('HOSTNAME', 'Unknown')}")
-                                            logger.info(f"[AWS_DIAG] 현재 작업 디렉토리: {os.getcwd()}")
-                                            logger.info(f"[AWS_DIAG] output 디렉토리 존재: {os.path.exists('output')}")
-                                            logger.info(f"[AWS_DIAG] output 디렉토리 권한: {oct(os.stat('output').st_mode)[-3:] if os.path.exists('output') else 'N/A'}")
-                                            
-                                            # === STT 처리 ===
-                                            try:
-                                                logger.info(f"[STT_START] OpenAI Whisper STT 시작")
-                                                stt_result = await audio_processor.transcribe_audio(temp_file_path)
+                                            # STT 결과 처리 (간소화)
+                                            if isinstance(stt_result, tuple) and len(stt_result) >= 2:
+                                                user_text, error_msg = stt_result[0], stt_result[1]
                                                 
-                                                # transcribe_audio는 튜플을 반환: (text, error_msg, error_code, quality_info)
-                                                if isinstance(stt_result, tuple) and len(stt_result) >= 4:
-                                                    user_text, error_msg, error_code, quality_info = stt_result
-                                                    
-                                                    # 에러가 있는 경우 처리
-                                                    if error_msg:
-                                                        logger.warning(f"[STT_ERROR] STT 처리 실패: {error_msg} (코드: {error_code})")
-                                                        user_text = ""
-                                                        confidence = 0.0
-                                                    else:
-                                                        user_text = user_text.strip() if user_text else ""
-                                                        confidence = quality_info.get("quality_score", 0.8) if quality_info else 0.8
-                                                        logger.info(f"[STT_END] STT 결과: '{user_text}' (신뢰도: {confidence:.2f})")
+                                                if error_msg:
+                                                    logger.warning(f"[STT_WARNING] STT 처리 중 경고: {error_msg}")
+                                                    # 경고가 있어도 텍스트가 있으면 계속 진행
+                                                
+                                                if user_text and user_text.strip():
+                                                    user_text = user_text.strip()
+                                                    confidence = 0.8  # 기본 신뢰도
+                                                    logger.info(f"[STT_SUCCESS] 음성 인식 성공: '{user_text}'")
                                                 else:
-                                                    # 예상치 못한 형식인 경우
-                                                    logger.error(f"[STT_ERROR] STT 결과 형식 오류: {type(stt_result)} - {stt_result}")
                                                     user_text = ""
                                                     confidence = 0.0
-                                                
-                                                # 🎯 STT 성공 즉시 사용자 메시지만 대화에 추가 (저장은 나중에)
-                                                if user_text and hasattr(chatbot_a, 'conversation'):
-                                                    # ✅ STT 성공 시 재시도 카운터 초기화
-                                                    client_info = connection_engine.get_client_info(client_id)
-                                                    if client_info:
-                                                        client_info['stt_retry_count'] = 0
-                                                        logger.debug(f"[STT_SUCCESS] 재시도 카운터 초기화: {client_id}")
-                                                    
-                                                    # 사용자 메시지를 대화에 추가 (저장은 AI 응답 후에 한 번만)
-                                                    chatbot_a.add_user_message(user_text)
-                                                    logger.info(f"[STT_STORE] 사용자 메시지 추가 완료: '{user_text[:30]}...'")
-                                                
-                                            except Exception as stt_error:
-                                                logger.error(f"[STT_ERROR] STT 처리 실패: {stt_error}", exc_info=True)
+                                                    logger.info(f"[STT_EMPTY] 음성을 인식하지 못했습니다")
+                                            else:
+                                                # 예상치 못한 형식
+                                                logger.warning(f"[STT_FORMAT] STT 결과 형식 확인 필요: {type(stt_result)}")
                                                 user_text = ""
                                                 confidence = 0.0
-                                                
-                                            # === ChatBot A 처리 및 TTS 처리 (통합) ===
+
+                                            # === 사용자 메시지 처리 ===
                                             if user_text:
-                                                try:
-                                                    logger.info(f"[CHATBOT_A_START] 부기 응답 생성 시작: '{user_text[:30]}...'")
-                                                    
-                                                    # ChatBot A 응답 생성
-                                                    ai_response = await asyncio.to_thread(chatbot_a.get_response, user_text)
-                                                    conversation_length = len(chatbot_a.get_conversation_history())
-                                                    logger.info(f"[CHATBOT_A_END] 부기 응답 생성 완료: '{ai_response[:50]}...' (대화길이: {conversation_length})")
-                                                    
-                                                    # TTS 처리
-                                                    tts_result = None
-                                                    try:
-                                                        logger.info(f"[TTS_START] 음성 생성 시작: '{ai_response[:30]}...'")
-                                                        audio_data, status, error_msg, error_code = await audio_processor.synthesize_tts(
-                                                            ai_response, 
-                                                            client_id=client_id
-                                                        )
-                                                        if status != "error" and audio_data:
-                                                            tts_result = {"audio_data": audio_data}
-                                                            logger.info(f"[TTS_END] 음성 생성 완료: {len(audio_data)} chars (base64)")
-                                                        else:
-                                                            logger.warning(f"[TTS_ERROR] 음성 생성 실패: {error_msg} (code: {error_code})")
-                                                            tts_result = None
-                                                    except Exception as tts_error:
-                                                        logger.warning(f"[TTS_ERROR] 음성 생성 중 예외: {tts_error}")
-                                                        tts_result = None
-                                                    
-                                                    # 🎯 AI 응답 완료 후 전체 대화 저장 (사용자 + AI 메시지 포함)
-                                                    try:
-                                                        full_history = chatbot_a.get_conversation_history()
-                                                        conversation_data = {
-                                                            "messages": [
-                                                                {"role": msg.get("role", "user"), "content": msg.get("content", "")}
-                                                                for msg in full_history
-                                                            ],
-                                                            "child_name": child_name,
-                                                            "interests": [item.strip() for item in interests_str.split(",")] if interests_str else [],
-                                                            "total_turns": len(full_history),
-                                                            "source": "websocket_complete_turn",
-                                                            "summary": f"{child_name}이와 부기가 나눈 실시간 대화 (완전한 턴)",
-                                                            "last_updated": datetime.now().isoformat()
-                                                        }
-                                                        global_session_store.store_conversation_data(child_name, conversation_data, client_id)
-                                                        logger.info(f"[CONVERSATION_STORE] 완전한 대화 턴 저장: {child_name} ({len(full_history)}개 메시지)")
-                                                    except Exception as store_error:
-                                                        logger.warning(f"[CONVERSATION_STORE] 대화 저장 실패: {store_error}")
-                                                    
-                                                except Exception as chatbot_error:
-                                                    logger.error(f"[CHATBOT_A_ERROR] 부기 응답 생성 실패: {chatbot_error}", exc_info=True)
-                                                    ai_response = "미안. 문제가 있는데 다시 말해줄 수 있을까?"
-                                                    tts_result = None
-                                                    conversation_length = 0
-                                            else:
-                                                # 🎤 STT 실패 시 재입력 요청
-                                                retry_messages = [
-                                                    "음성이 잘 안들려. 좀 더 크게 말해줄 수 있을까?",
-                                                    "잘 들리지 않아. 다시 한 번 말해줘!",
-                                                    "소리가 작아서 못 들었어. 다시 말해줄래?",
-                                                    "음성을 제대로 들을 수 없었어. 다시 말해줘!"
-                                                ]
+                                                # ChatBot A 세션 관리 및 응답 생성
+                                                logger.info(f"[CONVERSATION] 사용자 입력: '{user_text[:30]}...'")
                                                 
-                                                # 재시도 횟수 관리
-                                                client_info = connection_engine.get_client_info(client_id)
-                                                retry_count = client_info.get('stt_retry_count', 0) if client_info else 0
-                                                retry_count += 1
+                                                # 세션 정보 업데이트 (아이 정보가 있는 경우)
+                                                if hasattr(chatbot_a, 'memory_manager') and chatbot_a.memory_manager:
+                                                    if child_name and not chatbot_a.session_active:
+                                                        # 새 세션 시작 또는 기존 세션 복원
+                                                        session_id = f"{child_name}_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+                                                        if hasattr(chatbot_a, 'restore_session'):
+                                                            chatbot_a.restore_session(session_id)
+                                                        logger.info(f"[SESSION] 세션 활성화: {chatbot_a.session_id}")
                                                 
-                                                if retry_count <= 3:  # 최대 3번까지 재시도
-                                                    ai_response = retry_messages[min(retry_count - 1, len(retry_messages) - 1)]
-                                                    
-                                                    # 재시도 횟수 업데이트
-                                                    if client_info:
-                                                        client_info['stt_retry_count'] = retry_count
-                                                    
-                                                    # TTS로 재입력 요청 음성 생성
-                                                    try:
-                                                        audio_data, status, error_msg, error_code = await audio_processor.synthesize_tts(
-                                                            ai_response, client_id=client_id
-                                                        )
-                                                        if status != "error" and audio_data:
-                                                            tts_result = {"audio_data": audio_data}
-                                                            logger.info(f"[STT_RETRY_TTS] 재입력 요청 음성 생성 완료")
-                                                        else:
-                                                            tts_result = None
-                                                            logger.warning(f"[STT_RETRY_TTS] 재입력 요청 음성 생성 실패: {error_msg}")
-                                                    except Exception as retry_tts_error:
-                                                        logger.warning(f"[STT_RETRY_TTS] 재입력 요청 TTS 중 예외: {retry_tts_error}")
-                                                        tts_result = None
-                                                    
-                                                    conversation_length = 0
-                                                    
-                                                    # 🔄 재입력 요청 응답 전송 후 continue
-                                                    retry_response_packet = {
-                                                        "type": "retry_request",
-                                                        "text": ai_response,
-                                                        "audio": tts_result.get("audio_data") if tts_result else None,
-                                                        "user_text": "",
-                                                        "confidence": 0.0,
-                                                        "conversation_length": conversation_length,
-                                                        "retry_count": retry_count,
-                                                        "max_retries": 3,
-                                                        "timestamp": datetime.now().isoformat()
-                                                    }
-                                                    
-                                                    await ws_engine.send_json(websocket, retry_response_packet)
-                                                    logger.info(f"[STT_RETRY] 재입력 요청 응답 전송 완료: {ai_response}")
-                                                    
-                                                    # 오디오 청크 초기화하고 다시 입력 대기
-                                                    audio_chunks.clear()
-                                                    continue  # 다시 음성 입력을 받기 위해 루프 처음으로
-                                                    
+                                                # ChatBot A 응답 생성 (영구 메모리 시스템 사용)
+                                                logger.info(f"[AI_START] ChatBot A 영구 메모리 응답 생성 시작")
+                                                ai_response = await asyncio.to_thread(chatbot_a.get_response, user_text)
+                                                logger.info(f"[AI_END] ChatBot A 응답: '{ai_response[:50]}...'")
+                                                
+                                                # 세션 정보 로깅
+                                                if hasattr(chatbot_a, 'get_session_info'):
+                                                    session_info = chatbot_a.get_session_info()
+                                                    logger.info(f"[SESSION_INFO] 메모리 타입: {session_info.get('memory_type')}, 메시지 수: {session_info.get('message_count', 0)}")
+
+                                                # TTS 생성
+                                                logger.info(f"[TTS_START] 음성 합성 시작")
+                                                tts_result = await audio_processor.synthesize_tts(ai_response, client_id=client_id)
+                                                
+                                                if isinstance(tts_result, tuple) and len(tts_result) >= 2:
+                                                    audio_data, status = tts_result[0], tts_result[1]
+                                                    if status == "ok" and audio_data:
+                                                        logger.info(f"[TTS_SUCCESS] 음성 합성 성공")
+                                                    else:
+                                                        logger.warning(f"[TTS_WARNING] 음성 합성 경고: {status}")
+                                                        audio_data = None  # 경고가 있어도 오디오가 있으면 사용
                                                 else:
-                                                    # 재시도 횟수 초과 시
-                                                    ai_response = "계속 음성이 잘 안들려. 나중에 다시 시도해줘!"
-                                                    tts_result = None
-                                                    conversation_length = 0
-                                                    
-                                                    # 재시도 횟수 초기화
-                                                    if client_info:
-                                                        client_info['stt_retry_count'] = 0
-                                            
-                                            # === 최종 응답 전송 (STT 성공 또는 재시도 횟수 초과 시) ===
-                                            response_packet = {
-                                                "type": "ai_response",
-                                                "text": ai_response,
-                                                "audio": tts_result.get("audio_data") if tts_result else None,
-                                                "user_text": user_text,
-                                                "confidence": confidence,
-                                                "conversation_length": conversation_length,
-                                                "timestamp": datetime.now().isoformat()
-                                            }
-                                            
-                                            await ws_engine.send_json(websocket, response_packet)
-                                            logger.info(f"[AUDIO_END] 응답 전송 완료: {ai_response[:50]}...")
-                                            
-                                            # 오디오 청크 초기화
-                                            audio_chunks.clear()
-                                            
-                                            # === 부기 → 꼬기 자동 전환 로직 ===
-                                            if hasattr(chatbot_a, 'story_engine'):
-                                                story_engine = chatbot_a.story_engine
+                                                    audio_data = None
+                                                    logger.warning(f"[TTS_ERROR] 음성 합성 형식 오류")
+
+                                                # 대화 길이 확인
+                                                conversation_length = len(chatbot_a.conversation) if hasattr(chatbot_a, 'conversation') else 0
                                                 
-                                                # 충분한 정보 수집 조건 체크
-                                                is_story_ready = await check_story_completion(story_engine, conversation_length, child_name, age)
+                                                # 응답 패킷 전송
+                                                response_packet = {
+                                                    "type": "conversation_response",
+                                                    "text": ai_response,
+                                                    "audio": audio_data,
+                                                    "user_text": user_text,
+                                                    "confidence": confidence,
+                                                    "conversation_length": conversation_length,
+                                                    "timestamp": datetime.now().isoformat()
+                                                }
                                                 
-                                                if is_story_ready:
-                                                    logger.info(f"[STORY_READY] 충분한 이야기 정보 수집 완료로 자동 전환 시작: {client_id}")
+                                                await ws_engine.send_json(websocket, response_packet)
+                                                logger.info(f"[RESPONSE] 대화 응답 전송 완료")
+
+                                                # 대화 저장 (ChatBot A)
+                                                if hasattr(chatbot_a, 'save_conversation'):
+                                                    await asyncio.to_thread(chatbot_a.save_conversation)
+                                                    logger.debug(f"[SAVE] 대화 저장 완료")
+
+                                                # ChatBot B 전환 조건 확인 (간소화)
+                                                if conversation_length >= 8:  # 4번의 대화 (사용자 4 + AI 4)
+                                                    logger.info(f"[TRANSITION] ChatBot B 전환 조건 충족 (대화 길이: {conversation_length})")
                                                     
-                                                    # 이야기 준비 완료 메시지 전송
-                                                    story_ready_packet = {
-                                                        "type": "conversation_end",
-                                                        "text": f"와! {child_name}가 들려준 이야기로 정말 멋진 동화를 만들 수 있을 것 같아!",
-                                                        "message": "충분한 이야기 정보가 모였어. 이제 특별한 동화를 만들어줄게!.",
-                                                        "reason": "story_information_complete",
-                                                        "user_text": user_text,
-                                                        "story_elements": story_engine.get_story_elements(),
+                                                    # ChatBot B 전환 신호 전송
+                                                    transition_packet = {
+                                                        "type": "ready_for_story_generation",
+                                                        "message": "충분한 정보를 수집했어요! 이제 동화를 만들어볼까요?",
+                                                        "conversation_length": conversation_length,
+                                                        "child_name": child_name,
+                                                        "age": age,
                                                         "timestamp": datetime.now().isoformat()
                                                     }
                                                     
-                                                    send_success = await ws_engine.send_json(websocket, story_ready_packet)
-                                                    if send_success:
-                                                        logger.info(f"[STORY_READY] 이야기 준비 완료 메시지 전송 완료: {client_id}")
-                                                        
-                                                    # === 꼬기(ChatBot B) 자동 호출 (WorkflowOrchestrator 사용) ===
-                                                    try:
-                                                        story_id = await handle_orchestrator_story_generation(
-                                                            websocket=websocket,
-                                                            client_id=client_id,
-                                                            chatbot_a=chatbot_a,
-                                                            child_name=child_name,
-                                                            age=age,
-                                                            interests_list=[item.strip() for item in interests_str.split(",")] if interests_str else [],
-                                                            ws_engine=ws_engine,
-                                                            connection_engine=connection_engine
-                                                        )
-                                                        
-                                                        # story_id를 프론트엔드에 전송 (status 체크용)
-                                                        await ws_engine.send_json(websocket, {
-                                                            "type": "story_id_assigned",
-                                                            "story_id": story_id,
-                                                            "message": "동화 생성이 시작되었어! 잠시만 기다려줘.",
-                                                            "status_check_url": f"/api/v1/stories/{story_id}/completion",
-                                                            "timestamp": datetime.now().isoformat()
-                                                        })
-                                                        
-                                                        # 🗑️ 동화 생성 시작 후 음성 샘플 정리 (보안)
-                                                        try:
-                                                            voice_cloning_processor = audio_processor.voice_cloning_processor if hasattr(audio_processor, 'voice_cloning_processor') else None
-                                                            if voice_cloning_processor:
-                                                                cleanup_success = await voice_cloning_processor.cleanup_user_samples(child_name)
-                                                                if cleanup_success:
-                                                                    logger.info(f"[STORY_CLEANUP] 동화 생성 시작 후 음성 샘플 정리: {child_name}")
-                                                        except Exception as cleanup_error:
-                                                            logger.warning(f"[STORY_CLEANUP] 동화 생성 후 샘플 정리 실패: {cleanup_error}")
-                                                        
-                                                    except Exception as story_gen_error:
-                                                        logger.error(f"[STORY_GEN] 자동 동화 생성 중 오류: {story_gen_error}")
-                                                        await ws_engine.send_error(websocket, f"동화 생성 중 오류가 발생했습니다: {str(story_gen_error)}", "story_generation_failed")
-                                                    
-                                                    # 연결 정리 및 종료
-                                                    await connection_engine.handle_disconnect(client_id)
-                                                    await websocket.close(code=status.WS_1000_NORMAL_CLOSURE, reason="이야기 정보 수집 완료 및 동화 생성 완료")
-                                                    return
-                                            
-                                            processing_time = time.time() - processing_start_time
-                                            logger.info(f"[AUDIO_END] 전체 처리 완료: {processing_time:.2f}초")
-                                            
-                                        except Exception as e:
-                                            logger.error(f"[AUDIO_END] 처리 중 오류: {e}", exc_info=True)
-                                            await ws_engine.send_error(websocket, f"오디오 처리 중 오류가 발생했습니다: {str(e)}", "audio_processing_failed")
-                                    
-                                    finally:
+                                                    await ws_engine.send_json(websocket, transition_packet)
+                                                    logger.info(f"[TRANSITION] ChatBot B 전환 신호 전송 완료")
+
+                                            else:
+                                                # 음성 인식 실패 시
+                                                logger.info(f"[STT_RETRY] 음성 인식 실패, 재시도 요청")
+                                                
+                                                retry_response = "잘 안 들려요. 다시 말해줄 수 있어요?"
+                                                
+                                                # TTS 생성 (재시도 요청)
+                                                tts_result = await audio_processor.synthesize_tts(retry_response, client_id=client_id)
+                                                retry_audio = None
+                                                if isinstance(tts_result, tuple) and len(tts_result) >= 2:
+                                                    retry_audio = tts_result[0] if tts_result[1] == "ok" else None
+
+                                                # 재시도 응답 전송
+                                                retry_packet = {
+                                                    "type": "retry_request",
+                                                    "text": retry_response,
+                                                    "audio": retry_audio,
+                                                    "user_text": "",
+                                                    "confidence": 0.0,
+                                                    "timestamp": datetime.now().isoformat()
+                                                }
+                                                
+                                                await ws_engine.send_json(websocket, retry_packet)
+                                                logger.info(f"[RETRY] 재시도 요청 전송 완료")
+
+                                        except Exception as processing_error:
+                                            logger.error(f"[ERROR] 오디오 처리 중 오류: {processing_error}", exc_info=True)
+                                            await ws_engine.send_error(websocket, f"오디오 처리 중 오류: {str(processing_error)}", "audio_processing_error")
+
+                                        finally:
                                             # 임시 파일 정리
-                                            if temp_file_path and os.path.exists(temp_file_path):
-                                                try:
-                                                    os.remove(temp_file_path)
-                                                    logger.debug(f"[AUDIO_END] 임시 파일 삭제: {temp_file_path}")
-                                                except Exception as cleanup_error:
-                                                    logger.warning(f"[AUDIO_END] 임시 파일 삭제 실패: {cleanup_error}")
-                                else:
-                                    logger.warning(f"[AUDIO_END] 처리할 오디오 청크가 없음")
-                                    await ws_engine.send_json(websocket, {
-                                        "type": "ai_response", 
-                                        "text": "음성이 수신되지 않았어요. 다시 시도해 주세요.",
-                                        "audio": None,
-                                        "status": "no_audio_received",
-                                        "user_text": "",
-                                        "confidence": 0.0,
-                                        "timestamp": datetime.now().isoformat()
-                                    })
-                                continue
-                            
-                        
-                            
+                                            try:
+                                                if os.path.exists(temp_file_path):
+                                                    os.unlink(temp_file_path)
+                                            except Exception as cleanup_error:
+                                                logger.warning(f"임시 파일 정리 실패: {cleanup_error}")
+
+                                    except Exception as audio_processing_error:
+                                        logger.error(f"[AUDIO_PROCESS] 오디오 청크 처리 중 오류: {audio_processing_error}")
+                                        await ws_engine.send_error(websocket, f"오디오 처리 실패: {str(audio_processing_error)}", "audio_chunk_processing_error")
+
                             elif control_message.get("type") == "conversation_finish":
                                 logger.info(f"[CONVERSATION_FINISH] 사용자가 대화 완료 요청: {client_id}")
                                 
@@ -511,24 +378,24 @@ async def handle_audio_websocket(
                                 await connection_engine.handle_disconnect(client_id)
                                 await websocket.close(code=status.WS_1000_NORMAL_CLOSURE, reason="사용자 요청으로 대화 종료 및 동화 생성 완료")
                                 return
+                                
                             else:
                                 logger.info(f"[CONTROL] 알 수 없는 제어 메시지: {control_message}")
                                 continue
+                                
                         except json.JSONDecodeError as e:
                             logger.warning(f"텍스트 메시지가 JSON이 아님: {text_data[:50]}..., 오류: {e}")
                             continue
-                    elif control_message.get("type") == "websocket.disconnect":
-                        logger.info(f"[WEBSOCKET_DISCONNECT] 클라이언트 연결 종료: {client_id}")
-                        await connection_engine.handle_disconnect(client_id)
-                        await websocket.close(code=status.WS_1000_NORMAL_CLOSURE, reason="클라이언트 연결 종료")
-                        return
-                    else:
-                        logger.warning(f"알 수 없는 메시지 타입: {client_id}, 메시지: {message}")
-                        continue
-                else:
-                    logger.warning(f"예상치 못한 WebSocket 메시지: {client_id}, 타입: {message.get('type')}")
-                    continue
+                            
+                elif message.get("type") == "websocket.disconnect":
+                    logger.info(f"[WEBSOCKET_DISCONNECT] 클라이언트 연결 종료: {client_id}")
+                    await connection_engine.handle_disconnect(client_id)
+                    await websocket.close(code=status.WS_1000_NORMAL_CLOSURE, reason="클라이언트 연결 종료")
+                    return
                     
+                else:
+                    logger.warning(f"알 수 없는 메시지 타입: {client_id}, 메시지: {message}")
+                    continue
             except asyncio.TimeoutError:
                 logger.debug(f"[TIMEOUT] WebSocket 메시지 수신 타임아웃 (10초): {client_id}")
                 # 주기적인 ping 전송으로 연결 유지

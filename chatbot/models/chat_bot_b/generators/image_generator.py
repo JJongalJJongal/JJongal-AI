@@ -382,13 +382,25 @@ class ImageGenerator(BaseGenerator):
                     "age_group": age_group_key
                 })
             
-            # Image Batch Generation
+            # 부기의 분석 데이터 추출
+            conversation_data = {
+                "conversation_summary": input_data.get("conversation_summary", ""),
+                "extracted_keywords": input_data.get("extracted_keywords", []),
+                "conversation_analysis": input_data.get("conversation_analysis", {}),
+                "child_profile": input_data.get("child_profile", {}),
+                "story_generation_method": input_data.get("story_generation_method", "default")
+            }
+            
+            logger.info(f"이미지 생성에 부기 분석 데이터 활용: keywords={len(conversation_data['extracted_keywords'])}")
+            
+            # Image Batch Generation (부기 분석 데이터 포함)
             image_results = await self._generate_batch(
                 chapters=chapters,
                 story_data=story_data,
                 story_id=story_id,
                 age_group=age_group_key,
-                progress_callback=progress_callback
+                progress_callback=progress_callback,
+                conversation_data=conversation_data
             )
             
             # 성능 Metric 수집
@@ -429,7 +441,8 @@ class ImageGenerator(BaseGenerator):
                               story_data: Dict[str, Any],
                               story_id: str,
                               age_group: str,
-                              progress_callback: Optional[Callable] = None) -> List[Dict[str, Any]]:
+                              progress_callback: Optional[Callable] = None,
+                              conversation_data: Dict[str, Any] = None) -> List[Dict[str, Any]]:
         """이미지 배치 생성"""
         
         image_results = [] # 생성된 이미지 목록
@@ -450,12 +463,13 @@ class ImageGenerator(BaseGenerator):
                         "chapter_title": chapter.get("chapter_title", f"Chapter {i+1}")
                     })
                 
-                # Enhanced 프롬프트 생성
+                # Enhanced 프롬프트 생성 (부기 분석 데이터 포함)
                 enhanced_prompt = await self._create_enhanced_image_prompt(
                     chapter=chapter,
                     story_data=story_data,
                     age_group=age_group,
-                    chain=chain
+                    chain=chain,
+                    conversation_data=conversation_data
                 )
                 
                 # 이미지 생성
@@ -491,7 +505,8 @@ class ImageGenerator(BaseGenerator):
                                             chapter: Dict[str, Any],
                                             story_data: Dict[str, Any],
                                             age_group: str,
-                                            chain) -> str:
+                                            chain,
+                                            conversation_data: Dict[str, Any] = None) -> str:
         
         """LangChain을 사용한 향상된 이미지 프롬프트 생성"""
         
@@ -504,10 +519,10 @@ class ImageGenerator(BaseGenerator):
                 logger.error(f"User-defined DALL-E template not found for age group {age_group}. Falling back to basic prompt.") # 기본 프롬프트 생성
                 return self._create_fallback_prompt(chapter, age_group) # 기본 프롬프트 생성
 
-            # 프롬프트 템플릿 데이터 준비
-            characters_value = self._extract_characters_improved(story_data, chapter)
-            setting_value = self._extract_setting_improved(chapter)
-            scene_description = self._create_scene_description(chapter, characters_value, setting_value)
+            # 프롬프트 템플릿 데이터 준비 (부기 분석 데이터 활용)
+            characters_value = self._extract_characters_improved(story_data, chapter, conversation_data)
+            setting_value = self._extract_setting_improved(chapter, conversation_data)
+            scene_description = self._create_scene_description(chapter, characters_value, setting_value, conversation_data)
             
             logger.info(f"프롬프트 데이터 - Characters: {characters_value}, Setting: {setting_value}")
             logger.info(f"Scene Description: {scene_description}")
@@ -535,9 +550,27 @@ class ImageGenerator(BaseGenerator):
             logger.error(f"Failed to create image prompt from user-defined template: {e}") # 프롬프트 생성 실패
             return self._create_fallback_prompt(chapter, age_group) # 기본 프롬프트 생성
 
-    def _extract_characters_improved(self, story_data: Dict[str, Any], chapter: Dict[str, Any]) -> str:
-        """개선된 캐릭터 추출 로직 - JSON 설정 사용"""
+    def _extract_characters_improved(self, story_data: Dict[str, Any], chapter: Dict[str, Any], conversation_data: Dict[str, Any] = None) -> str:
+        """개선된 캐릭터 추출 로직 - 부기 분석 데이터 우선 활용"""
         characters = []
+        
+        # 0. 부기의 대화 분석 데이터에서 캐릭터 키워드 우선 추출
+        if conversation_data:
+            extracted_keywords = conversation_data.get("extracted_keywords", [])
+            child_profile = conversation_data.get("child_profile", {})
+            
+            # 아이 이름 추가
+            child_name = child_profile.get("name")
+            if child_name and child_name != "친구":
+                characters.append(child_name)
+            
+            # 대화에서 언급된 캐릭터 관련 키워드 추출
+            character_words = ["친구", "엄마", "아빠", "동물", "공주", "왕자", "마법사", "요정", "강아지", "고양이", "토끼", "곰", "새"]
+            for keyword in extracted_keywords:
+                if any(char_word in keyword.lower() for char_word in character_words):
+                    characters.append(keyword)
+            
+            logger.info(f"부기 분석 데이터에서 추출한 캐릭터: {characters}")
         
         # 1. 챕터 제목에서 캐릭터 추출
         chapter_title = chapter.get("chapter_title", "")
@@ -612,13 +645,25 @@ class ImageGenerator(BaseGenerator):
         
         return cleaned_name.strip()
 
-    def _extract_setting_improved(self, chapter: Dict[str, Any]) -> str:
-        """개선된 배경 추출 로직 - JSON 설정 사용""" 
+    def _extract_setting_improved(self, chapter: Dict[str, Any], conversation_data: Dict[str, Any] = None) -> str:
+        """개선된 배경 추출 로직 - 부기 분석 데이터 우선 활용""" 
         content = chapter.get("chapter_content", "") # 챕터 내용
         title = chapter.get("chapter_title", "") # 챕터 제목
         
-        # JSON에서 로드한 장소 키워드 사용
+        # 부기의 대화 분석 데이터에서 장소 키워드 우선 추출
         found_locations = []
+        if conversation_data:
+            extracted_keywords = conversation_data.get("extracted_keywords", [])
+            
+            # 대화에서 언급된 장소 관련 키워드 추출
+            setting_words = ["집", "학교", "숲", "바다", "산", "공원", "마을", "성", "하늘", "우주", "방", "정원", "놀이터"]
+            for keyword in extracted_keywords:
+                if any(setting_word in keyword.lower() for setting_word in setting_words):
+                    found_locations.append(keyword)
+            
+            logger.info(f"부기 분석 데이터에서 추출한 배경: {found_locations}")
+        
+        # JSON에서 로드한 장소 키워드 사용 (추가 검색)
         search_text = f"{title} {content}" # 챕터 제목과 내용을 검색 텍스트로 사용
         
         for category, keywords in self.location_keywords.items(): # 장소 키워드 사용
@@ -636,13 +681,33 @@ class ImageGenerator(BaseGenerator):
         logger.info(f"추출된 배경: {result}")
         return result
 
-    def _create_scene_description(self, chapter: Dict[str, Any], characters: str, setting: str) -> str:
-        """장면 설명 생성 - JSON 설정 사용"""
+    def _create_scene_description(self, chapter: Dict[str, Any], characters: str, setting: str, conversation_data: Dict[str, Any] = None) -> str:
+        """장면 설명 생성 - 부기 분석 데이터 활용"""
         chapter_title = chapter.get("chapter_title", "")
         content = chapter.get("chapter_content", "")
         
-        # JSON에서 로드한 행동 키워드 사용
+        # 부기의 대화 분석 데이터에서 감정/행동 키워드 추출
         found_actions = []
+        if conversation_data:
+            extracted_keywords = conversation_data.get("extracted_keywords", [])
+            conversation_summary = conversation_data.get("conversation_summary", "")
+            
+            # 대화에서 언급된 감정/행동 키워드 추출
+            emotion_words = ["행복", "슬픔", "무서워", "신나", "재미", "즐거", "기쁨", "사랑", "놀이", "모험"]
+            for keyword in extracted_keywords:
+                if any(emotion_word in keyword.lower() for emotion_word in emotion_words):
+                    found_actions.append(keyword)
+            
+            # 대화 요약에서도 감정 추출
+            if conversation_summary:
+                for emotion_word in emotion_words:
+                    if emotion_word in conversation_summary:
+                        found_actions.append(emotion_word)
+                        break
+            
+            logger.info(f"부기 분석 데이터에서 추출한 감정/행동: {found_actions}")
+        
+        # JSON에서 로드한 행동 키워드 사용 (추가 검색)
         search_text = f"{chapter_title} {content[:200]}"  # 첫 200자만 검색
         
         for category, keywords in self.action_keywords.items():
