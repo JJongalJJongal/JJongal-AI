@@ -585,6 +585,16 @@ class ChatBotA:
         """대화 기록에 메시지 추가"""
         self.conversation.add_message(role, content)
     
+    def add_user_message(self, content: str):
+        """사용자 메시지를 대화 기록에 추가 (편의성 메서드)"""
+        self.conversation.add_message("user", content)
+        logger.debug(f"[CHATBOT_A] 사용자 메시지 추가: '{content[:30]}...'")
+    
+    def add_ai_message(self, content: str):
+        """AI 메시지를 대화 기록에 추가 (편의성 메서드)"""
+        self.conversation.add_message("assistant", content)
+        logger.debug(f"[CHATBOT_A] AI 메시지 추가: '{content[:30]}...'")
+    
     def get_conversation_history(self) -> List[Dict]:
         """대화 기록 반환"""
         return self.conversation.get_conversation_history()
