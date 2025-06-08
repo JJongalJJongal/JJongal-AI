@@ -21,13 +21,13 @@ logger = get_module_logger(__name__)
 from .app import app
 from shared.utils.logging_utils import setup_logger
 
-def run_server(host="0.0.0.0", port=8000, log_level="info", reload=False):
+def run_server(host="0.0.0.0", port=8001, log_level="info", reload=False):
     """
     WebSocket 서버를 실행합니다.
     
     Args:
         host (str): 바인딩할 호스트 (기본값: "0.0.0.0")
-        port (int): 사용할 포트 (기본값: 8000)
+        port (int): 사용할 포트 (기본값: 8001)
         log_level (str): 로깅 레벨 (기본값: "info")
         reload (bool): 코드 변경 시 자동 리로드 여부 (기본값: False)
     """
@@ -52,7 +52,7 @@ if __name__ == "__main__":
     
     parser = argparse.ArgumentParser(description="꼬꼬북 음성 WebSocket 서버")
     parser.add_argument("--host", default="0.0.0.0", help="바인딩할 호스트 (기본값: 0.0.0.0)")
-    parser.add_argument("--port", type=int, default=8000, help="사용할 포트 (기본값: 8000)")
+    parser.add_argument("--port", type=int, default=8001, help="사용할 포트 (기본값: 8001)")
     parser.add_argument("--log-level", default="info", choices=["debug", "info", "warning", "error", "critical"], 
                         help="로깅 레벨 (기본값: info)")
     parser.add_argument("--reload", action="store_true", help="코드 변경 시 자동 리로드")

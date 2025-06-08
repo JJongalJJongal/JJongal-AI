@@ -103,14 +103,14 @@ ENV OMP_NUM_THREADS=4
 ENV TOKENIZERS_PARALLELISM=false
 
 # 포트 노출
-EXPOSE 8000
+EXPOSE 8001
 
 # 사용자 전환
 USER ccb_user
 
 # 헬스체크 설정
 HEALTHCHECK --interval=30s --timeout=10s --start-period=90s --retries=3 \
-    CMD curl -f http://localhost:8000/api/v1/health || exit 1
+    CMD curl -f http://localhost:8001/api/v1/health || exit 1
 
 # 시작 스크립트 생성
 RUN echo '#!/bin/bash\n\
@@ -137,10 +137,10 @@ mkdir -p /app/output/workflow_states \\\n\
 echo "디렉토리 확인 완료."\n\
 \n\
 # FastAPI 서버 시작 (통합 API) - 올바른 경로로 수정\n\
-echo "FastAPI 서버 시작 중... (포트: 8000)"\n\
+echo "FastAPI 서버 시작 중... (포트: 8001)"\n\
 exec uvicorn chatbot.app:app \\\n\
     --host 0.0.0.0 \\\n\
-    --port 8000 \\\n\
+    --port 8001 \\\n\
     --workers 1 \\\n\
     --log-level info \\\n\
     --access-log \\\n\
@@ -151,4 +151,4 @@ exec uvicorn chatbot.app:app \\\n\
 CMD ["/app/start.sh"]
 
 # 개발 모드용 오버라이드 (docker-compose.dev.yml에서 사용)
-# CMD ["uvicorn", "chatbot.app:app", "--host", "0.0.0.0", "--port", "8000", "--reload"] 
+# CMD ["uvicorn", "chatbot.app:app", "--host", "0.0.0.0", "--port", "8001", "--reload"] 
