@@ -63,6 +63,16 @@ class ChatBotB:
         self.use_enhanced_generators = use_enhanced_generators
         self.enable_performance_tracking = enable_performance_tracking
         
+        # 통일된 벡터DB 경로 설정
+        if vector_db_path is None:
+            import os
+            chroma_base = os.getenv("CHROMA_DB_PATH", "/app/chatbot/data/vector_db")
+            vector_db_path = os.path.join(chroma_base, "main")  # 기본값: main DB 사용
+            logger.info(f"벡터DB 경로가 지정되지 않음. 환경변수에서 설정: {vector_db_path}")
+        
+        self.vector_db_path = vector_db_path
+        self.collection_name = collection_name
+        
         # 클라이언트 초기화
         self.openai_client = None
         self.elevenlabs_api_key = None
@@ -93,7 +103,7 @@ class ChatBotB:
         
         # 초기화
         self._initialize_clients()
-        self._initialize_engines(vector_db_path, collection_name)
+        self._initialize_engines(self.vector_db_path, collection_name)
         
     def _initialize_clients(self):
         """API 클라이언트 초기화"""

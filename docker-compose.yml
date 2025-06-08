@@ -28,8 +28,8 @@ services:
 
       # 통합 서버 모드 설정
       - INTEGRATED_MODE=true # 모든 기능을 하나의 서버에서 실행
-      - CHROMA_DB_PATH=/app/chatbot/data/vector_db # ChromaDB 저장 경로
-      - VECTOR_DB_PATH=/app/chatbot/data/vector_db/main # VectorDB 실제 데이터 경로
+      - CHROMA_DB_PATH=/app/chatbot/data/vector_db # ChromaDB 기본 저장 경로 (통일)
+      
       
       # 멀티미디어 생성 설정
       - MULTIMEDIA_OUTPUT_DIR=/app/output # 멀티미디어 파일 출력 디렉토리

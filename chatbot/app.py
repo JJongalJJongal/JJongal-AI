@@ -140,6 +140,9 @@ def ensure_required_directories():
     """도커 환경에서 필요한 디렉토리들을 확인하고 생성"""
     base_output_dir = os.getenv("MULTIMEDIA_OUTPUT_DIR", "/app/output")
     
+    # 통일된 벡터DB 경로 설정
+    vector_db_base = os.getenv("CHROMA_DB_PATH", "/app/chatbot/data/vector_db")
+    
     required_directories = [
         base_output_dir,                                                  # /app/output
         os.path.join(base_output_dir, "workflow_states"),                # workflow_states 
@@ -151,10 +154,10 @@ def ensure_required_directories():
         os.path.join(base_output_dir, "temp", "voice_samples"),          # temp/voice_samples
         os.path.join(base_output_dir, "conversations"),                  # conversations
         "/app/logs",                                                     # logs (절대 경로)
-        "/app/chatbot/data/vector_db",                                   # vector_db (절대 경로)
-        "/app/chatbot/data/vector_db/main",                              # vector_db/main
-        "/app/chatbot/data/vector_db/detailed",                          # vector_db/detailed  
-        "/app/chatbot/data/vector_db/summary",                           # vector_db/summary
+        vector_db_base,                                                  # 벡터DB 기본 경로
+        os.path.join(vector_db_base, "main"),                            # vector_db/main
+        os.path.join(vector_db_base, "detailed"),                        # vector_db/detailed  
+        os.path.join(vector_db_base, "summary"),                         # vector_db/summary
     ]
     
     created_count = 0
@@ -177,6 +180,12 @@ def ensure_required_directories():
         logger.info(f"총 {created_count}개의 새로운 디렉토리가 생성되었습니다")
     else:
         logger.info("모든 필수 디렉토리가 이미 존재합니다")
+    
+    # VectorDB 경로 로깅
+    logger.info(f"벡터DB 기본 경로: {vector_db_base}")
+    logger.info(f"  - Main DB: {os.path.join(vector_db_base, 'main')}")
+    logger.info(f"  - Detailed DB: {os.path.join(vector_db_base, 'detailed')}")
+    logger.info(f"  - Summary DB: {os.path.join(vector_db_base, 'summary')}")
 
 # FastAPI 애플리케이션 생성
 app = FastAPI(

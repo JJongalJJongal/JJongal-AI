@@ -303,6 +303,7 @@ class VectorDB:
             
             logger.info(f"컬렉션 '{name}' 가져오기 완료")
             return self.collection
+            
         except Exception as e:
             logger.error(f"컬렉션 가져오기 실패: {str(e)}")
             raise

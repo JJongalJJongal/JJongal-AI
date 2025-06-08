@@ -65,13 +65,21 @@ class TextGenerator(BaseGenerator):
         super().__init__(max_retries=max_retries, timeout=180.0)
         
         self.openai_client = openai_client # OpenAI 클라이언트
+        
+        # 통일된 벡터DB 경로 설정
+        if vector_db_path is None:
+            import os
+            chroma_base = os.getenv("CHROMA_DB_PATH", "/app/chatbot/data/vector_db")
+            vector_db_path = os.path.join(chroma_base, "main")  # 기본값: main DB 사용
+            logger.info(f"TextGenerator: 벡터DB 경로가 지정되지 않음. 환경변수에서 설정: {vector_db_path}")
+        
         self.vector_db_path = vector_db_path # ChromaDB 경로
         self.collection_name = collection_name # ChromaDB 컬렉션 이름
         self.prompts_file_path = prompts_file_path # 개선된 프롬프트 파일 경로
         self.model_name = model_name # 사용할 LLM 모델명
         self.temperature = temperature # 생성 온도
         self.enable_performance_tracking = enable_performance_tracking # 성능 추적 활성화
-        self.model_kwargs = model_kwargs or {} # LLM 모델 키워드 인수 (ex: {"max_tokens": 1000})
+        self.model_kwargs = model_kwargs or {}
         
         # Enhanced LangChain 구성
         self.vector_store = None

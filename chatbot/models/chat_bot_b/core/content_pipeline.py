@@ -84,6 +84,14 @@ class ContentPipeline():
         
         # Client 설정
         self.openai_client = openai_client # OpenAI Client
+        
+        # 통일된 벡터DB 경로 설정
+        if vector_db_path is None:
+            import os
+            chroma_base = os.getenv("CHROMA_DB_PATH", "/app/chatbot/data/vector_db")
+            vector_db_path = os.path.join(chroma_base, "main")  # 기본값: main DB 사용
+            logger.info(f"ContentPipeline: 벡터DB 경로가 지정되지 않음. 환경변수에서 설정: {vector_db_path}")
+        
         self.vector_db_path = vector_db_path # ChromaDB 데이터베이스 경로
         self.collection_name = collection_name # ChromaDB 컬렉션 이름
         self.max_retries = max_retries # 실패 시 재시도 횟수

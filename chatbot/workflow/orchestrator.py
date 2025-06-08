@@ -137,13 +137,14 @@ class WorkflowOrchestrator:
     def initialize_chatbots(self):
         """챗봇 인스턴스 초기화"""
         try:
-            # VectorDB 인스턴스 초기화 (ChatBotA 필요)
+            # VectorDB 초기화 (ChatBotA 필요)
             try:
                 from chatbot.data.vector_db.core import VectorDB
                 import os
                 
-                # .env에서 VectorDB 경로 읽기
-                vector_db_path = os.getenv("VECTOR_DB_PATH", "/app/chatbot/data/vector_db")
+                # .env에서 VectorDB 경로 읽기 (통일된 환경변수 사용)
+                chroma_base = os.getenv("CHROMA_DB_PATH", "/app/chatbot/data/vector_db")
+                vector_db_path = os.path.join(chroma_base, "main")  # main DB 사용
                 self.logger.info(f"VectorDB 경로 환경변수: {vector_db_path}")
                 
                 # VectorDB 초기화 (ChromaDB 경로 포함)

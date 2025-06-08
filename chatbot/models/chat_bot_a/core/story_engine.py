@@ -75,13 +75,13 @@ class StoryEngine:
             # logger.warning("RAG 시스템이 임시로 비활성화됨 (ChromaDB 충돌 방지)")
             # return None
             
-            # 이 파일의 위치를 기준으로 vector_db 폴더의 기본 경로를 계산합니다.
-            # story_engine.py -> core -> chat_bot_a -> models -> chatbot -> data/vector_db
-            base_dir = Path(__file__).resolve().parent.parent.parent.parent / 'data' / 'vector_db'
+            # 통일된 벡터DB 경로 설정 (환경변수 사용)
+            import os
+            chroma_base = os.getenv("CHROMA_DB_PATH", "/app/chatbot/data/vector_db")
+            db_path_str = os.path.join(chroma_base, "summary")  # summary DB 사용
+            db_path = Path(db_path_str)
             
-            # base_directory 인자를 추가하여 DB 경로를 가져옵니다.
-            db_path_str = get_db_type_path(db_type="summary", base_directory=str(base_dir))
-            db_path = Path(db_path_str) 
+            logger.info(f"StoryEngine RAG: 벡터DB 경로 설정 - {db_path}")
 
             if not db_path.exists():
                 logger.warning(f"RAG를 위한 VectorDB 경로를 찾을 수 없습니다: {db_path}")
