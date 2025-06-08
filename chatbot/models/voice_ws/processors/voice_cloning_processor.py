@@ -6,19 +6,21 @@
 """
 import os
 import ssl
+import time
 import aiohttp
 import traceback
-import numpy as np
-from pathlib import Path
-from typing import List, Dict, Any, Optional, Tuple
-from dotenv import load_dotenv
 import subprocess
 import warnings
-import librosa
-import soundfile as sf
+import asyncio
+import gc
+import psutil
+from pathlib import Path
+from typing import List, Dict, Any, Optional, Tuple
+from concurrent.futures import ThreadPoolExecutor
+from dotenv import load_dotenv
 
-from shared.utils.logging_utils import get_module_logger
-from elevenlabs import ElevenLabs
+# NumPy와 오디오 라이브러리
+import numpy as np
 
 # 고급 오디오 분석을 위한 라이브러리
 try:
@@ -30,18 +32,17 @@ except ImportError:
     librosa = None
     sf = None
 
-# RNNoise 적용을 위한 추가 임포트
-try:
-    import librosa
-    import soundfile as sf
-    LIBROSA_AVAILABLE = True
-except ImportError:
-    LIBROSA_AVAILABLE = False
+from shared.utils.logging_utils import get_module_logger
+from elevenlabs import ElevenLabs
 
 logger = get_module_logger(__name__)
 
 # 환경 변수 로드
 load_dotenv()
+
+# librosa 경고 억제
+warnings.filterwarnings("ignore", category=UserWarning, module="librosa")
+warnings.filterwarnings("ignore", category=FutureWarning, module="librosa")
 
 class VoiceCloningProcessor:
     """
@@ -62,6 +63,7 @@ class VoiceCloningProcessor:
             elevenlabs_api_key: ElevenLabs API 키
         """
         self.logger = get_module_logger(__name__)
+        self.logger.info("🎤 음성 복제 처리기 초기화 (메모리 최적화 포함)")
         
         # ElevenLabs 클라이언트 설정
         if elevenlabs_api_key:
@@ -95,6 +97,20 @@ class VoiceCloningProcessor:
         # RNNoise 설정
         self.rnnoise_enabled = True  # RNNoise 활성화
         self.rnnoise_model_path = self.temp_audio_dir / "rnnoise_model.rnnn"  # RNNoise 모델 경로
+        
+        # 성능 모니터링
+        self.performance_stats = {
+            "total_clones": 0,
+            "successful_clones": 0,
+            "failed_clones": 0,
+            "memory_cleanups": 0,
+            "processing_times": []
+        }
+        
+        # 메모리 최적화 설정
+        self.max_concurrent_processes = 2  # 동시 처리 제한
+        self.memory_limit_mb = 1024  # 1GB 메모리 제한
+        self.thread_pool = ThreadPoolExecutor(max_workers=self.max_concurrent_processes)
         
         # librosa 가용성 확인
         if LIBROSA_AVAILABLE:
@@ -917,3 +933,264 @@ class VoiceCloningProcessor:
         except Exception as e:
             logger.error(f"[CLEANUP] 사용자 샘플 정리 실패: {e}")
             return False 
+
+    async def create_voice_clone(self, user_audio_files: List[str], user_name: str) -> Optional[str]:
+        """
+        음성 복제 생성 (메모리 최적화)
+        
+        Args:
+            user_audio_files: 사용자 음성 파일 경로 리스트
+            user_name: 사용자 이름
+            
+        Returns:
+            복제된 음성 ID 또는 None
+        """
+        start_time = time.time()
+        
+        try:
+            # 메모리 사용량 체크
+            memory_usage_before = psutil.virtual_memory().percent
+            self.logger.info(f"🧠 음성 복제 시작 - 메모리 사용량: {memory_usage_before}%")
+            
+            if memory_usage_before > 85:
+                self.logger.warning("⚠️ 메모리 사용량이 높음, 정리 후 진행")
+                await self._cleanup_memory()
+                
+            # 음성 파일 검증 및 전처리 (비동기)
+            processed_files = await self._preprocess_audio_files_async(user_audio_files)
+            if not processed_files:
+                self.logger.error("❌ 음성 파일 전처리 실패")
+                return None
+            
+            # ElevenLabs API 호출 (메모리 효율적 처리)
+            voice_id = await self._create_voice_clone_api(processed_files, user_name)
+            
+            if voice_id:
+                self.performance_stats["successful_clones"] += 1
+                self.logger.info(f"✅ 음성 복제 성공: {voice_id} (사용자: {user_name})")
+                
+                # 즉시 임시 파일 정리
+                await self._cleanup_temp_files_async(processed_files)
+            else:
+                self.performance_stats["failed_clones"] += 1
+                self.logger.error(f"❌ 음성 복제 실패 (사용자: {user_name})")
+            
+            # 처리 시간 기록
+            processing_time = time.time() - start_time
+            self.performance_stats["processing_times"].append(processing_time)
+            self.performance_stats["total_clones"] += 1
+            
+            # 메모리 정리
+            await self._cleanup_memory()
+            
+            memory_usage_after = psutil.virtual_memory().percent
+            self.logger.info(f"🧠 음성 복제 완료 - 메모리 사용량: {memory_usage_after}% (처리시간: {processing_time:.2f}초)")
+            
+            return voice_id
+            
+        except Exception as e:
+            self.logger.error(f"❌ 음성 복제 중 오류: {e}", exc_info=True)
+            self.performance_stats["failed_clones"] += 1
+            return None
+    
+    async def _preprocess_audio_files_async(self, audio_files: List[str]) -> List[str]:
+        """음성 파일 비동기 전처리 (메모리 최적화)"""
+        if not audio_files:
+            return []
+        
+        self.logger.info(f"🔄 {len(audio_files)}개 음성 파일 전처리 시작...")
+        processed_files = []
+        
+        # 파일별 병렬 처리 (메모리 제한 고려)
+        semaphore = asyncio.Semaphore(self.max_concurrent_processes)
+        
+        async def process_single_file(file_path: str) -> Optional[str]:
+            async with semaphore:
+                return await self._process_single_audio_file(file_path)
+        
+        # 모든 파일을 병렬로 처리
+        tasks = [process_single_file(file_path) for file_path in audio_files]
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+        
+        # 성공한 결과만 수집
+        for result in results:
+            if isinstance(result, str) and result:
+                processed_files.append(result)
+            elif isinstance(result, Exception):
+                self.logger.warning(f"⚠️ 파일 처리 실패: {result}")
+        
+        self.logger.info(f"✅ 전처리 완료: {len(processed_files)}/{len(audio_files)}개 파일")
+        return processed_files
+    
+    async def _process_single_audio_file(self, file_path: str) -> Optional[str]:
+        """단일 음성 파일 처리 (스레드풀 사용)"""
+        try:
+            # CPU 집약적 작업을 스레드풀에서 실행
+            loop = asyncio.get_event_loop()
+            return await loop.run_in_executor(
+                self.thread_pool,
+                self._process_audio_file_sync,
+                file_path
+            )
+        except Exception as e:
+            self.logger.error(f"❌ 음성 파일 처리 실패: {file_path}, 오류: {e}")
+            return None
+    
+    def _process_audio_file_sync(self, file_path: str) -> Optional[str]:
+        """동기 음성 파일 처리 (메모리 효율적)"""
+        try:
+            import librosa
+            import soundfile as sf
+            
+            # 메모리 효율적으로 오디오 로드
+            audio_data, sample_rate = librosa.load(
+                file_path,
+                sr=22050,  # 표준 샘플레이트로 통일
+                mono=True,  # 모노로 변환
+                dtype='float32'  # 메모리 효율적인 타입
+            )
+            
+            # 오디오 정규화 및 노이즈 제거
+            audio_data = librosa.util.normalize(audio_data)
+            
+            # 처리된 파일 저장
+            output_path = file_path.replace('.wav', '_processed.wav')
+            sf.write(output_path, audio_data, sample_rate, format='WAV')
+            
+            # 원본 데이터 메모리 해제
+            del audio_data
+            gc.collect()
+            
+            return output_path
+            
+        except Exception as e:
+            self.logger.error(f"❌ 동기 음성 처리 실패: {file_path}, 오류: {e}")
+            return None
+    
+    async def _cleanup_temp_files_async(self, file_paths: List[str]) -> None:
+        """임시 파일 비동기 정리"""
+        if not file_paths:
+            return
+            
+        cleanup_tasks = []
+        for file_path in file_paths:
+            cleanup_tasks.append(self._delete_file_async(file_path))
+        
+        await asyncio.gather(*cleanup_tasks, return_exceptions=True)
+        self.logger.info(f"🗑️ 임시 파일 정리 완료: {len(file_paths)}개 파일")
+    
+    async def _delete_file_async(self, file_path: str) -> None:
+        """단일 파일 비동기 삭제"""
+        try:
+            if os.path.exists(file_path):
+                os.remove(file_path)
+        except Exception as e:
+            self.logger.warning(f"⚠️ 파일 삭제 실패: {file_path}, 오류: {e}")
+    
+    async def _cleanup_memory(self) -> None:
+        """메모리 정리"""
+        gc.collect()
+        self.performance_stats["memory_cleanups"] += 1
+        
+        memory_usage = psutil.virtual_memory().percent
+        self.logger.info(f"🧹 메모리 정리 완료 - 사용량: {memory_usage}%")
+    
+    def get_performance_stats(self) -> Dict[str, Any]:
+        """성능 통계 반환"""
+        stats = self.performance_stats.copy()
+        
+        if stats["processing_times"]:
+            stats["average_processing_time"] = sum(stats["processing_times"]) / len(stats["processing_times"])
+            stats["max_processing_time"] = max(stats["processing_times"])
+            stats["min_processing_time"] = min(stats["processing_times"])
+        
+        return stats
+    
+    def cleanup(self) -> None:
+        """리소스 정리"""
+        self.logger.info("🧹 VoiceCloningProcessor 리소스 정리 시작")
+        
+        # 스레드풀 종료
+        if hasattr(self, 'thread_pool'):
+            self.thread_pool.shutdown(wait=True)
+            
+        # 메모리 정리
+        gc.collect()
+        
+        self.logger.info("✅ VoiceCloningProcessor 리소스 정리 완료")
+    
+    async def _create_voice_clone_api(self, processed_files: List[str], user_name: str) -> Optional[str]:
+        """
+        ElevenLabs API를 통한 음성 복제 생성
+        
+        Args:
+            processed_files: 전처리된 음성 파일 경로 리스트
+            user_name: 사용자 이름
+            
+        Returns:
+            복제된 음성 ID 또는 None
+        """
+        if not self.client:
+            self.logger.error("ElevenLabs 클라이언트가 설정되지 않았습니다")
+            return None
+        
+        try:
+            voice_name = f"{user_name}_voice_clone_{int(time.time())}"
+            
+            # SSL 컨텍스트 설정
+            ssl_context = ssl.create_default_context()
+            ssl_context.check_hostname = False
+            ssl_context.verify_mode = ssl.CERT_NONE
+            
+            timeout = aiohttp.ClientTimeout(total=300)  # 5분 타임아웃
+            
+            async with aiohttp.ClientSession(timeout=timeout) as session:
+                # Multipart form data 준비
+                data = aiohttp.FormData()
+                data.add_field('name', voice_name)
+                data.add_field('description', f'실시간 생성된 {user_name} 음성 클론')
+                data.add_field('remove_background_noise', 'true')
+                
+                # 음성 파일들 추가 (최대 5개)
+                for i, file_path in enumerate(processed_files[:5]):
+                    try:
+                        with open(file_path, 'rb') as f:
+                            file_data = f.read()
+                            
+                        content_type = 'audio/wav'
+                        filename = f'sample_{i}.wav'
+                        
+                        data.add_field('files', file_data, filename=filename, content_type=content_type)
+                    except Exception as e:
+                        self.logger.warning(f"⚠️ 파일 읽기 실패: {file_path} - {e}")
+                        continue
+                
+                # ElevenLabs API 호출
+                url = f"{self.client.base_url}/voices/add"
+                headers = {"xi-api-key": self.client.api_key}
+                
+                async with session.post(url, headers=headers, data=data, ssl=ssl_context) as response:
+                    response_text = await response.text()
+                    self.logger.info(f"ElevenLabs API 응답 상태: {response.status}")
+                    
+                    if response.status in [200, 201]:
+                        try:
+                            result = await response.json()
+                            voice_id = result.get("voice_id")
+                            
+                            if voice_id:
+                                self.logger.info(f"✅ 음성 복제 API 성공: {voice_id}")
+                                return voice_id
+                            else:
+                                self.logger.error(f"❌ 음성 ID가 응답에 없음: {result}")
+                                return None
+                        except Exception as json_error:
+                            self.logger.error(f"❌ JSON 파싱 실패: {json_error}")
+                            return None
+                    else:
+                        self.logger.error(f"❌ ElevenLabs API 오류 ({response.status}): {response_text}")
+                        return None
+                        
+        except Exception as e:
+            self.logger.error(f"❌ 음성 복제 API 호출 실패: {e}")
+            return None 

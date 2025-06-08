@@ -4,27 +4,56 @@ CCB_AI 통합 FastAPI 애플리케이션
 WebSocket 음성 인터페이스와 스토리 생성 API를 통합한 메인 서버입니다.
 """
 import asyncio
+import gc
+import json
+import logging
 import os
 import sys
-from contextlib import asynccontextmanager
-from typing import Optional, Dict, Any
-from datetime import datetime
-from fastapi import FastAPI, WebSocket, HTTPException, Response, Query, status, Depends, Request
-from fastapi.responses import FileResponse
-from fastapi.middleware.cors import CORSMiddleware
-from fastapi.websockets import WebSocketDisconnect, WebSocketState
-from fastapi.staticfiles import StaticFiles
-from dotenv import load_dotenv
+import time
 import urllib.parse
+from contextlib import asynccontextmanager
+from datetime import datetime, timedelta
+from typing import Dict, List, Optional, Any
 
-# 경로 설정
-current_dir = os.path.dirname(os.path.abspath(__file__))
-project_root = os.path.abspath(os.path.join(current_dir, '..'))
-sys.path.append(project_root)
+import psutil
+from dotenv import load_dotenv
+from fastapi import (
+    FastAPI, HTTPException, WebSocket, WebSocketDisconnect, Depends, Query, 
+    Request, Header, status
+)
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse, JSONResponse
+from fastapi.staticfiles import StaticFiles
+from pydantic import BaseModel, Field
+
+from shared.utils.logging_utils import setup_root_logger, get_module_logger
+
+# 프로젝트 루트 설정
+project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if project_root not in os.sys.path:
+    os.sys.path.append(project_root)
+
+# 환경 변수 로드
 load_dotenv(os.path.join(project_root, '.env'))
 
-# 로깅
-from shared.utils.logging_utils import get_module_logger
+# 로깅 강화 설정 (INFO 레벨 보장)
+LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO").upper()
+
+# 루트 로거 설정 (전역 로깅 보장)
+setup_root_logger(LOG_LEVEL, "logs/ccb_ai.log")
+
+# 모듈 로거 설정
+logger = get_module_logger(__name__)
+
+# 로깅 확인 메시지
+logger.info("=== 🚀 CCB AI 서버 시작 ===")
+logger.info(f"로그 레벨: {LOG_LEVEL}")
+logger.info(f"Python 로깅 레벨: {logging.getLogger().level}")
+
+# FastAPI 로깅도 INFO로 강제 설정
+logging.getLogger("uvicorn").setLevel(logging.INFO)
+logging.getLogger("uvicorn.access").setLevel(logging.INFO)
+logging.getLogger("fastapi").setLevel(logging.INFO)
 
 # Voice WebSocket 컴포넌트
 from chatbot.models.voice_ws.core.connection_engine import ConnectionEngine
@@ -89,9 +118,6 @@ class HealthResponse(BaseModel):
     version: str
     active_stories: int
     total_stories: int
-
-logger = get_module_logger(__name__)
-logger.info("=== CHATBOT.APP.PY Module Loaded ===")
 
 # 전역 컴포넌트
 connection_engine = ConnectionEngine()
@@ -180,7 +206,7 @@ async def lifespan_manager(app: FastAPI):
     
     # WebSocket 연결 정리
     try:
-        await connection_engine.disconnect_all()
+        await connection_engine.close_all_connections()
         logger.info("WebSocket 연결 정리 완료")
     except:
         pass
@@ -274,18 +300,61 @@ try:
 except Exception as e:
     logger.error(f"정적 파일 서빙 설정 실패: {e}")
 
-# 전역 오류 처리
+# 성능 모니터링 미들웨어 추가
+@app.middleware("http")
+async def performance_monitoring_middleware(request: Request, call_next):
+    """성능 모니터링 미들웨어"""
+    start_time = time.time()
+    
+    # 요청 정보 로깅
+    logger.info(f"🚀 API 요청: {request.method} {request.url}")
+    
+    try:
+        response = await call_next(request)
+        
+        # 응답 시간 계산
+        process_time = time.time() - start_time
+        response.headers["X-Process-Time"] = str(process_time)
+        
+        # 응답 시간이 긴 경우 경고
+        if process_time > 5.0:
+            logger.warning(f"⏰ 느린 API 응답: {request.url} ({process_time:.2f}초)")
+        else:
+            logger.info(f"✅ API 응답 완료: {request.url} ({process_time:.2f}초)")
+        
+        return response
+        
+    except Exception as e:
+        process_time = time.time() - start_time
+        logger.error(f"❌ API 오류: {request.url} ({process_time:.2f}초) - {e}")
+        
+        return JSONResponse(
+            status_code=500,
+            content={
+                "success": False,
+                "message": "서버 내부 오류가 발생했습니다",
+                "error_code": "INTERNAL_SERVER_ERROR"
+            }
+        )
+
 @app.middleware("http")
 async def catch_exceptions_middleware(request, call_next):
-    """전역 오류 처리 미들웨어"""
+    """전역 예외 처리 미들웨어 (성능 최적화)"""
     try:
         return await call_next(request)
     except Exception as e:
-        logger.error(f"처리되지 않은 서버 오류: {e}")
-        return Response(
-            content='{"detail": "서버 내부 오류가 발생했습니다"}',
+        logger.error(f"❌ 전역 예외 발생: {request.url} - {e}", exc_info=True)
+        
+        # 메모리 정리
+        gc.collect()
+        
+        return JSONResponse(
             status_code=500,
-            media_type="application/json"
+            content={
+                "success": False,
+                "message": "예상치 못한 오류가 발생했습니다",
+                "error_code": "UNEXPECTED_ERROR"
+            }
         )
 
 # ===========================================
@@ -1320,6 +1389,129 @@ async def api_health_check():
             version="1.0.0",
             active_stories=0,
             total_stories=0
+        )
+
+@app.get("/api/v1/performance")
+async def get_performance_metrics(auth: dict = Depends(verify_auth)):
+    """시스템 성능 메트릭 조회"""
+    try:
+        # 시스템 리소스 정보
+        memory = psutil.virtual_memory()
+        cpu_percent = psutil.cpu_percent(interval=1)
+        disk_usage = psutil.disk_usage('/')
+        
+        # ConnectionEngine 성능 통계
+        connection_stats = connection_engine.get_performance_stats() if connection_engine else {}
+        
+        # VoiceCloningProcessor 성능 통계 (있는 경우)
+        voice_stats = {}
+        try:
+            from chatbot.models.voice_ws.processors.voice_cloning_processor import VoiceCloningProcessor
+            # VoiceCloningProcessor 인스턴스가 있다면 통계 수집
+            # 실제 인스턴스 참조가 필요하므로 기본값 사용
+            voice_stats = {"note": "VoiceCloningProcessor 통계는 인스턴스별로 수집됩니다"}
+        except Exception:
+            voice_stats = {"error": "VoiceCloningProcessor 통계 수집 실패"}
+        
+        # 메모리 사용량 세부 정보
+        process = psutil.Process(os.getpid())
+        process_memory = process.memory_info()
+        
+        performance_data = {
+            "timestamp": datetime.now().isoformat(),
+            "system_resources": {
+                "memory": {
+                    "total_gb": round(memory.total / (1024**3), 2),
+                    "available_gb": round(memory.available / (1024**3), 2),
+                    "used_percent": memory.percent,
+                    "process_memory_mb": round(process_memory.rss / (1024**2), 2)
+                },
+                "cpu": {
+                    "usage_percent": cpu_percent,
+                    "cpu_count": psutil.cpu_count()
+                },
+                "disk": {
+                    "total_gb": round(disk_usage.total / (1024**3), 2),
+                    "used_gb": round(disk_usage.used / (1024**3), 2),
+                    "free_gb": round(disk_usage.free / (1024**3), 2),
+                    "used_percent": round((disk_usage.used / disk_usage.total) * 100, 2)
+                }
+            },
+            "connection_engine": connection_stats,
+            "voice_processing": voice_stats,
+            "active_connections": connection_engine.get_client_count() if connection_engine else 0,
+            "chatbot_b_instances": len(connection_engine.chatbot_b_instances) if connection_engine else 0
+        }
+        
+        return StandardResponse(
+            success=True,
+            message="성능 메트릭 조회 성공",
+            data=performance_data
+        )
+        
+    except Exception as e:
+        logger.error(f"성능 메트릭 조회 실패: {e}", exc_info=True)
+        return StandardResponse(
+            success=False,
+            message=f"성능 메트릭 조회 중 오류가 발생했습니다: {str(e)}",
+            error_code="PERFORMANCE_METRICS_FAILED"
+        )
+
+@app.post("/api/v1/system/optimize")
+async def optimize_system(auth: dict = Depends(verify_auth)):
+    """시스템 최적화 실행"""
+    try:
+        optimization_results = []
+        
+        # 메모리 정리
+        gc.collect()
+        memory_before = psutil.virtual_memory().percent
+        await asyncio.sleep(1)  # 정리 완료 대기
+        memory_after = psutil.virtual_memory().percent
+        
+        optimization_results.append({
+            "action": "memory_cleanup",
+            "memory_before": f"{memory_before}%",
+            "memory_after": f"{memory_after}%",
+            "improvement": f"{memory_before - memory_after:.2f}%"
+        })
+        
+        # ConnectionEngine 최적화
+        if connection_engine:
+            await connection_engine._trigger_memory_cleanup()
+            optimization_results.append({
+                "action": "connection_engine_cleanup",
+                "status": "completed"
+            })
+        
+        # 비활성 연결 정리
+        if connection_engine:
+            await connection_engine._cleanup_inactive_connections()
+            await connection_engine._cleanup_inactive_chatbot_b_instances()
+            await connection_engine._cleanup_inactive_voice_mappings()
+            
+            optimization_results.append({
+                "action": "inactive_connections_cleanup",
+                "active_connections": connection_engine.get_client_count(),
+                "chatbot_instances": len(connection_engine.chatbot_b_instances),
+                "voice_mappings": len(connection_engine.voice_mappings)
+            })
+        
+        return StandardResponse(
+            success=True,
+            message="시스템 최적화 완료",
+            data={
+                "optimization_results": optimization_results,
+                "timestamp": datetime.now().isoformat()
+            }
+        )
+        
+    except Exception as e:
+        logger.error(f"시스템 최적화 실패: {e}", exc_info=True)
+        return StandardResponse(
+            success=False,
+            message=f"시스템 최적화 중 오류가 발생했습니다: {str(e)}",
+            error_code="SYSTEM_OPTIMIZATION_FAILED"
         )
 
 if __name__ == "__main__":
