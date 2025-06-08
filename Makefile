@@ -67,7 +67,7 @@ demo-start:
 	@sleep 30
 	@echo "시연 시작 가능!"
 	@echo "Frontend: http://localhost:80"
-	@echo "API: http://localhost:8000"
+	@echo "API: http://localhost:8001"
 	@echo "모니터링: http://localhost:9100"
 
 # 시연 상태 확인
@@ -79,7 +79,7 @@ demo-status:
 	@docker ps --format "table {{.Names}}\t{{.Status}}\t{{.Ports}}" | grep -E "(ccb-|NAMES)"
 	@echo ""
 	@echo "헬스체크:"
-	@curl -s http://localhost:8000/api/v1/health | jq '.' || echo "API 서버 연결 실패"
+	@curl -s http://localhost:8001/api/v1/health | jq '.' || echo "API 서버 연결 실패"
 	@echo ""
 	@echo "메모리 사용량:"
 	@docker stats --no-stream --format "table {{.Name}}\t{{.MemUsage}}\t{{.MemPerc}}" | grep -E "(ccb-|NAME)"
@@ -90,13 +90,13 @@ demo-test:
 	@echo "꼬꼬북 AI 기능 테스트 중..."
 	@echo ""
 	@echo "1️⃣ API 헬스체크:"
-	@curl -s http://localhost:8000/api/v1/health || echo "실패"
+	@curl -s http://localhost:8001/api/v1/health || echo "실패"
 	@echo ""
 	@echo "2️⃣ API 엔드포인트 목록 확인:"
-	@curl -s "http://localhost:8000/docs" > /dev/null && echo "✅ API 문서 접근 가능" || echo "❌ API 문서 접근 실패"
+	@curl -s "http://localhost:8001/docs" > /dev/null && echo "✅ API 문서 접근 가능" || echo "❌ API 문서 접근 실패"
 	@echo ""
 	@echo "3️⃣ 스토리 생성 API 테스트:"
-	@curl -s -X POST "http://localhost:8000/api/v1/stories" \
+	@curl -s -X POST "http://localhost:8001/api/v1/stories" \
 		-H "Content-Type: application/json" \
 		-d '{"child_profile": {"name": "테스트아이", "age": 5, "interests": ["동물", "모험"], "language_level": "basic"}, "enable_multimedia": true}' | jq '.' || echo "스토리 API 테스트 실패"
 
@@ -136,7 +136,7 @@ test:
 # 헬스체크
 .PHONY: health
 health:
-	curl -f http://localhost:8000/api/v1/health
+	curl -f http://localhost:8001/api/v1/health
 
 # 성능 모니터링
 .PHONY: monitor
@@ -151,7 +151,7 @@ monitor:
 		docker stats --no-stream --format "table {{.Name}}\t{{.CPUPerc}}\t{{.MemUsage}}\t{{.MemPerc}}\t{{.NetIO}}" | grep -E "(ccb-|NAME)"; \
 		echo ""; \
 		echo "API 응답 시간:"; \
-		curl -w "응답시간: %{time_total}s\n" -s -o /dev/null http://localhost:8000/api/v1/health || echo "❌ API 연결 실패"; \
+		curl -w "응답시간: %{time_total}s\n" -s -o /dev/null http://...:8001/api/v1/health || echo "❌ API 연결 실패"; \
 		sleep 5; \
 	done
 

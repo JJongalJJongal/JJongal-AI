@@ -106,7 +106,7 @@ async def lifespan_manager(app: FastAPI):
         logger.error(f"워크플로우 시스템 초기화 실패: {e}")
         orchestrator = None
     
-    logger.info("FastAPI 서버 시작 중... (포트: 8001)")
+    logger.info("FastAPI 서버 시작 중... (포트: 8000)")
     
     # WebSocket 정리 태스크 시작
     asyncio.create_task(connection_engine.cleanup_inactive_clients())

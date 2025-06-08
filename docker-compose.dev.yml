@@ -21,7 +21,7 @@ services:
       - LANGCHAIN_API_KEY=${LANGCHAIN_API_KEY}
       - LANGCHAIN_PROJECT=${LANGCHAIN_PROJECT}
     # 개발 모드로 실행 (--reload 옵션 추가) - 통합 서버 사용
-    command: ["uvicorn", "chatbot.app:app", "--host", "0.0.0.0", "--port", "8001", "--reload"]
+    command: ["uvicorn", "chatbot.app:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]
     
   # 개발 환경에서는 Nginx 제외
   nginx:

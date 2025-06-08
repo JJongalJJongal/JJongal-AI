@@ -85,7 +85,7 @@ def get_app_settings() -> Dict[str, Any]:
         
         # API 설정
         "api_host": "0.0.0.0",
-        "api_port": int(os.getenv("API_PORT", "8001")),
+        "api_port": int(os.getenv("API_PORT", "8000")),
         
         # 환경 변수
         "env_vars": env_vars,
