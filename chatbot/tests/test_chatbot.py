@@ -57,7 +57,7 @@ class CCBIntegratedTest(unittest.IsolatedAsyncioTestCase):
         # WebSocket 서버 시작 (voice 테스트용)
         cls._start_websocket_server()
         
-        print("✅ 통합 테스트 환경 설정 완료\n")
+        print("통합 테스트 환경 설정 완료\n")
     
     @classmethod
     def tearDownClass(cls):
@@ -67,12 +67,12 @@ class CCBIntegratedTest(unittest.IsolatedAsyncioTestCase):
         print("="*60)
         
         cls._stop_websocket_server()
-        print("✅ 통합 테스트 환경 정리 완료")
+        print("통합 테스트 환경 정리 완료")
     
     @classmethod
     def _create_test_audio(cls):
         """테스트용 MP3 오디오 파일 생성"""
-        print("📁 테스트용 MP3 오디오 파일 생성 중...")
+        print("테스트용 MP3 오디오 파일 생성 중...")
         
         try:
             # OpenAI TTS를 사용해서 실제 테스트용 MP3 생성
@@ -95,11 +95,11 @@ class CCBIntegratedTest(unittest.IsolatedAsyncioTestCase):
                 with open(SAMPLE_AUDIO_PATH, "wb") as f:
                     f.write(response.content)
                     
-                print(f"   ✅ OpenAI TTS로 MP3 파일 생성: {SAMPLE_AUDIO_PATH}")
+                print(f"OpenAI TTS로 MP3 파일 생성: {SAMPLE_AUDIO_PATH}")
                 return
                 
         except Exception as e:
-            print(f"   ⚠️ OpenAI TTS 생성 실패: {e}")
+            print(f"OpenAI TTS 생성 실패: {e}")
         
         # OpenAI TTS 실패 시 최소한의 MP3 헤더로 더미 파일 생성
         # 간단한 MP3 프레임 헤더 (실제로는 재생되지 않지만 파일 형식은 MP3)
@@ -114,12 +114,12 @@ class CCBIntegratedTest(unittest.IsolatedAsyncioTestCase):
         with open(SAMPLE_AUDIO_PATH, "wb") as f:
             f.write(dummy_mp3_data)
         
-        print(f"   ✅ 더미 MP3 파일 생성: {SAMPLE_AUDIO_PATH}")
+        print(f"더미 MP3 파일 생성: {SAMPLE_AUDIO_PATH}")
 
     @classmethod
     def _start_websocket_server(cls):
         """WebSocket 서버 시작"""
-        print("🚀 WebSocket 서버 시작 중...")
+        print("WebSocket 서버 시작 중...")
         
         # 이미 실행 중인 서버 확인
         try:
@@ -128,7 +128,7 @@ class CCBIntegratedTest(unittest.IsolatedAsyncioTestCase):
             result = sock.connect_ex(('localhost', 8000))
             sock.close()
             if result == 0:
-                print("   ⚠️ 서버가 이미 실행 중입니다.")
+                print("서버가 이미 실행 중입니다.")
                 return
         except:
             pass
@@ -144,25 +144,25 @@ class CCBIntegratedTest(unittest.IsolatedAsyncioTestCase):
                 result = sock.connect_ex(('localhost', 8000))
                 sock.close()
                 if result == 0:
-                    print(f"   ✅ 서버 시작 완료 ({i+1}초 소요)")
+                    print(f"서버 시작 완료 ({i+1}초 소요)")
                     time.sleep(2)
                     return
             except:
                 pass
             time.sleep(1)
         
-        print("   ⚠️ 서버 시작 확인 실패, 테스트 계속 진행")
+        print("서버 시작 확인 실패, 테스트 계속 진행")
 
     @classmethod
     def _stop_websocket_server(cls):
         """WebSocket 서버 종료"""
-        print("🛑 WebSocket 서버 종료 중...")
+        print("WebSocket 서버 종료 중...")
         if hasattr(cls, 'server_process') and cls.server_process:
             if hasattr(cls.server_process, 'should_exit'):
                 cls.server_process.should_exit = True
             if cls.server_thread:
                 cls.server_thread.join(timeout=5)
-        print("   ✅ 서버 종료 완료")
+        print("서버 종료 완료")
     
     @classmethod
     def _run_server_in_thread(cls):
@@ -173,9 +173,9 @@ class CCBIntegratedTest(unittest.IsolatedAsyncioTestCase):
             cls.server_process = server
             server.run()
         except Exception as e:
-            print(f"   ❌ 서버 실행 오류: {e}")
+            print(f"서버 실행 오류: {e}")
         finally:
-            print("   🔄 서버 스레드 종료")
+            print("서버 스레드 종료")
     
     # ==========================================
     # 1. 부기(ChatBotA) 기본 기능 테스트
@@ -184,7 +184,7 @@ class CCBIntegratedTest(unittest.IsolatedAsyncioTestCase):
     async def test_01_bugi_basic_functionality(self):
         """1단계: 부기 챗봇 기본 기능 테스트"""
         print("\n" + "="*50)
-        print("🤖 1단계: 부기 챗봇 기본 기능 테스트")
+        print("1단계: 부기 챗봇 기본 기능 테스트")
         print("="*50)
         
         # 챗봇 인스턴스 생성 (Enhanced 모드 활성화)
@@ -215,11 +215,11 @@ class CCBIntegratedTest(unittest.IsolatedAsyncioTestCase):
         )
         
         self.assertIsNotNone(greeting, "인사말이 생성되지 않았습니다.")
-        print(f"✅ 인사말: {greeting}")
+        print(f"인사말: {greeting}")
         
         # 시스템 상태 확인
         system_status = chatbot.get_system_status()
-        print(f"🔧 시스템 상태:")
+        print(f"시스템 상태:")
         print(f"   - OpenAI 클라이언트: {'✅' if system_status.get('openai_client') else '❌'}")
         print(f"   - Enhanced 모드: {'✅' if system_status.get('enhanced_mode') else '❌'}")
         print(f"   - RAG 시스템: {'✅' if system_status.get('rag_system') else '❌'}")
@@ -233,7 +233,7 @@ class CCBIntegratedTest(unittest.IsolatedAsyncioTestCase):
             "내 이야기에는 용감한 아이가 나올 거야"
         ]
         
-        print("\n🗣️ 테스트 대화:")
+        print("\n테스트 대화:")
         for user_input in test_inputs:
             print(f"   사용자: {user_input}")
             response = chatbot.get_response(user_input)
@@ -255,7 +255,7 @@ class CCBIntegratedTest(unittest.IsolatedAsyncioTestCase):
         self.assertIsNotNone(token_info, "토큰 정보가 반환되지 않았습니다.")
         print(f"   사용된 토큰: {token_info.get('total', 0)}")
         
-        print("✅ 부기 챗봇 기본 기능 테스트 완료\n")
+        print("부기 챗봇 기본 기능 테스트 완료\n")
         
         # 다음 테스트를 위해 story 저장
         self._test_story_data = story
@@ -268,7 +268,7 @@ class CCBIntegratedTest(unittest.IsolatedAsyncioTestCase):
     async def test_02_kogi_multimedia_generation(self):
         """2단계: 꼬기 챗봇 멀티미디어 생성 테스트"""
         print("\n" + "="*50)
-        print("🎨 2단계: 꼬기 챗봇 멀티미디어 생성 테스트")
+        print("2단계: 꼬기 챗봇 멀티미디어 생성 테스트")
         print("="*50)
         
         # 출력 디렉토리 설정 (output/temp 사용)
@@ -315,7 +315,7 @@ class CCBIntegratedTest(unittest.IsolatedAsyncioTestCase):
             "요정": "pNInz6obpgDQGcFmaJgB"      # 판타지 목소리
         }
         
-        print("🎬 상세 스토리 및 멀티미디어 생성 중... (RAG 활성화)")
+        print("상세 스토리 및 멀티미디어 생성 중... (RAG 활성화)")
         
         # 상세 스토리 생성
         result = await kogi.generate_detailed_story()
@@ -327,7 +327,7 @@ class CCBIntegratedTest(unittest.IsolatedAsyncioTestCase):
         story_data_result = result.get("story_data")
         self.assertIsNotNone(story_data_result, "상세 스토리가 생성되지 않았습니다.")
         
-        print("📚 생성된 스토리:")
+        print("생성된 스토리:")
         print(f"   제목: {story_data_result.get('title', '제목 없음')}")
         print(f"   생성 상태: {result.get('status', '상태 없음')}")
         
@@ -342,7 +342,7 @@ class CCBIntegratedTest(unittest.IsolatedAsyncioTestCase):
         # 이미지 생성 결과 확인
         image_paths_list = result.get("image_paths", [])
         if image_paths_list:
-            print(f"🖼️ 생성된 이미지: {len(image_paths_list)}개")
+            print(f"생성된 이미지: {len(image_paths_list)}개")
             generated_image_files_count = 0
             for i, image_path_str in enumerate(image_paths_list[:3]):  # 처음 3개만 확인
                 if image_path_str:
@@ -361,19 +361,35 @@ class CCBIntegratedTest(unittest.IsolatedAsyncioTestCase):
         # 음성 생성 결과 확인
         audio_paths = result.get("audio_paths", [])
         if audio_paths:
-            print(f"🔊 생성된 음성: {len(audio_paths)}개")
-            for i, audio_path_str in enumerate(audio_paths[:3]):  # 처음 3개만 확인
-                audio_path = Path(audio_path_str)
-                if audio_path.exists():
-                    print(f"     ✅ 음성 {i+1}: {audio_path.stat().st_size} bytes")
+            print(f"생성된 음성: {len(audio_paths)}개")
+            for i, audio_data in enumerate(audio_paths[:3]):  # 처음 3개만 확인
+                # audio_data는 딕셔너리 구조: {"chapter_number": N, "narration_audio": "path", ...}
+                if isinstance(audio_data, dict):
+                    # 내레이션 오디오 경로 확인
+                    audio_path_str = audio_data.get("narration_audio")
+                    if audio_path_str and isinstance(audio_path_str, str):
+                        audio_path = Path(audio_path_str)
+                        if audio_path.exists():
+                            print(f"     ✅ 음성 {i+1}: {audio_path.stat().st_size} bytes")
+                        else:
+                            print(f"     ❌ 음성 {i+1}: 파일 없음 ({audio_path_str})")
+                    else:
+                        print(f"     ⚠️ 음성 {i+1}: 경로 정보 없음")
+                elif isinstance(audio_data, str):
+                    # 문자열인 경우 (이전 버전 호환성)
+                    audio_path = Path(audio_data)
+                    if audio_path.exists():
+                        print(f"     ✅ 음성 {i+1}: {audio_path.stat().st_size} bytes")
+                    else:
+                        print(f"     ❌ 음성 {i+1}: 파일 없음 ({audio_data})")
                 else:
-                    print(f"     ❌ 음성 {i+1}: 파일 없음")
+                    print(f"     ❌ 음성 {i+1}: 예상하지 못한 데이터 타입 ({type(audio_data)})")
         else:
             print("   ⚠️ 음성이 생성되지 않았습니다.")
 
         self.assertTrue(len(chapters) > 0, "최소한 하나의 챕터는 생성되어야 합니다.")
         
-        print("✅ 꼬기 챗봇 멀티미디어 생성 테스트 완료 (RAG 활성화)\n")
+        print("꼬기 챗봇 멀티미디어 생성 테스트 완료 (RAG 활성화)\n")
         return result
     
     # ==========================================
@@ -383,7 +399,7 @@ class CCBIntegratedTest(unittest.IsolatedAsyncioTestCase):
     async def test_03_websocket_voice_functionality(self):
         """3단계: 웹소켓 음성 기능 테스트"""
         print("\n" + "="*50)
-        print("🎤 3단계: 웹소켓 음성 기능 테스트")
+        print("3단계: 웹소켓 음성 기능 테스트")
         print("="*50)
         
         # 필수 파라미터 설정
@@ -399,27 +415,27 @@ class CCBIntegratedTest(unittest.IsolatedAsyncioTestCase):
         
         try:
             async with websockets.connect(base_uri) as websocket:
-                print("   ✅ WebSocket 연결 성공")
+                print("WebSocket 연결 성공")
                 
                 # 인사말 수신
                 greeting_response = await websocket.recv()
                 greeting_data = json.loads(greeting_response)
                 self.assertIn("text", greeting_data, "인사말에 텍스트가 없습니다.")
-                print(f"   🤖 인사말: {greeting_data.get('text', '')}")
+                print(f"인사말: {greeting_data.get('text', '')}")
                 
                 # 오디오 파일 확인
                 self.assertTrue(os.path.exists(SAMPLE_AUDIO_PATH), f"샘플 오디오 파일 없음: {SAMPLE_AUDIO_PATH}")
-                print(f"   📁 오디오 파일 크기: {os.path.getsize(SAMPLE_AUDIO_PATH)} 바이트")
+                print(f"오디오 파일 크기: {os.path.getsize(SAMPLE_AUDIO_PATH)} 바이트")
                 
                 # 오디오 전송
                 with open(SAMPLE_AUDIO_PATH, "rb") as audio_file:
                     audio_data = audio_file.read()
                 
-                print(f"   📤 오디오 전송: {len(audio_data)} 바이트")
+                print(f"오디오 전송: {len(audio_data)} 바이트")
                 await websocket.send(audio_data)
                 
                 # 서버 처리 대기
-                print("   ⏳ 서버 오디오 처리 대기 중... (3초)")
+                print("서버 오디오 처리 대기 중... (3초)")
                 await asyncio.sleep(3)
                 
                 # 응답 수신
@@ -427,7 +443,7 @@ class CCBIntegratedTest(unittest.IsolatedAsyncioTestCase):
                     response = await asyncio.wait_for(websocket.recv(), timeout=30.0)
                     response_data = json.loads(response)
                     
-                    print("   📥 서버 응답 수신:")
+                    print("서버 응답 수신:")
                     self.assertIn("type", response_data, "응답에 유형 정보가 없습니다.")
                     print(f"     응답 유형: {response_data.get('type', '')}")
                     print(f"     AI 응답: {response_data.get('text', '')}")
@@ -445,7 +461,7 @@ class CCBIntegratedTest(unittest.IsolatedAsyncioTestCase):
                             ensure_directory(os.path.dirname(response_audio_path))
                             with open(response_audio_path, "wb") as audio_file_out:
                                 audio_file_out.write(audio_decoded_data)
-                            print(f"     🔊 응답 오디오 저장: {response_audio_path}")
+                            print(f"응답 오디오 저장: {response_audio_path}")
                             self.assertTrue(os.path.exists(response_audio_path), "응답 오디오 파일이 저장되지 않았습니다.")
                         except Exception as audio_error:
                             self.fail(f"오디오 저장 중 오류 발생: {audio_error}")
@@ -456,7 +472,7 @@ class CCBIntegratedTest(unittest.IsolatedAsyncioTestCase):
         except Exception as e:
             self.fail(f"웹소켓 연결 중 오류 발생: {e}")
         
-        print("✅ 웹소켓 음성 기능 테스트 완료\n")
+        print("웹소켓 음성 기능 테스트 완료\n")
     
     # ==========================================
     # 4. 부기→꼬기 통합 플로우 테스트
@@ -545,9 +561,9 @@ class CCBIntegratedTest(unittest.IsolatedAsyncioTestCase):
         else:
             main_char_name = "테스트주인공"
             
-        # 음성 클로닝 정보 설정
+        # 음성 클로닝 정보 설정 (유효한 음성 ID 사용)
         kogi.set_cloned_voice_info(
-            child_voice_id="test_child_voice_id",
+            child_voice_id="EXAVITQu4vr4xnSDxMaL",  # 실제 아이 음성 ID
             main_character_name=main_char_name
         )
             

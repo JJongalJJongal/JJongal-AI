@@ -9,6 +9,7 @@ import uuid
 import asyncio
 import json
 import base64
+import ssl
 import websockets
 from typing import Dict, Any, Optional, Callable, List
 from pathlib import Path
@@ -144,11 +145,16 @@ class VoiceGenerator(BaseGenerator):
         logger.info(f"캐릭터 음성 매핑 업데이트: {character_mapping}")
     
     def get_voice_for_character(self, character_name: str, character_type: str = None) -> str:
-        """캐릭터에 맞는 음성 ID 반환"""
+        """캐릭터에 맞는 음성 ID 반환 (안전한 폴백 지원)"""
         
         # 1. 직접 매핑된 음성이 있는지 확인
         if character_name in self.character_voice_mapping:
-            return self.character_voice_mapping[character_name]
+            mapped_voice = self.character_voice_mapping[character_name]
+            # 유효하지 않은 음성 ID는 기본 음성으로 대체
+            if mapped_voice and not mapped_voice.startswith("test_"):
+                return mapped_voice
+            else:
+                logger.warning(f"유효하지 않은 음성 ID ({mapped_voice})를 기본 음성으로 대체합니다.")
         
         # 2. 캐릭터 타입별 기본 음성 사용
         if character_type and character_type in self.default_character_voices:
@@ -156,7 +162,7 @@ class VoiceGenerator(BaseGenerator):
         
         # 3. 캐릭터명으로 타입 추정
         character_lower = character_name.lower()
-        if any(keyword in character_lower for keyword in ["아이", "어린이", "꼬마", "소년", "소녀"]): # 아이, 어린이, 꼬마, 소년, 소녀
+        if any(keyword in character_lower for keyword in ["아이", "어린이", "꼬마", "소년", "소녀", "민준"]): # 아이, 어린이, 꼬마, 소년, 소녀, 주인공 이름
             return self.default_character_voices["child"]
         elif any(keyword in character_lower for keyword in ["아빠", "엄마", "선생님"]): # 아빠, 엄마, 선생님
             if any(keyword in character_lower for keyword in ["아빠", "할아버지"]): # 아빠, 할아버지
@@ -165,11 +171,11 @@ class VoiceGenerator(BaseGenerator):
                 return self.default_character_voices["adult_female"]
         elif any(keyword in character_lower for keyword in ["할아버지"]): # 할아버지
             return self.default_character_voices["grandpa"]
-        elif any(keyword in character_lower for keyword in ["동물", "요정", "마법사", "용", "공주"]):
+        elif any(keyword in character_lower for keyword in ["동물", "요정", "마법사", "용", "공주", "외계인", "로봇"]):
             return self.default_character_voices["fantasy"]
         
-        # 4. 기본값: 내레이터 음성
-        return self.narrator_voice_id
+        # 4. 기본값: 아이 음성 (동화의 주인공은 보통 아이)
+        return self.default_character_voices["child"]
     
     def get_voice_settings_for_character(self, character_name: str, character_type: str = None) -> Dict[str, Any]:
         """캐릭터에 맞는 음성 설정 반환"""
@@ -577,8 +583,15 @@ class VoiceGenerator(BaseGenerator):
             # ElevenLabs API 호출
             url = f"{self.base_url}/text-to-speech/{voice_id}"
             
-            async with aiohttp.ClientSession() as session:
-                async with session.post(url, headers=self.headers, json=data) as response:
+            # SSL 컨텍스트 설정
+            ssl_context = ssl.create_default_context()
+            ssl_context.check_hostname = False
+            ssl_context.verify_mode = ssl.CERT_NONE
+            
+            timeout = aiohttp.ClientTimeout(total=120)
+            
+            async with aiohttp.ClientSession(timeout=timeout) as session:
+                async with session.post(url, headers=self.headers, json=data, ssl=ssl_context) as response:
                     if response.status != 200:
                         error_text = await response.text()
                         raise Exception(f"ElevenLabs API 오류 ({response.status}): {error_text}")
@@ -617,8 +630,15 @@ class VoiceGenerator(BaseGenerator):
             url = f"{self.base_url}/voices"
             headers = {"xi-api-key": self.api_key}
             
-            async with aiohttp.ClientSession() as session:
-                async with session.get(url, headers=headers) as response:
+            # SSL 컨텍스트 설정
+            ssl_context = ssl.create_default_context()
+            ssl_context.check_hostname = False
+            ssl_context.verify_mode = ssl.CERT_NONE
+            
+            timeout = aiohttp.ClientTimeout(total=60)
+            
+            async with aiohttp.ClientSession(timeout=timeout) as session:
+                async with session.get(url, headers=headers, ssl=ssl_context) as response:
                     if response.status != 200:
                         error_text = await response.text()
                         raise Exception(f"음성 목록 조회 실패 ({response.status}): {error_text}")
@@ -725,10 +745,16 @@ class VoiceGenerator(BaseGenerator):
             
             start_time = asyncio.get_event_loop().time()
             
+            # SSL 컨텍스트 설정
+            ssl_context = ssl.create_default_context()
+            ssl_context.check_hostname = False
+            ssl_context.verify_mode = ssl.CERT_NONE
+            
             # WebSocket 연결 및 스트리밍
             async with websockets.connect(
                 uri, 
-                extra_headers={"xi-api-key": self.api_key}
+                extra_headers={"xi-api-key": self.api_key},
+                ssl=ssl_context
             ) as websocket:
                 
                 # 1. 초기화 메시지 전송 (음성 설정)
@@ -795,10 +821,12 @@ class VoiceGenerator(BaseGenerator):
                 
                 streaming_info["total_time"] = asyncio.get_event_loop().time() - start_time
                 
+                # 안전한 로그 출력 (None 값 처리)
+                ttfb_str = f"{streaming_info['first_chunk_time']:.2f}s" if streaming_info['first_chunk_time'] is not None else "N/A"
                 logger.info(f"WebSocket 음성 생성 완료: {audio_path} "
                           f"({streaming_info['chunks_received']} chunks, "
                           f"{streaming_info['total_bytes']} bytes, "
-                          f"TTFB: {streaming_info['first_chunk_time']:.2f}s)")
+                          f"TTFB: {ttfb_str})")
                 
                 return audio_path, streaming_info
                 

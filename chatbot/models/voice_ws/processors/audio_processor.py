@@ -4,6 +4,7 @@
 Whisper STT 및 ElevenLabs TTS 기능을 제공합니다.
 """
 import os
+import ssl
 import base64
 import asyncio
 import traceback
@@ -172,8 +173,15 @@ class AudioProcessor:
                 url = f"{ELEVENLABS_BASE_URL}/text-to-speech/{voice_id}"
                 headers = get_elevenlabs_headers(self.elevenlabs_api_key)
                 
-                async with aiohttp.ClientSession() as session:
-                    async with session.post(url, headers=headers, json=data) as response:
+                # SSL 컨텍스트 설정
+                ssl_context = ssl.create_default_context()
+                ssl_context.check_hostname = False
+                ssl_context.verify_mode = ssl.CERT_NONE
+                
+                timeout = aiohttp.ClientTimeout(total=120)
+                
+                async with aiohttp.ClientSession(timeout=timeout) as session:
+                    async with session.post(url, headers=headers, json=data, ssl=ssl_context) as response:
                         if response.status != 200:
                             error_text = await response.text()
                             raise Exception(f"ElevenLabs API 오류 ({response.status}): {error_text}")
