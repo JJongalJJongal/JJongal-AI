@@ -82,12 +82,11 @@ class StateManager:
         self.state_dir = os.path.join(output_dir, "workflow_states")
         self.metadata_dir = os.path.join(output_dir, "metadata")
         
-        # 디렉토리 생성
-        os.makedirs(self.state_dir, exist_ok=True)
-        os.makedirs(self.metadata_dir, exist_ok=True)
-        
-        # 로깅 설정
+        # 로깅 설정 (디렉토리 생성 전에 설정)
         self.logger = logging.getLogger(__name__)
+        
+        # 필수 디렉토리들 생성 (안전한 생성)
+        self._ensure_directories()
         
         # 활성 상태 추적
         self.active_states: Dict[str, StateSnapshot] = {}
@@ -95,7 +94,37 @@ class StateManager:
         # 상태 변경 콜백
         self.state_change_callbacks: List[callable] = []
         
-        self.logger.info("상태 관리자 초기화 완료")
+        self.logger.info(f"상태 관리자 초기화 완료 (상태 디렉토리: {self.state_dir})")
+    
+    def _ensure_directories(self):
+        """필수 디렉토리들을 안전하게 생성"""
+        directories_to_create = [
+            self.output_dir,                           # output
+            self.state_dir,                            # output/workflow_states
+            self.metadata_dir,                         # output/metadata
+            os.path.join(self.output_dir, "stories"),  # output/stories
+            os.path.join(self.output_dir, "temp"),     # output/temp (통일된 temp 경로)
+            os.path.join(self.output_dir, "temp", "images"),      # output/temp/images
+            os.path.join(self.output_dir, "temp", "audio"),       # output/temp/audio
+            os.path.join(self.output_dir, "temp", "voice_samples"), # output/temp/voice_samples
+            os.path.join(self.output_dir, "conversations"),       # output/conversations
+        ]
+        
+        for directory in directories_to_create:
+            try:
+                os.makedirs(directory, exist_ok=True)
+                self.logger.debug(f"디렉토리 확인/생성 완료: {directory}")
+            except PermissionError as e:
+                self.logger.error(f"디렉토리 생성 권한 오류: {directory} - {e}")
+                raise
+            except OSError as e:
+                self.logger.error(f"디렉토리 생성 실패: {directory} - {e}")
+                raise
+            except Exception as e:
+                self.logger.error(f"예상치 못한 디렉토리 생성 오류: {directory} - {e}")
+                raise
+        
+        self.logger.info(f"모든 필수 디렉토리 확인/생성 완료 ({len(directories_to_create)}개)")
     
     def add_state_change_callback(self, callback: callable):
         """상태 변경 콜백 추가"""

@@ -119,6 +119,10 @@ class ChatBotB:
     def _initialize_engines(self, vector_db_path: str, collection_name: str):
         """엔진 및 생성기 초기화 (Enhanced 포함)"""
         try:
+            # 통일된 temp 경로 설정
+            base_temp_path = self.output_dir / "temp"
+            base_temp_path.mkdir(parents=True, exist_ok=True)
+            
             # 1. 기본 생성기들 초기화
             self.text_generator = TextGenerator(
                 openai_client=self.openai_client,
@@ -129,12 +133,12 @@ class ChatBotB:
             self.image_generator = ImageGenerator( 
                 openai_client=self.openai_client,
                 model_name="dall-e-3",
-                temp_storage_path=str(self.output_dir / "temp" / "images")   
+                temp_storage_path=str(base_temp_path / "images")   # output/temp/images (중복 제거)
             )
             
             self.voice_generator = VoiceGenerator(
                 elevenlabs_api_key=self.elevenlabs_api_key,
-                temp_storage_path=str(self.output_dir / "temp" / "audio"),
+                temp_storage_path=str(base_temp_path / "audio"),   # output/temp/audio (중복 제거)
                 voice_id="xi3rF0t7dg7uN2M0WUhr", # Yuna (기본 내레이터 음성)
                 model_id="eleven_multilingual_v2", # 기본 모델 ID (한국어 지원)
                 voice_settings=None, # 음성 설정 (stability, similarity_boost, style, use_speaker_boost)
@@ -153,7 +157,7 @@ class ChatBotB:
                 self.enhanced_image_generator = ImageGenerator(
                     openai_client=self.openai_client,
                     model_name="dall-e-3",
-                    temp_storage_path=str(self.output_dir / "temp" / "images"),
+                    temp_storage_path=str(base_temp_path / "images"),  # 동일한 경로 사용
                     enable_performance_tracking=self.enable_performance_tracking
                 )
                 
@@ -163,7 +167,7 @@ class ChatBotB:
             self.story_engine = StoryGenerationEngine(
                 openai_client=self.openai_client,
                 elevenlabs_client=None,
-                output_dir=str(self.output_dir)
+                output_dir=str(self.output_dir)  # temp 제외한 기본 output 경로만 전달
             )
             
             # 생성기들을 엔진에 주입
@@ -181,7 +185,7 @@ class ChatBotB:
                 collection_name=collection_name
             )
             
-            logger.info("엔진 및 생성기 초기화 완료")
+            logger.info(f"엔진 및 생성기 초기화 완료 (통일된 temp 경로: {base_temp_path})")
             
         except Exception as e:
             logger.error(f"엔진 초기화 실패: {e}")

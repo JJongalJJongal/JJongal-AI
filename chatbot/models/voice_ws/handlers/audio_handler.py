@@ -10,12 +10,14 @@ from datetime import datetime
 from typing import Optional, Dict, Any
 from fastapi import WebSocket, status
 from fastapi.websockets import WebSocketDisconnect, WebSocketState
+import uuid
 
 from shared.utils.logging_utils import get_module_logger
 from chatbot.models.chat_bot_a import ChatBotA # 부기 챗봇 import
 from ..core.connection_engine import ConnectionEngine
 from ..core.websocket_engine import WebSocketEngine # WebSocket 연결 종료 처리
 from ..processors.audio_processor import AudioProcessor
+from chatbot.models.voice_ws.processors.voice_cloning_processor import VoiceCloningProcessor
 
 
 logger = get_module_logger(__name__)
@@ -29,10 +31,21 @@ async def handle_audio_websocket(
     audio_processor: AudioProcessor,
 ):
     """
-    오디오 WebSocket 연결의 전체 라이프사이클을 관리합니다.
-    인증, 초기화, 메시지 수신/처리, 연결 종료를 담당합니다.
+    WebSocket을 통한 실시간 음성 처리 및 음성 클로닝
+    
+    새로운 기능:
+    - 사용자 음성 샘플 수집
+    - 일정 샘플 수집 후 자동 음성 클론 생성
+    - 생성된 클론 음성을 ChatBotB에 전달
     """
-    client_id = f"{child_name}_{int(time.time())}" if child_name else f"unknown_{int(time.time())}"
+    
+    client_id = str(uuid.uuid4())
+    logger.info(f"[WEBSOCKET] 새로운 오디오 WebSocket 연결: {client_id}")
+    logger.info(f"연결 파라미터 - 아이 이름: {child_name}, 나이: {age}, 관심사: {interests_str}")
+    
+    # 음성 클로닝 프로세서 초기화
+    voice_cloning_processor = VoiceCloningProcessor()
+    voice_cloning_enabled = True  # 음성 클로닝 기능 활성화 여부
     
     # WebSocket 엔진 인스턴스 생성
     ws_engine = WebSocketEngine()
@@ -168,25 +181,126 @@ async def handle_audio_websocket(
                 try:
                     # === 1단계: 오디오 청크 결합 ===
                     logger.info(f"[AUDIO_PROCESS] 1단계: 오디오 청크 결합 시작 - {len(audio_chunks)}개 청크")
-                    full_audio_data = b"".join(audio_chunks) # 오디오 chunk 결합
-                    audio_chunks = [] # 청크 리셋
-                    audio_bytes_accumulated = 0 # 오디오 byte 누적 값 초기화
-                    chunk_collection_start_time = time.time() # 오디오 chunk 수집 시간 리셋
+                    full_audio_data = b"".join(audio_chunks)
+                    audio_chunks = []
+                    audio_bytes_accumulated = 0
+                    chunk_collection_start_time = time.time()
                     logger.info(f"[AUDIO_PROCESS] 1단계 완료: 전체 오디오 크기 {len(full_audio_data)}바이트")
 
-                    # === 2단계: 오디오 파일 처리 ===
+                    # === 새로운 기능: 음성 클로닝 샘플 수집 ===
+                    if voice_cloning_enabled and full_audio_data:
+                        voice_collection_start = time.time()
+                        logger.info(f"[VOICE_CLONING] 음성 샘플 수집 시작 - client_id: {client_id}")
+                        
+                        # 사용자 음성 샘플 저장
+                        sample_saved = await voice_cloning_processor.collect_user_audio_sample(
+                            user_id=child_name,  # 아이 이름을 user_id로 사용
+                            audio_data=full_audio_data
+                        )
+                        
+                        if sample_saved:
+                            sample_count = voice_cloning_processor.get_sample_count(child_name)
+                            
+                            # 진행상황 WebSocket 메시지 전송 (2개씩 수집될 때마다)
+                            if sample_count % 2 == 0:
+                                await ws_engine.send_json(websocket, {
+                                    "type": "voice_clone_progress",
+                                    "sample_count": sample_count,
+                                    "ready_for_cloning": voice_cloning_processor.is_ready_for_cloning(child_name),
+                                    "has_cloned_voice": voice_cloning_processor.get_user_voice_id(child_name) is not None,
+                                    "message": f"목소리 수집 중... ({sample_count}/5)",
+                                    "timestamp": datetime.now().isoformat()
+                                })
+                                logger.info(f"[VOICE_CLONING] 진행상황 전송 - {child_name}: {sample_count}개 샘플")
+                            
+                            # 5개 샘플 수집 완료 시 음성 클론 생성
+                            if voice_cloning_processor.is_ready_for_cloning(child_name) and \
+                               voice_cloning_processor.get_user_voice_id(child_name) is None:
+                                
+                                logger.info(f"[VOICE_CLONING] 클론 생성 시작 - {child_name}")
+                                
+                                # WebSocket으로 클론 생성 시작 알림
+                                await ws_engine.send_json(websocket, {
+                                    "type": "voice_clone_starting",
+                                    "message": "목소리 복제를 시작합니다...",
+                                    "timestamp": datetime.now().isoformat()
+                                })
+                                
+                                # ElevenLabs IVC API로 음성 클론 생성
+                                voice_id, error_msg = await voice_cloning_processor.create_instant_voice_clone(
+                                    user_id=child_name,
+                                    voice_name=f"{child_name}_voice_clone"
+                                )
+                                
+                                if voice_id:
+                                    # 성공 시 ChatBotB에 클론 음성 설정
+                                    try:
+                                        # ChatBotB 인스턴스 가져오기 또는 생성
+                                        chatbot_b_data = connection_engine.get_chatbot_b_instance(client_id)
+                                        if not chatbot_b_data:
+                                            # ChatBotB 인스턴스 생성
+                                            from chatbot.models.chat_bot_b import ChatBotB
+                                            chatbot_b = ChatBotB()
+                                            chatbot_b.set_target_age(age)
+                                            
+                                            # ConnectionEngine에 ChatBotB 저장
+                                            connection_engine.add_chatbot_b_instance(client_id, {
+                                                "chatbot_b": chatbot_b,
+                                                "last_activity": time.time()
+                                            })
+                                            logger.info(f"[VOICE_CLONING] ChatBotB 인스턴스 생성: {client_id}")
+                                        else:
+                                            chatbot_b = chatbot_b_data["chatbot_b"]
+                                            connection_engine.update_chatbot_b_activity(client_id)
+                                        
+                                        # 클론된 음성을 ChatBotB에 설정
+                                        chatbot_b.set_cloned_voice_info(
+                                            child_voice_id=voice_id,
+                                            main_character_name=child_name  # 아이 이름을 주인공 이름으로 사용
+                                        )
+                                        
+                                        # 성공 메시지 전송
+                                        await ws_engine.send_json(websocket, {
+                                            "type": "voice_clone_success",
+                                            "voice_id": voice_id,
+                                            "message": f"{child_name}님의 목소리가 성공적으로 복제되었어요! 이제 동화에서 주인공 목소리로 사용됩니다.",
+                                            "timestamp": datetime.now().isoformat()
+                                        })
+                                        
+                                        logger.info(f"[VOICE_CLONING] 클론 생성 및 ChatBotB 설정 완료 - {child_name}: {voice_id}")
+                                        
+                                    except Exception as chatbot_error:
+                                        logger.error(f"[VOICE_CLONING] ChatBotB 설정 실패: {chatbot_error}")
+                                        await ws_engine.send_json(websocket, {
+                                            "type": "voice_clone_error",
+                                            "message": f"음성 복제는 성공했지만 설정 중 오류가 발생했습니다: {chatbot_error}",
+                                            "timestamp": datetime.now().isoformat()
+                                        })
+                                else:
+                                    # 실패 메시지 전송
+                                    await ws_engine.send_json(websocket, {
+                                        "type": "voice_clone_error",
+                                        "message": f"목소리 복제에 실패했습니다: {error_msg}",
+                                        "timestamp": datetime.now().isoformat()
+                                    })
+                                    logger.error(f"[VOICE_CLONING] 클론 생성 실패 - {child_name}: {error_msg}")
+                        
+                        voice_collection_time = time.time() - voice_collection_start
+                        logger.info(f"[VOICE_CLONING] 음성 샘플 수집 완료 - 소요시간: {voice_collection_time:.2f}초")
+
+                    # === 기존 2단계: 오디오 파일 처리 ===
                     step2_start = time.time()
                     logger.info(f"[AUDIO_PROCESS] 2단계: 오디오 파일 처리 시작")
-                    temp_file_path, proc_error, proc_code = await audio_processor.process_audio_chunk(full_audio_data, client_id) # 오디오 청크 처리
+                    temp_file_path, proc_error, proc_code = await audio_processor.process_audio_chunk(full_audio_data, client_id)
                     step2_time = time.time() - step2_start
                     logger.info(f"[AUDIO_PROCESS] 2단계 완료: {step2_time:.2f}초 소요, temp_file: {temp_file_path}")
                     
                     if proc_error:
                         logger.error(f"[AUDIO_PROCESS] 2단계 오류: {proc_error} (코드: {proc_code})")
-                        await ws_engine.send_error(websocket, proc_error, proc_code) # 오디오 처리 오류 전송
+                        await ws_engine.send_error(websocket, proc_error, proc_code)
                         continue
                     
-                    connection_engine.get_client_info(client_id)["temp_files"].append(temp_file_path) # 임시 파일 경로 추가
+                    connection_engine.get_client_info(client_id)["temp_files"].append(temp_file_path)
                     
                     # === 3단계: STT (음성→텍스트) ===
                     step3_start = time.time()

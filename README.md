@@ -275,3 +275,161 @@ binaryWs.onopen = () => {
 3. **토큰 인증**: 개발용 `development_token` 또는 실제 JWT 토큰 필요
 4. **연결 상태 확인**: 전송 전에 반드시 `ws.readyState === WebSocket.OPEN` 확인
 5. **에러 처리**: 모든 `type: "error"` 응답에 대한 적절한 처리 로직 필요 
+
+## ��️ **실시간 음성 클로닝 기능 (완전 구현!)**
+
+부기와 대화하면서 자동으로 아이의 목소리를 학습하고 클론하여 동화에 적용하는 혁신적인 기능입니다.
+
+### ✨ **완전한 작동 플로우**
+
+1. **음성 수집 단계** (자동)
+   - 아이가 부기와 대화할 때마다 음성 샘플을 자동 수집
+   - 각 샘플은 `output/temp/voice_samples/{child_name}/` 폴더에 저장
+   - 2개씩 수집될 때마다 진행상황 WebSocket 메시지 전송
+
+2. **클론 생성 단계** (5개 샘플 수집 후 자동 실행)
+   - ElevenLabs Instant Voice Cloning API로 새 음성 ID 생성
+   - ChatBotB 인스턴스에 클론된 음성 자동 매핑
+   - 성공/실패 WebSocket 알림 전송
+
+3. **동화 적용 단계** (즉시)
+   - 생성된 클론 음성을 동화의 주인공 목소리로 자동 설정
+   - WebSocket 스트리밍 음성 생성에서 클론 음성 사용
+   - Enhanced Mode의 캐릭터별 음성 생성에 통합
+
+### 📡 **WebSocket 메시지 포맷**
+
+```javascript
+// 진행상황 알림 (2개씩 수집될 때마다)
+{
+  "type": "voice_clone_progress",
+  "sample_count": 4,
+  "ready_for_cloning": false,
+  "has_cloned_voice": false,
+  "message": "목소리 수집 중... (4/5)",
+  "timestamp": "2024-12-19T10:30:45.123Z"
+}
+
+// 클론 생성 시작 알림
+{
+  "type": "voice_clone_starting",
+  "message": "목소리 복제를 시작합니다...",
+  "timestamp": "2024-12-19T10:31:00.456Z"
+}
+
+// 클론 생성 성공 알림
+{
+  "type": "voice_clone_success",
+  "voice_id": "c38kUX8pkfYO2kHyqfFy",
+  "message": "민준님의 목소리가 성공적으로 복제되었어요! 이제 동화에서 주인공 목소리로 사용됩니다.",
+  "timestamp": "2024-12-19T10:32:15.789Z"
+}
+
+// 동화 생성시 클론 음성 적용 알림
+{
+  "type": "voice_clone_applied",
+  "message": "민준님의 복제된 목소리를 동화에 적용했어요!",
+  "voice_id": "c38kUX8pkfYO2kHyqfFy",
+  "timestamp": "2024-12-19T10:35:20.123Z"
+}
+```
+
+### 🔧 **핵심 구현 컴포넌트**
+
+#### 1. VoiceCloningProcessor
+```python
+# 음성 샘플 수집
+processor = VoiceCloningProcessor()
+sample_saved = await processor.collect_user_audio_sample(
+    user_id="민준",
+    audio_data=audio_bytes
+)
+
+# 클론 생성 (5개 샘플 수집 후)
+voice_id, error = await processor.create_instant_voice_clone(
+    user_id="민준",
+    voice_name="민준_voice_clone"
+)
+
+# 상태 확인
+sample_count = processor.get_sample_count("민준")
+is_ready = processor.is_ready_for_cloning("민준")
+cloned_voice_id = processor.get_user_voice_id("민준")
+```
+
+#### 2. ChatBotB 연동
+```python
+# 클론된 음성을 ChatBotB에 설정
+chatbot_b.set_cloned_voice_info(
+    child_voice_id=voice_id,
+    main_character_name="민준"
+)
+
+# 동화 생성시 클론 음성 자동 사용
+result = await chatbot_b.generate_detailed_story(
+    use_websocket_voice=True  # 클론 음성 포함 스트리밍
+)
+```
+
+#### 3. 실시간 WebSocket 통합
+```python
+# audio_handler.py에서 자동 처리
+if voice_cloning_processor.is_ready_for_cloning(child_name):
+    voice_id, error = await voice_cloning_processor.create_instant_voice_clone(...)
+    if voice_id:
+        chatbot_b.set_cloned_voice_info(voice_id, child_name)
+```
+
+### 🛠 **기술 특징**
+
+- **실시간 처리**: 대화 중 자동으로 음성 수집 및 클론 생성
+- **ElevenLabs IVC 연동**: Instant Voice Cloning API 완전 지원
+- **WebSocket 스트리밍**: 생성된 클론 음성으로 실시간 TTS
+- **자동 매핑**: ChatBotB의 캐릭터별 음성 시스템에 즉시 통합
+- **오류 처리**: SSL, API 실패, 타임아웃 등 모든 예외 상황 대응
+- **진행 추적**: 단계별 WebSocket 알림으로 사용자 피드백 제공
+
+### 📁 **파일 구조**
+
+```
+chatbot/models/voice_ws/processors/
+├── voice_cloning_processor.py    # 클로닝 로직 (완전 구현)
+└── audio_processor.py           # 기존 TTS 로직
+
+chatbot/models/voice_ws/handlers/
+├── audio_handler.py             # 실시간 음성 수집 (클로닝 통합)
+└── story_handler.py            # 동화 생성 (클론 음성 적용)
+
+chatbot/models/chat_bot_b/
+├── chat_bot_b.py               # set_cloned_voice_info 메서드
+└── generators/voice_generator.py # 캐릭터별 음성 매핑
+```
+
+### 🚀 **사용 예시**
+
+1. **아이가 부기와 대화 시작**
+   ```
+   WebSocket: /ws/audio?child_name=민준&age=7
+   ```
+
+2. **자동 음성 수집 (백그라운드)**
+   ```
+   [2개 수집] → "목소리 수집 중... (2/5)"
+   [4개 수집] → "목소리 수집 중... (4/5)"
+   [5개 수집] → "목소리 복제를 시작합니다..."
+   ```
+
+3. **클론 생성 완료**
+   ```
+   "민준님의 목소리가 성공적으로 복제되었어요!"
+   voice_id: "c38kUX8pkfYO2kHyqfFy"
+   ```
+
+4. **동화 생성시 자동 적용**
+   ```
+   WebSocket: /ws/story_generation
+   → "민준님의 복제된 목소리를 동화에 적용했어요!"
+   → 주인공 대사가 민준이의 목소리로 생성됨
+   ```
+
+이제 실시간 음성 클로닝 기능이 **완전히 구현되어 작동**합니다! 🎉

@@ -68,6 +68,9 @@ class WorkflowOrchestrator:
         # 로깅 설정
         self.logger = get_module_logger(__name__)
         
+        # 필수 디렉토리 확인/생성
+        self._ensure_output_directories()
+        
         # 상태 관리자
         self.state_manager = StateManager(output_dir)
         
@@ -92,10 +95,44 @@ class WorkflowOrchestrator:
             "progress_updated": [] # 진행 상태 업데이트 이벤트
         }
         
-        # 현재 활성 스토리
-        self.active_stories: Dict[str, StoryDataSchema] = {}
+        # 활성 스토리 추적
+        self.active_stories: Dict[str, StoryDataSchema] = {} # 활성 스토리 목록 (story_id -> StoryDataSchema)
         
-        self.logger.info("Workflow Orchestrator 초기화 완료")
+        # 챗봇 초기화
+        self._initialize_chatbots()
+        
+        self.logger.info(f"WorkflowOrchestrator 초기화 완료 (output_dir: {output_dir})")
+    
+    def _ensure_output_directories(self):
+        """출력 디렉토리 구조 확인/생성"""
+        import os
+        
+        directories_to_create = [
+            self.output_dir,                                          # output
+            os.path.join(self.output_dir, "workflow_states"),         # workflow_states
+            os.path.join(self.output_dir, "metadata"),                # metadata  
+            os.path.join(self.output_dir, "stories"),                 # stories
+            os.path.join(self.output_dir, "temp"),                    # temp
+            os.path.join(self.output_dir, "temp", "images"),          # temp/images
+            os.path.join(self.output_dir, "temp", "audio"),           # temp/audio
+            os.path.join(self.output_dir, "temp", "voice_samples"),   # temp/voice_samples
+            os.path.join(self.output_dir, "conversations"),           # conversations
+        ]
+        
+        created_count = 0
+        for directory in directories_to_create:
+            try:
+                if not os.path.exists(directory):
+                    os.makedirs(directory, exist_ok=True)
+                    self.logger.debug(f"디렉토리 생성: {directory}")
+                    created_count += 1
+            except Exception as e:
+                self.logger.error(f"디렉토리 생성 실패: {directory} - {e}")
+                
+        if created_count > 0:
+            self.logger.info(f"WorkflowOrchestrator: {created_count}개 디렉토리 생성됨")
+        else:
+            self.logger.debug("WorkflowOrchestrator: 모든 디렉토리 확인됨")
     
     def initialize_chatbots(self):
         """챗봇 인스턴스 초기화"""

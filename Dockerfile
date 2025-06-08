@@ -66,8 +66,19 @@ RUN chown -R ccb_user:ccb_user /app
 
 # 필요한 디렉토리 생성
 RUN mkdir -p /app/output \
+             /app/output/workflow_states \
+             /app/output/metadata \
+             /app/output/stories \
+             /app/output/temp \
+             /app/output/temp/images \
+             /app/output/temp/audio \
+             /app/output/temp/voice_samples \
+             /app/output/conversations \
              /app/logs \
              /app/chatbot/data/vector_db \
+             /app/chatbot/data/vector_db/main \
+             /app/chatbot/data/vector_db/detailed \
+             /app/chatbot/data/vector_db/summary \
              /app/chatbot/data/prompts \
              /app/shared \
     && chown -R ccb_user:ccb_user /app
@@ -110,8 +121,20 @@ echo "작업 디렉토리: $(pwd)"\n\
 echo "Python 버전: $(python --version)"\n\
 echo "설치된 패키지 확인..."\n\
 \n\
-# 필요한 디렉토리 확인 및 생성\n\
-mkdir -p /app/output /app/logs /app/chatbot/data\n\
+# 필요한 디렉토리 확인 및 생성 (런타임 안전성 보장)\n\
+echo "필수 디렉토리 확인 중..."\n\
+mkdir -p /app/output/workflow_states \\\n\
+         /app/output/metadata \\\n\
+         /app/output/stories \\\n\
+         /app/output/temp/images \\\n\
+         /app/output/temp/audio \\\n\
+         /app/output/temp/voice_samples \\\n\
+         /app/output/conversations \\\n\
+         /app/logs \\\n\
+         /app/chatbot/data/vector_db/main \\\n\
+         /app/chatbot/data/vector_db/detailed \\\n\
+         /app/chatbot/data/vector_db/summary\n\
+echo "디렉토리 확인 완료."\n\
 \n\
 # FastAPI 서버 시작 (통합 API) - 올바른 경로로 수정\n\
 echo "FastAPI 서버 시작 중... (포트: 8000)"\n\

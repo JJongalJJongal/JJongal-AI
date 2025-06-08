@@ -9,12 +9,14 @@ import asyncio
 import traceback
 from typing import Optional, Dict, Any
 from fastapi import WebSocket, status
+from datetime import datetime
 
 from shared.utils.logging_utils import get_module_logger
 from chatbot.models.chat_bot_b import ChatBotB # 꼬기 챗봇 import
 from ..core.connection_engine import ConnectionEngine # 연결 엔진 import
 from ..core.websocket_engine import WebSocketDisconnect, WebSocketEngine # WebSocket 연결 종료 처리
 from ..processors.audio_processor import AudioProcessor # 오디오 처리 프로세서
+from ..processors.voice_cloning_processor import VoiceCloningProcessor # 음성 클론 프로세서
 
 logger = get_module_logger(__name__) # 로깅
 
@@ -112,7 +114,7 @@ async def handle_story_generation_websocket(
         logger.info(f"동화 생성 WebSocket 연결 정리 완료: {client_id}")
 
 async def handle_story_outline(websocket: WebSocket, client_id: str, message: dict, connection_engine: ConnectionEngine, chatbot_b: ChatBotB, ws_engine: WebSocketEngine):
-    """이야기 개요 처리 핸들러"""
+    """이야기 개요 처리 핸들러 (클론 음성 지원)"""
     logger.info(f"이야기 개요 수신 ({client_id}): {message.get('outline')}")
     story_outline_data = message.get("outline")
     if not story_outline_data or not isinstance(story_outline_data, dict):
@@ -123,18 +125,18 @@ async def handle_story_outline(websocket: WebSocket, client_id: str, message: di
         # ChatBot B에 개요 설정
         await asyncio.to_thread(chatbot_b.set_story_outline, story_outline_data)
         
-        # 상세 이야기 생성
-        detailed_story = await asyncio.to_thread(chatbot_b.generate_detailed_story)
+        # 클론 음성 지원하는 generate_story 핸들러 호출
+        await handle_generate_story(
+            websocket=websocket,
+            client_id=client_id,
+            request_data={"story_outline": story_outline_data},
+            connection_engine=connection_engine,
+            ws_engine=ws_engine
+        )
         
-        if detailed_story:
-            await ws_engine.send_json(websocket, {"type": "story_generated", "story": detailed_story, "status": "ok"})
-            logger.info(f"상세 이야기 생성 완료 및 전송 ({client_id})")
-        else:
-            await ws_engine.send_error(websocket, "상세 이야기 생성 실패", "story_generation_failed")
-            logger.error(f"상세 이야기 생성 실패 ({client_id})")
     except Exception as e:
         logger.error(f"이야기 개요 처리 중 오류 ({client_id}): {e}\n{traceback.format_exc()}")
-        await ws_engine.send_error(websocket, f"이야기 개요 처리 오류: {str(e)}", "story_outline_processing_error")
+        await ws_engine.send_error(websocket, f"이야기 처리 오류: {str(e)}", "story_outline_error")
 
 async def handle_generate_illustrations(websocket: WebSocket, client_id: str, chatbot_b: ChatBotB, ws_engine: WebSocketEngine):
     """삽화 생성 요청 처리 핸들러"""
@@ -203,3 +205,94 @@ async def handle_save_story(websocket: WebSocket, client_id: str, message: dict,
     except Exception as e:
         logger.error(f"이야기 저장 중 오류 ({client_id}): {e}\n{traceback.format_exc()}")
         await websocket.send_json({"type": "error", "message": f"이야기 저장 오류: {str(e)}", "status": "error"}) 
+
+async def handle_generate_story(websocket: WebSocket, client_id: str, request_data: Dict[str, Any], 
+                               connection_engine: ConnectionEngine, ws_engine: WebSocketEngine):
+    """동화 생성 요청 처리 핸들러 (클론 음성 지원)"""
+    logger.info(f"동화 생성 요청 수신 ({client_id})")
+    try:
+        # 연결 정보 가져오기
+        connection_info = connection_engine.get_client_info(client_id)
+        if not connection_info:
+            await ws_engine.send_error(websocket, "연결 정보를 찾을 수 없습니다", "connection_not_found")
+            return
+        
+        child_name = connection_info.get("child_name", "친구")
+        age = connection_info.get("age", 7)
+        
+        # ChatBotB 인스턴스 가져오기 또는 생성
+        chatbot_b_data = connection_engine.get_chatbot_b_instance(client_id)
+        if not chatbot_b_data:
+            # ChatBotB 인스턴스 생성
+            from chatbot.models.chat_bot_b import ChatBotB
+            chatbot_b = ChatBotB()
+            chatbot_b.set_target_age(age)
+            
+            # ConnectionEngine에 ChatBotB 저장
+            connection_engine.add_chatbot_b_instance(client_id, {
+                "chatbot_b": chatbot_b,
+                "last_activity": time.time()
+            })
+            logger.info(f"[STORY_GEN] ChatBotB 인스턴스 생성: {client_id}")
+        else:
+            chatbot_b = chatbot_b_data["chatbot_b"]
+            connection_engine.update_chatbot_b_activity(client_id)
+        
+        # 클론된 음성이 있는지 확인 및 설정
+        voice_cloning_processor = VoiceCloningProcessor()
+        cloned_voice_id = voice_cloning_processor.get_user_voice_id(child_name)
+        if cloned_voice_id:
+            chatbot_b.set_cloned_voice_info(
+                child_voice_id=cloned_voice_id,
+                main_character_name=child_name
+            )
+            logger.info(f"[STORY_GEN] 클론된 음성 설정 완료 - {child_name}: {cloned_voice_id}")
+            
+            # 클론 음성 사용 알림
+            await ws_engine.send_json(websocket, {
+                "type": "voice_clone_applied",
+                "message": f"{child_name}님의 복제된 목소리를 동화에 적용했어요!",
+                "voice_id": cloned_voice_id,
+                "timestamp": datetime.now().isoformat()
+            })
+        
+        # 스토리 개요 설정
+        story_outline = request_data.get("story_outline", {})
+        chatbot_b.set_story_outline(story_outline)
+        
+        # 진행 상황 콜백 함수 정의
+        async def progress_callback(progress_data):
+            await ws_engine.send_json(websocket, {
+                "type": "story_progress",
+                "progress": progress_data,
+                "timestamp": datetime.now().isoformat()
+            })
+        
+        # 동화 생성 시작 알림
+        await ws_engine.send_json(websocket, {
+            "type": "story_generation_started",
+            "message": "동화 생성을 시작합니다...",
+            "has_cloned_voice": cloned_voice_id is not None,
+            "timestamp": datetime.now().isoformat()
+        })
+        
+        # 동화 생성 (Enhanced Mode 사용)
+        result = await chatbot_b.generate_detailed_story(
+            progress_callback=progress_callback,
+            use_websocket_voice=True  # WebSocket 스트리밍 음성 사용
+        )
+        
+        # 생성 완료 알림
+        await ws_engine.send_json(websocket, {
+            "type": "story_generated",
+            "result": result,
+            "cloned_voice_used": cloned_voice_id is not None,
+            "timestamp": datetime.now().isoformat()
+        })
+        
+        logger.info(f"동화 생성 완료 ({client_id}) - 클론 음성 사용: {cloned_voice_id is not None}")
+        
+    except Exception as e:
+        error_detail = traceback.format_exc()
+        logger.error(f"동화 생성 중 오류 ({client_id}): {e}\n{error_detail}")
+        await ws_engine.send_error(websocket, f"동화 생성 오류: {str(e)}", "story_generation_error") 

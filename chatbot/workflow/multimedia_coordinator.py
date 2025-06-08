@@ -10,6 +10,7 @@ import os
 from typing import Dict, List, Any, Optional
 from datetime import datetime
 import json
+from pathlib import Path
 
 from .story_schema import StoryDataSchema, MultimediaAssets
 
@@ -61,18 +62,21 @@ class MultimediaCoordinator:
         # 출력 디렉토리 생성 (절대 경로로 설정)
         if not os.path.isabs(self.output_dir):
             self.output_dir = os.path.abspath(self.output_dir)
-            
-        self.images_dir = os.path.join(self.output_dir, "images")
-        self.audio_dir = os.path.join(self.output_dir, "audio")
+        
+        # 통일된 temp 경로 구조 사용 - 중복 제거
+        base_output_path = Path(self.output_dir)
+        temp_path = base_output_path / "temp"
+        
+        self.images_dir = str(temp_path / "images")  # output/temp/images
+        self.audio_dir = str(temp_path / "audio")    # output/temp/audio
         
         try:
             os.makedirs(self.images_dir, exist_ok=True) # 이미지 디렉토리 생성
             os.makedirs(self.audio_dir, exist_ok=True) # 오디오 디렉토리 생성
-            self.logger.info(f"멀티미디어 디렉토리 생성됨: {self.output_dir}") # 멀티미디어 디렉토리 생성됨
+            self.logger.info(f"멀티미디어 디렉토리 생성됨: {self.output_dir} (temp: {temp_path})") # 멀티미디어 디렉토리 생성됨
         except PermissionError as e:
             self.logger.error(f"멀티미디어 디렉토리 생성 권한 오류: {e}") # 멀티미디어 디렉토리 생성 권한 오류
-            self.images_dir = os.path.join(self.output_dir, "images") 
-            self.audio_dir = os.path.join(self.output_dir, "audio") 
+            # 권한 오류 시 다시 시도
             os.makedirs(self.images_dir, exist_ok=True) # 이미지 디렉토리 생성
             os.makedirs(self.audio_dir, exist_ok=True) # 오디오 디렉토리 생성
             
@@ -105,7 +109,7 @@ class MultimediaCoordinator:
                 # 환경변수에서 vector_db_path 가져오기
                 vector_db_path = os.getenv("VECTOR_DB_PATH", "/app/chatbot/data/vector_db")
                 self.chat_bot_b = ChatBotB(
-                    output_dir=self.output_dir,
+                    output_dir=self.output_dir,  # temp 제외한 기본 경로만 전달
                     vector_db_path=vector_db_path,
                     collection_name="fairy_tales",
                     use_enhanced_generators=True,
@@ -113,10 +117,10 @@ class MultimediaCoordinator:
                 )
                 self.logger.info(f"ChatBotB 초기화 완료 (vector_db_path: {vector_db_path}) - 실제 스토리 생성 사용")
                 
-                # VoiceGenerator 직접 초기화
+                # VoiceGenerator 직접 초기화 - 통일된 temp 경로 사용
                 self.voice_generator = VoiceGenerator(
                     elevenlabs_api_key=self.elevenlabs_api_key,
-                    temp_storage_path="output/temp/audio"
+                    temp_storage_path=self.audio_dir  # 이미 설정된 temp/audio 경로 사용
                 )
                 self.logger.info("VoiceGenerator 직접 초기화 완료")
                 

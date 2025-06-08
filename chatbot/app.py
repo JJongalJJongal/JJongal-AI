@@ -61,6 +61,13 @@ async def lifespan_manager(app: FastAPI):
     logger.info(f"작업 디렉토리: {os.getcwd()}")
     logger.info(f"Python 버전: {sys.version.split()[0]}")
     
+    # 필수 디렉토리 생성
+    try:
+        ensure_required_directories()
+        logger.info("필수 디렉토리 확인/생성 완료")
+    except Exception as e:
+        logger.error(f"디렉토리 생성 중 오류: {e}")
+    
     # 파일 권한 설정
     try:
         from shared.utils.file_permissions import ensure_readable_output
@@ -107,10 +114,69 @@ async def lifespan_manager(app: FastAPI):
     yield
     
     # 종료 시 정리
-    logger.info("서비스 종료 중...")
-    connection_engine.set_shutdown_event()
-    await connection_engine.close_all_connections()
-    logger.info("서비스 종료 완료")
+    logger.info("꼬꼬북 AI 시스템 종료 중...")
+    
+    if orchestrator:
+        # 활성 스토리 정리
+        active_stories = orchestrator.get_active_stories()
+        if active_stories:
+            logger.info(f"활성 스토리 정리 중: {len(active_stories)}개")
+            for story_id in active_stories:
+                try:
+                    await orchestrator.cancel_story(story_id)
+                except:
+                    pass
+    
+    # WebSocket 연결 정리
+    try:
+        await connection_engine.disconnect_all()
+        logger.info("WebSocket 연결 정리 완료")
+    except:
+        pass
+    
+    logger.info("꼬꼬북 AI 시스템 종료 완료")
+
+def ensure_required_directories():
+    """도커 환경에서 필요한 디렉토리들을 확인하고 생성"""
+    base_output_dir = os.getenv("MULTIMEDIA_OUTPUT_DIR", "/app/output")
+    
+    required_directories = [
+        base_output_dir,                                                  # /app/output
+        os.path.join(base_output_dir, "workflow_states"),                # workflow_states 
+        os.path.join(base_output_dir, "metadata"),                       # metadata
+        os.path.join(base_output_dir, "stories"),                        # stories
+        os.path.join(base_output_dir, "temp"),                           # temp
+        os.path.join(base_output_dir, "temp", "images"),                 # temp/images
+        os.path.join(base_output_dir, "temp", "audio"),                  # temp/audio
+        os.path.join(base_output_dir, "temp", "voice_samples"),          # temp/voice_samples
+        os.path.join(base_output_dir, "conversations"),                  # conversations
+        "/app/logs",                                                     # logs (절대 경로)
+        "/app/chatbot/data/vector_db",                                   # vector_db (절대 경로)
+        "/app/chatbot/data/vector_db/main",                              # vector_db/main
+        "/app/chatbot/data/vector_db/detailed",                          # vector_db/detailed  
+        "/app/chatbot/data/vector_db/summary",                           # vector_db/summary
+    ]
+    
+    created_count = 0
+    for directory in required_directories:
+        try:
+            if not os.path.exists(directory):
+                os.makedirs(directory, exist_ok=True)
+                logger.info(f"디렉토리 생성: {directory}")
+                created_count += 1
+            else:
+                logger.debug(f"디렉토리 확인: {directory}")
+        except PermissionError as e:
+            logger.error(f"디렉토리 생성 권한 오류: {directory} - {e}")
+        except OSError as e:
+            logger.error(f"디렉토리 생성 실패: {directory} - {e}")
+        except Exception as e:
+            logger.error(f"예상치 못한 디렉토리 생성 오류: {directory} - {e}")
+    
+    if created_count > 0:
+        logger.info(f"총 {created_count}개의 새로운 디렉토리가 생성되었습니다")
+    else:
+        logger.info("모든 필수 디렉토리가 이미 존재합니다")
 
 # FastAPI 애플리케이션 생성
 app = FastAPI(

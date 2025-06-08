@@ -22,7 +22,8 @@ def ensure_audio_directory() -> Path:
     Returns:
         Path: 오디오 저장 디렉토리 경로
     """
-    audio_dir = Path("output/temp/audio")
+    # 통일된 temp 경로 구조 사용 - 중복 제거
+    audio_dir = Path("output") / "temp" / "audio"  # output/temp/audio (중복 제거)
     audio_dir.mkdir(parents=True, exist_ok=True)
     logger.info(f"오디오 저장 디렉토리 준비 완료: {audio_dir}")
     return audio_dir

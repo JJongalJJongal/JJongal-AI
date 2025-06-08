@@ -137,8 +137,8 @@ class ContentPipeline():
             self.s3_client = boto3.client('s3')
             self.s3_bucket = os.getenv("S3_BUCKET_NAME", 'fairy_tales')
             
-            # 3. 임시 로컬 저장소 설정 (프로젝트 내 통일된 구조 사용)
-            self.temp_storage = Path('output/temp')
+            # 3. 통일된 임시 로컬 저장소 설정 - 중복 제거
+            self.temp_storage = Path('output') / 'temp'  # output/temp (중복 제거)
             self.temp_storage.mkdir(parents=True, exist_ok=True)
             
             # 이미지와 오디오 하위 폴더 생성
@@ -148,7 +148,7 @@ class ContentPipeline():
             # 4. LangChain chain initialize
             # self._setup_langchain_chains() # Consider if this is still needed or if generators manage their chains
             
-            logger.info("AWS EC2 + S3 환경 초기화 완료")
+            logger.info(f"AWS EC2 + S3 환경 초기화 완료 (통일된 temp 경로: {self.temp_storage})")
         
         except Exception as e:
             logger.error(f"AWS 환경 초기화 실패 : {e}")

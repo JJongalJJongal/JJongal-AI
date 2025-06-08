@@ -35,11 +35,28 @@ async def save_conversation(chatbot: Any, child_name: str, client_id: str):
             return
 
         now = datetime.now() # 현재 시간 가져오기
-        output_dir = os.path.join(os.getcwd(), "output", "conversations", now.strftime("%Y-%m-%d")) # 저장 경로 설정
-        os.makedirs(output_dir, exist_ok=True) # 저장 경로 생성
+        
+        # 안전한 디렉토리 생성
+        base_output_dir = os.getenv("MULTIMEDIA_OUTPUT_DIR", "output")
+        date_folder = now.strftime("%Y-%m-%d")
+        output_dir = os.path.join(base_output_dir, "conversations", date_folder) # 저장 경로 설정
+        
+        # 디렉토리 안전하게 생성
+        try:
+            os.makedirs(output_dir, exist_ok=True) # 저장 경로 생성
+            logger.debug(f"[SAVE_CONV] 대화 저장 디렉토리 확인/생성: {output_dir}")
+        except PermissionError as e:
+            logger.error(f"[SAVE_CONV] 디렉토리 생성 권한 오류: {output_dir} - {e}")
+            return
+        except OSError as e:
+            logger.error(f"[SAVE_CONV] 디렉토리 생성 실패: {output_dir} - {e}")
+            return
+        except Exception as e:
+            logger.error(f"[SAVE_CONV] 예상치 못한 디렉토리 생성 오류: {output_dir} - {e}")
+            return
 
         filename = f"{child_name}_{now.strftime('%Y%m%d_%H%M%S')}_{client_id}.json" # 파일 이름 설정
-        filepath = os.path.join(output_dir, filename) # 파일 경로 설정
+        filepath = os.path.join(output_dir, filename)
 
         conversation_data = { # 대화 내용 저장
             "client_id": client_id, # 클라이언트 ID
