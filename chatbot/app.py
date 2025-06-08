@@ -36,11 +36,11 @@ if project_root not in os.sys.path:
 # 환경 변수 로드
 load_dotenv(os.path.join(project_root, '.env'))
 
-# 로깅 강화 설정 (INFO 레벨 보장)
+# 환경 변수에서 로그 레벨 가져오기
 LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO").upper()
 
-# 루트 로거 설정 (전역 로깅 보장)
-setup_root_logger(LOG_LEVEL, "logs/ccb_ai.log")
+# 루트 로거 설정 (콘솔로만 출력)
+setup_root_logger(LOG_LEVEL)
 
 # 모듈 로거 설정
 logger = get_module_logger(__name__)

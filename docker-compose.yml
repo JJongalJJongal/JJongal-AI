@@ -6,7 +6,7 @@ services:
       dockerfile: Dockerfile
     image: ccb-ai:latest
     container_name: ccb-ai-app
-    user: "${UID:-1000}:${GID:-1000}"  # 호스트 사용자와 매핑
+    # user: "${UID:-1000}:${GID:-1000}"  # 이 줄을 주석 처리하여 Dockerfile의 사용자 설정을 따르도록 합니다.
     ports:
       - "8001:8000" # 포트 포워딩 (Host:Container)
     environment:
