@@ -81,10 +81,19 @@ class VoiceCloningProcessor:
             user_audio_dir = self.temp_audio_dir / user_id
             user_audio_dir.mkdir(exist_ok=True)
             
-            # 타임스탬프 기반 파일명
+            # 타임스탬프 기반 파일명 
             import time
             timestamp = int(time.time())
-            audio_file_path = user_audio_dir / f"sample_{timestamp}.mp3"
+            
+            # 오디오 형식 감지
+            if audio_data[:4] == b'RIFF' and audio_data[8:12] == b'WAVE':
+                extension = '.wav'
+            elif audio_data[:3] == b'ID3' or (audio_data[0:2] == b'\xff\xfb') or (audio_data[0:2] == b'\xff\xf3'):
+                extension = '.mp3'
+            else:
+                extension = '.wav'  # 기본값
+            
+            audio_file_path = user_audio_dir / f"sample_{timestamp}{extension}"
             
             # 오디오 파일 저장
             with open(audio_file_path, 'wb') as f:
@@ -144,7 +153,19 @@ class VoiceCloningProcessor:
                 for i, file_path in enumerate(sample_files):
                     with open(file_path, 'rb') as f:
                         file_data = f.read()
-                        data.add_field('files', file_data, filename=f'sample_{i}.mp3', content_type='audio/mpeg')
+                        
+                        # 파일 확장자에 따른 content_type 설정
+                        if file_path.endswith('.wav'):
+                            content_type = 'audio/wav'
+                            filename = f'sample_{i}.wav'
+                        elif file_path.endswith('.mp3'):
+                            content_type = 'audio/mpeg'
+                            filename = f'sample_{i}.mp3'
+                        else:
+                            content_type = 'audio/wav'  # 기본값
+                            filename = f'sample_{i}.wav'
+                        
+                        data.add_field('files', file_data, filename=filename, content_type=content_type)
                 
                 # ElevenLabs IVC API 호출
                 url = f"{self.client.base_url}/voices/add"
@@ -152,19 +173,39 @@ class VoiceCloningProcessor:
                 
                 async with session.post(url, headers=headers, data=data, ssl=ssl_context) as response:
                     response_text = await response.text()
+                    logger.info(f"ElevenLabs API 응답 상태: {response.status}")
+                    logger.debug(f"ElevenLabs API 응답 내용: {response_text[:500]}...")
                     
                     if response.status == 200:
-                        result = await response.json()
-                        voice_id = result.get("voice_id")
-                        
-                        if voice_id:
-                            # 생성된 음성 ID 저장
-                            self.user_voice_data[user_id]["voice_id"] = voice_id
-                            self.user_voice_data[user_id]["clone_status"] = "ready"
-                            logger.info(f"사용자 {user_id} 음성 클론 생성 성공: {voice_id}")
-                            return voice_id, None
-                        else:
-                            return None, "음성 ID가 응답에 포함되지 않았습니다"
+                        try:
+                            result = await response.json()
+                            voice_id = result.get("voice_id")
+                            
+                            if voice_id:
+                                # 생성된 음성 ID 저장
+                                self.user_voice_data[user_id]["voice_id"] = voice_id
+                                self.user_voice_data[user_id]["clone_status"] = "ready"
+                                logger.info(f"사용자 {user_id} 음성 클론 생성 성공: {voice_id}")
+                                return voice_id, None
+                            else:
+                                return None, f"음성 ID가 응답에 포함되지 않았습니다. 응답: {result}"
+                        except Exception as json_error:
+                            return None, f"응답 JSON 파싱 실패: {json_error}, 응답: {response_text}"
+                    elif response.status == 201:
+                        # ElevenLabs는 종종 201 Created를 반환
+                        try:
+                            result = await response.json()
+                            voice_id = result.get("voice_id")
+                            
+                            if voice_id:
+                                self.user_voice_data[user_id]["voice_id"] = voice_id
+                                self.user_voice_data[user_id]["clone_status"] = "ready"
+                                logger.info(f"사용자 {user_id} 음성 클론 생성 성공 (201): {voice_id}")
+                                return voice_id, None
+                            else:
+                                return None, f"음성 ID가 응답에 포함되지 않았습니다. 응답: {result}"
+                        except Exception as json_error:
+                            return None, f"응답 JSON 파싱 실패: {json_error}, 응답: {response_text}"
                     else:
                         error_msg = f"ElevenLabs API 오류 ({response.status}): {response_text}"
                         logger.error(error_msg)

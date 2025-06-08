@@ -113,7 +113,7 @@ class VoiceGenerator(BaseGenerator):
         # ElevenLabs API 설정
         self.base_url = "https://api.elevenlabs.io/v1"
         self.headers = {
-            "Accept": "audio/mp3",
+            "Accept": "audio/wav",
             "Content-Type": "application/json",
             "xi-api-key": self.api_key
         }
@@ -577,7 +577,8 @@ class VoiceGenerator(BaseGenerator):
             data = {
                 "text": text,
                 "model_id": model_id,
-                "voice_settings": voice_settings
+                "voice_settings": voice_settings,
+                "output_format": "wav_44100"
             }
             
             # ElevenLabs API 호출
@@ -600,7 +601,7 @@ class VoiceGenerator(BaseGenerator):
                     audio_data = await response.read()
             
             # 파일 저장
-            audio_filename = f"{filename_prefix}.mp3"
+            audio_filename = f"{filename_prefix}.wav"
             
             # story_id별 폴더 생성 (filename_prefix에서 story_id 추출)
             if "_" in filename_prefix:
@@ -722,7 +723,7 @@ class VoiceGenerator(BaseGenerator):
             uri = f"wss://api.elevenlabs.io/v1/text-to-speech/{voice_id}/stream-input?model_id={model_id}"
             
             # 오디오 파일 경로 설정
-            audio_filename = f"{filename_prefix}.mp3"
+            audio_filename = f"{filename_prefix}.wav"
             
             # story_id별 폴더 생성 (filename_prefix에서 story_id 추출)
             if "_" in filename_prefix:
@@ -763,6 +764,10 @@ class VoiceGenerator(BaseGenerator):
                     "voice_settings": voice_settings,
                     "generation_config": {
                         "chunk_length_schedule": [120, 160, 250, 290]  # 기본 설정
+                    },
+                    "output_format": {
+                        "container": "wav",
+                        "encoding": "pcm_44100"
                     }
                 }
                 await websocket.send(json.dumps(init_message))

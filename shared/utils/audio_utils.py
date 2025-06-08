@@ -135,7 +135,7 @@ async def generate_speech(
             text=text,
             voice_id=voice_id,
             model_id="eleven_multilingual_v2",
-            output_format="mp3_44100_128"
+            output_format="wav_44100"
         )
         
         # 파일로 저장 (필요한 경우)

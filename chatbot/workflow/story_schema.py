@@ -149,11 +149,8 @@ class StoryMetadata:
     """이야기 메타데이터"""
     story_id: str = field(default_factory=lambda: str(uuid.uuid4()))
     title: Optional[str] = None
-    theme: Optional[str] = None
     moral_lesson: Optional[str] = None
     educational_value: List[str] = field(default_factory=list)
-    estimated_reading_time: int = 0  # 분 단위
-    difficulty_level: str = "beginner"
     tags: List[str] = field(default_factory=list)
     created_at: datetime = field(default_factory=datetime.now)
     updated_at: datetime = field(default_factory=datetime.now)
@@ -163,11 +160,8 @@ class StoryMetadata:
         return {
             "story_id": self.story_id,
             "title": self.title,
-            "theme": self.theme,
             "moral_lesson": self.moral_lesson,
             "educational_value": self.educational_value,
-            "estimated_reading_time": self.estimated_reading_time,
-            "difficulty_level": self.difficulty_level,
             "tags": self.tags,
             "created_at": self.created_at.isoformat(),
             "updated_at": self.updated_at.isoformat()
@@ -176,14 +170,12 @@ class StoryMetadata:
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> 'StoryMetadata':
         """딕셔너리에서 생성"""
+     
         return cls(
             story_id=data.get("story_id", str(uuid.uuid4())),
             title=data.get("title"),
-            theme=data.get("theme"),
             moral_lesson=data.get("moral_lesson"),
             educational_value=data.get("educational_value", []),
-            estimated_reading_time=data.get("estimated_reading_time", 0),
-            difficulty_level=data.get("difficulty_level", "beginner"),
             tags=data.get("tags", []),
             created_at=datetime.fromisoformat(data["created_at"]) if data.get("created_at") else datetime.now(),
             updated_at=datetime.fromisoformat(data["updated_at"]) if data.get("updated_at") else datetime.now()
@@ -195,7 +187,6 @@ class GeneratedStory:
     content: str
     chapters: List[Dict[str, str]] = field(default_factory=list)
     word_count: int = 0
-    reading_level: str = "beginner"
     generated_at: datetime = field(default_factory=datetime.now)
     generation_model: str = "gpt-4o-mini"
     quality_score: float = 0.0
@@ -206,7 +197,6 @@ class GeneratedStory:
             "content": self.content,
             "chapters": self.chapters,
             "word_count": self.word_count,
-            "reading_level": self.reading_level,
             "generated_at": self.generated_at.isoformat(),
             "generation_model": self.generation_model,
             "quality_score": self.quality_score
@@ -219,7 +209,6 @@ class GeneratedStory:
             content=data["content"],
             chapters=data.get("chapters", []),
             word_count=data.get("word_count", 0),
-            reading_level=data.get("reading_level", "beginner"),
             generated_at=datetime.fromisoformat(data["generated_at"]) if data.get("generated_at") else datetime.now(),
             generation_model=data.get("generation_model", "gpt-4o-mini"),
             quality_score=data.get("quality_score", 0.0)

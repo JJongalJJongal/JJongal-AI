@@ -7,6 +7,7 @@ import time
 import asyncio
 import traceback
 import json
+import os
 from datetime import datetime
 from typing import Optional, Dict, Any
 from fastapi import WebSocket, status
@@ -46,6 +47,9 @@ async def handle_audio_websocket(
     
     # 오디오 수집 상태
     audio_chunks = []
+    
+    # 음성 클로닝 프로세서 초기화
+    voice_cloning_processor = VoiceCloningProcessor()
     
     # 연결 유지 관리
     ping_interval = 30.0  # 30초마다 ping
@@ -160,6 +164,44 @@ async def handle_audio_websocket(
                                             # STT 결과를 기존 형식에 맞게 변환
                                             if text and not error_msg:
                                                 stt_result = {"text": text, "confidence": 0.95}  # confidence는 기본값
+                                                
+                                                # === 음성 클로닝용 샘플 수집 ===
+                                                try:
+                                                    # 음성 품질 체크 (3초 이상, 의미있는 텍스트)
+                                                    if len(combined_audio) > 48000 and len(text.strip()) > 5:  # ~3초 이상 + 의미있는 텍스트
+                                                        sample_saved = await voice_cloning_processor.collect_user_audio_sample(
+                                                            user_id=child_name,
+                                                            audio_data=combined_audio
+                                                        )
+                                                        
+                                                        if sample_saved:
+                                                            sample_count = voice_cloning_processor.get_sample_count(child_name)
+                                                            logger.info(f"[VOICE_CLONE] 음성 샘플 수집: {child_name} ({sample_count}/5)")
+                                                            
+                                                            # 진행 상황 알림
+                                                            if sample_count < 5:
+                                                                await ws_engine.send_json(websocket, {
+                                                                    "type": "voice_sample_collected",
+                                                                    "message": f"목소리 수집 중... ({sample_count}/5)",
+                                                                    "sample_count": sample_count,
+                                                                    "total_needed": 5,
+                                                                    "timestamp": datetime.now().isoformat()
+                                                                })
+                                                            elif sample_count == 5:
+                                                                await ws_engine.send_json(websocket, {
+                                                                    "type": "voice_clone_ready",
+                                                                    "message": "충분한 음성 샘플이 수집되었어요! 목소리 복제를 시작합니다...",
+                                                                    "sample_count": sample_count,
+                                                                    "timestamp": datetime.now().isoformat()
+                                                                })
+                                                                
+                                                                # 백그라운드에서 음성 클론 생성
+                                                                asyncio.create_task(create_voice_clone_background(
+                                                                    voice_cloning_processor, child_name, websocket, ws_engine
+                                                                ))
+                                                except Exception as clone_error:
+                                                    logger.warning(f"[VOICE_CLONE] 샘플 수집 실패: {clone_error}")
+                                                
                                             else:
                                                 logger.error(f"[STT] 오류 발생: {error_msg} (오류 코드: {error_code})")
                                                 stt_result = None
@@ -753,4 +795,56 @@ async def handle_chat_a_response(chatbot_a: ChatBotA, user_text: str, audio_proc
         
     except Exception as e:
         logger.error(f"[CHAT_A] ChatBot A 응답 처리 중 오류: {e}")
-        raise 
+        raise
+
+async def create_voice_clone_background(
+    voice_cloning_processor: VoiceCloningProcessor,
+    child_name: str,
+    websocket: WebSocket,
+    ws_engine: WebSocketEngine
+):
+    """백그라운드에서 음성 클론 생성"""
+    try:
+        logger.info(f"[VOICE_CLONE] 백그라운드 음성 클론 생성 시작: {child_name}")
+        
+        # ElevenLabs API로 음성 클론 생성
+        voice_id, error_msg = await voice_cloning_processor.create_instant_voice_clone(
+            user_id=child_name,
+            voice_name=f"{child_name}_voice_clone"
+        )
+        
+        if voice_id:
+            logger.info(f"[VOICE_CLONE] 음성 클론 생성 성공: {child_name} -> {voice_id}")
+            
+            # 성공 알림
+            await ws_engine.send_json(websocket, {
+                "type": "voice_clone_created",
+                "message": f"🎉 {child_name}님의 목소리가 성공적으로 복제되었어요! 동화에서 주인공의 목소리로 사용됩니다.",
+                "voice_id": voice_id,
+                "child_name": child_name,
+                "timestamp": datetime.now().isoformat()
+            })
+        else:
+            logger.error(f"[VOICE_CLONE] 음성 클론 생성 실패: {child_name} - {error_msg}")
+            
+            # 실패 알림
+            await ws_engine.send_json(websocket, {
+                "type": "voice_clone_failed",
+                "message": f"음성 복제에 실패했어요. 기본 목소리로 동화를 만들어드릴게요! ({error_msg})",
+                "error": error_msg,
+                "timestamp": datetime.now().isoformat()
+            })
+            
+    except Exception as e:
+        logger.error(f"[VOICE_CLONE] 백그라운드 클론 생성 오류: {e}")
+        
+        # 오류 알림
+        try:
+            await ws_engine.send_json(websocket, {
+                "type": "voice_clone_failed",
+                "message": "음성 복제 중 오류가 발생했어요. 기본 목소리로 동화를 만들어드릴게요!",
+                "error": str(e),
+                "timestamp": datetime.now().isoformat()
+            })
+        except:
+            pass  # WebSocket이 이미 닫혔을 수 있음 

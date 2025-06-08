@@ -286,19 +286,40 @@ class StoryEngine:
             return analysis_result
         
         try:
-            # GPT를 통한 고급 분석
+            # GPT를 통한 고급 분석 - 개선된 프롬프트
             system_message = f"""
-            당신은 {self.story_stage} 단계에서 아이의 응답을 분석하는 전문가입니다.
-            다음 작업을 수행하세요:
-            1. 주요 키워드 3-5개 추출
-            2. 응답의 창의성 점수 (0-1)
-            3. 다음 질문을 위한 제안사항
-            
-            JSON 형식으로 응답하세요:
+            당신은 아이의 상상력과 창의성을 분석하는 전문가입니다. 현재 '{self.story_stage}' 단계입니다.
+
+            아이의 응답을 분석하여 다음을 추출하세요:
+
+            1. **핵심 키워드 추출**: 
+               - 등장인물: 사람, 동물, 캐릭터 이름
+               - 장소/배경: 구체적인 위치, 환경
+               - 감정/상태: 기분, 느낌 표현
+               - 행동/사건: 동작, 일어나는 일
+               - 물건/도구: 중요한 아이템들
+
+            2. **품질 점수 (0-1)**:
+               - 창의성 (0.3): 독창적이고 상상력 있는가?
+               - 구체성 (0.3): 세부사항이 풍부한가?
+               - 감정표현 (0.2): 감정이 잘 드러나는가?
+               - 연결성 (0.2): 이야기와 연관성이 있는가?
+
+            3. **아이의 관심사**: 숨겨진 관심사나 선호도
+            4. **이야기 요소**: 현재 단계에 맞는 구체적 요소들
+
+            반드시 JSON 형식으로 응답하세요:
             {{
                 "keywords": ["키워드1", "키워드2", ...],
-                "quality_score": 0.8,
-                "suggestions": ["제안1", "제안2", ...]
+                "quality_score": 0.85,
+                "interests": ["관심사1", "관심사2"],
+                "story_elements": {{
+                    "characters": ["캐릭터들"],
+                    "settings": ["장소들"],
+                    "emotions": ["감정들"],
+                    "objects": ["물건들"]
+                }},
+                "suggestions": ["제안1", "제안2"]
             }}
             """
             
@@ -321,23 +342,58 @@ class StoryEngine:
                     completion_tokens=response.usage.completion_tokens
                 )
 
-            # JSON 응답 파싱 시도
+            # JSON 응답 파싱 시도 - 개선된 처리
             response_text = response.choices[0].message.content
             try:
-                parsed_result = json.loads(response_text)
-                analysis_result.update(parsed_result)
+                # JSON 부분만 추출 시도
+                json_start = response_text.find('{')
+                json_end = response_text.rfind('}') + 1
+                if json_start != -1 and json_end > json_start:
+                    json_part = response_text[json_start:json_end]
+                    parsed_result = json.loads(json_part)
+                    analysis_result.update(parsed_result)
+                    
+                    # 개선된 정보 추출
+                    if "story_elements" in parsed_result:
+                        story_elements = parsed_result["story_elements"]
+                        
+                        # 단계별로 적절한 요소들을 추가
+                        if self.story_stage == "character" and "characters" in story_elements:
+                            self.story_elements[self.story_stage]["topics"].update(story_elements["characters"])
+                        elif self.story_stage == "setting" and "settings" in story_elements:
+                            self.story_elements[self.story_stage]["topics"].update(story_elements["settings"])
+                        elif self.story_stage == "problem" and "emotions" in story_elements:
+                            self.story_elements[self.story_stage]["topics"].update(story_elements["emotions"])
+                        
+                        # 공통 키워드도 추가
+                        if "objects" in story_elements:
+                            self.story_elements[self.story_stage]["topics"].update(story_elements["objects"])
+                    
+                    # 관심사 정보 저장 (user_data에 업데이트)
+                    if "interests" in parsed_result and parsed_result["interests"]:
+                        if "interests" not in self.user_data:
+                            self.user_data["interests"] = []
+                        for interest in parsed_result["interests"]:
+                            if interest not in self.user_data["interests"]:
+                                self.user_data["interests"].append(interest)
+                                logger.info(f"새로운 관심사 발견: {interest}")
+                    
+                else:
+                    raise json.JSONDecodeError("No valid JSON found", response_text, 0)
+                    
             except json.JSONDecodeError:
-                # JSON 파싱 실패 시 키워드만 추출
-                keywords = self._extract_keywords_fallback(response_text)
+                # JSON 파싱 실패 시 향상된 키워드 추출
+                keywords = self._extract_keywords_enhanced(user_input, response_text)
                 analysis_result["keywords"] = keywords
+                logger.warning(f"JSON 파싱 실패, 대체 키워드 추출: {keywords}")
             
             # 현재 단계에 결과 반영
-            if analysis_result["keywords"]:
+            if analysis_result.get("keywords"):
                 self.story_elements[self.story_stage]["topics"].update(analysis_result["keywords"])
                 self.story_elements[self.story_stage]["count"] += 1
                 
             # 품질 점수 기록
-            self.quality_scores.append(analysis_result["quality_score"])
+            self.quality_scores.append(analysis_result.get("quality_score", 0.5))
             
         except Exception as e:
             logger.error(f"사용자 응답 분석 중 오류: {e}")
@@ -358,6 +414,97 @@ class StoryEngine:
                 if len(keywords) >= 5:
                     break
         return keywords
+    
+    def _extract_keywords_enhanced(self, user_input: str, ai_response: str = "") -> List[str]:
+        """향상된 키워드 추출 - 사용자 입력과 AI 응답을 모두 분석"""
+        keywords = set()
+        
+        # 1. 사용자 입력에서 직접 키워드 추출
+        user_keywords = self._extract_keywords_from_text(user_input)
+        keywords.update(user_keywords)
+        
+        # 2. AI 응답에서 추출된 키워드 찾기
+        if ai_response:
+            ai_keywords = self._extract_keywords_from_text(ai_response)
+            keywords.update(ai_keywords)
+        
+        # 3. 단계별 특화 키워드 추출
+        stage_keywords = self._extract_stage_specific_keywords(user_input)
+        keywords.update(stage_keywords)
+        
+        # 4. 감정/상태 키워드 추출
+        emotion_keywords = self._extract_emotion_keywords(user_input)
+        keywords.update(emotion_keywords)
+        
+        return list(keywords)[:8]  # 최대 8개까지
+    
+    def _extract_keywords_from_text(self, text: str) -> List[str]:
+        """텍스트에서 의미있는 키워드 추출"""
+        import re
+        
+        keywords = []
+        
+        # 한글 명사 패턴 (2-4글자)
+        korean_nouns = re.findall(r'[가-힣]{2,4}', text)
+        
+        # 불용어 제거
+        stop_words = {
+            '그것', '이것', '저것', '여기', '거기', '저기', '때문', '경우', '정도',
+            '그런데', '그리고', '하지만', '그래서', '그러면', '그러니까', '그런',
+            '이런', '저런', '어떤', '무슨', '어느', '누구', '언제', '어디',
+            '이렇게', '그렇게', '저렇게', '어떻게', '왜냐하면', '따라서'
+        }
+        
+        for word in korean_nouns:
+            if word not in stop_words and len(word) >= 2:
+                keywords.append(word)
+        
+        return list(set(keywords))
+    
+    def _extract_stage_specific_keywords(self, text: str) -> List[str]:
+        """단계별 특화 키워드 추출"""
+        keywords = []
+        
+        # 단계별 키워드 패턴
+        stage_patterns = {
+            "character": {
+                "animals": ["강아지", "고양이", "토끼", "곰", "사자", "호랑이", "코끼리", "기린", "원숭이", "새", "물고기", "용", "유니콘"],
+                "people": ["공주", "왕자", "마법사", "친구", "엄마", "아빠", "할머니", "할아버지", "선생님", "아이"],
+                "fantasy": ["요정", "마녀", "거인", "난쟁이", "로봇", "외계인"]
+            },
+            "setting": {
+                "nature": ["숲", "바다", "산", "강", "호수", "하늘", "구름", "별", "달", "해"],
+                "places": ["집", "학교", "공원", "마을", "도시", "성", "동굴", "섬", "정원"],
+                "fantasy": ["마법의", "신비한", "환상의", "꿈의", "무지개", "마법나라"]
+            },
+            "problem": {
+                "challenges": ["모험", "여행", "탐험", "구하기", "찾기", "도움", "문제", "걱정", "어려움"],
+                "emotions": ["무서운", "슬픈", "기쁜", "신나는", "놀라운", "재미있는", "두려운", "용감한"]
+            }
+        }
+        
+        if self.story_stage in stage_patterns:
+            for category, words in stage_patterns[self.story_stage].items():
+                for word in words:
+                    if word in text:
+                        keywords.append(word)
+        
+        return keywords
+    
+    def _extract_emotion_keywords(self, text: str) -> List[str]:
+        """감정 키워드 추출"""
+        emotion_words = [
+            "기쁘다", "슬프다", "화나다", "무섭다", "신나다", "걱정하다",
+            "행복하다", "부끄럽다", "놀라다", "용감하다", "자신감", "희망",
+            "사랑", "미워", "즐겁다", "심심하다", "외롭다", "따뜻하다"
+        ]
+        
+        found_emotions = []
+        for emotion in emotion_words:
+            if emotion in text:
+                found_emotions.append(emotion)
+        
+        return found_emotions
     
     def should_transition_to_next_stage(self, conversation_length: int) -> bool:
         """

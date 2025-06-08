@@ -174,8 +174,9 @@ class MultimediaCoordinator:
             images = []
             story_id = story_schema.metadata.story_id
             
-            # 이미지 저장 디렉토리 생성
-            story_images_dir = os.path.join(self.images_dir, story_id)
+            # 이미지 저장 디렉토리 생성 (짧은 story_id 사용 - 오디오와 통일)
+            story_id_short = story_id[:8] if len(story_id) > 8 else story_id
+            story_images_dir = os.path.join(self.images_dir, story_id_short)
             os.makedirs(story_images_dir, exist_ok=True)
             
             # 이야기 내용에서 장면 추출
@@ -183,8 +184,8 @@ class MultimediaCoordinator:
             
             for i, scene in enumerate(scenes[:self.image_config["max_images"]]):
                 try:
-                    # 이미지 생성 - 실제 story_id 전달
-                    image_info = await self._generate_single_image(scene, i, story_images_dir, story_id)
+                    # 이미지 생성 - 짧은 story_id 전달 (오디오와 통일)
+                    image_info = await self._generate_single_image(scene, i, story_images_dir, story_id_short)
                     if image_info:
                         images.append(image_info)
                         
@@ -528,13 +529,16 @@ class MultimediaCoordinator:
     def get_multimedia_status(self, story_id: str) -> Dict[str, Any]:
         """멀티미디어 생성 상태 조회"""
         try:
+            # 짧은 story_id 사용 (저장 시와 동일)
+            story_id_short = story_id[:8] if len(story_id) > 8 else story_id
+            
             # 이미지 디렉토리 확인
-            story_images_dir = os.path.join(self.images_dir, story_id)
+            story_images_dir = os.path.join(self.images_dir, story_id_short)
             images_exist = os.path.exists(story_images_dir)
             image_count = len(os.listdir(story_images_dir)) if images_exist else 0
             
             # 오디오 디렉토리 확인
-            story_audio_dir = os.path.join(self.audio_dir, story_id)
+            story_audio_dir = os.path.join(self.audio_dir, story_id_short)
             audio_exist = os.path.exists(story_audio_dir)
             audio_count = len(os.listdir(story_audio_dir)) if audio_exist else 0
             

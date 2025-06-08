@@ -35,7 +35,7 @@ ELEVENLABS_BASE_URL = "https://api.elevenlabs.io/v1"
 def get_elevenlabs_headers(api_key: str):
     """ElevenLabs API 헤더 생성"""
     return {
-        "Accept": "audio/mp3",
+        "Accept": "audio/wav",
         "Content-Type": "application/json",
         "xi-api-key": api_key
     }
@@ -184,7 +184,8 @@ class AudioProcessor:
                 data = {
                     "text": cleaned_text,
                     "model_id": self.bugi_voice_config["model_id"],
-                    "voice_settings": self.bugi_voice_config["voice_settings"]
+                    "voice_settings": self.bugi_voice_config["voice_settings"],
+                    "output_format": "wav_44100"
                 }
                 
                 url = f"{ELEVENLABS_BASE_URL}/text-to-speech/{voice_id}"
