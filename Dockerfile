@@ -79,30 +79,23 @@ ENV PATH="/opt/venv/bin:$PATH"
 # 작업 디렉토리 설정
 WORKDIR /app
 
-# 애플리케이션 소유자 설정
-RUN chown -R ccb_user:ccb_user /app
+# 애플리케이션 코드 먼저 복사
+COPY --chown=ccb_user:ccb_user . /app/
 
-# 필요한 디렉토리 생성
-RUN mkdir -p /app/output \
-             /app/output/workflow_states \
+# 필요한 디렉토리 생성 및 최종 권한 설정
+# 이 단계에서 모든 디렉토리가 생성되고 올바른 소유자가 설정됩니다.
+RUN mkdir -p /app/output/workflow_states \
              /app/output/metadata \
              /app/output/stories \
-             /app/output/temp \
              /app/output/temp/images \
              /app/output/temp/audio \
              /app/output/temp/voice_samples \
              /app/output/conversations \
              /app/logs \
-             /app/chatbot/data/vector_db \
              /app/chatbot/data/vector_db/main \
              /app/chatbot/data/vector_db/detailed \
              /app/chatbot/data/vector_db/summary \
-             /app/chatbot/data/prompts \
-             /app/shared \
     && chown -R ccb_user:ccb_user /app
-
-# 애플리케이션 코드 복사 (경량화된 데이터만)
-COPY --chown=ccb_user:ccb_user . /app/
 
 # Python 경로 설정
 ENV PYTHONPATH="/app"
@@ -134,31 +127,18 @@ USER ccb_user
 HEALTHCHECK --interval=30s --timeout=10s --start-period=90s --retries=3 \
     CMD curl -f http://localhost:8000/api/v1/health || exit 1
 
-# 시작 스크립트 생성
+# 시작 스크립트 생성 (정리된 버전)
 RUN echo '#!/bin/bash\n\
 set -e\n\
 \n\
 echo "꼬꼬북 AI 시스템 시작 중..."\n\
-echo "작업 디렉토리: $(pwd)"\n\
 echo "Python 버전: $(python --version)"\n\
 echo "설치된 패키지 확인..."\n\
 \n\
-# 필요한 디렉토리 확인 및 생성 (런타임 안전성 보장)\n\
-echo "필수 디렉토리 확인 중..."\n\
-mkdir -p /app/output/workflow_states \\\n\
-         /app/output/metadata \\\n\
-         /app/output/stories \\\n\
-         /app/output/temp/images \\\n\
-         /app/output/temp/audio \\\n\
-         /app/output/temp/voice_samples \\\n\
-         /app/output/conversations \\\n\
-         /app/logs \\\n\
-         /app/chatbot/data/vector_db/main \\\n\
-         /app/chatbot/data/vector_db/detailed \\\n\
-         /app/chatbot/data/vector_db/summary\n\
-echo "디렉토리 확인 완료."\n\
+# 디렉토리는 Docker 빌드 시 이미 생성되었으므로, 여기서는 확인 메시지만 출력합니다.\n\
+echo "필수 디렉토리 확인 완료."\n\
 \n\
-# FastAPI 서버 시작 (통합 API) - 올바른 경로로 수정\n\
+# FastAPI 서버 시작\n\
 echo "FastAPI 서버 시작 중... (포트: 8000)"\n\
 exec uvicorn chatbot.app:app \\\n\
     --host 0.0.0.0 \\\n\
