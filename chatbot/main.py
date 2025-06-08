@@ -18,6 +18,7 @@ import sys
 import time
 import argparse
 import json
+import asyncio
 from pathlib import Path
 
 # 경로 설정
@@ -186,22 +187,24 @@ class EnhancedChatBotSystem:
                 "bugi": response
             })
     
-    def generate_story(self):
-        """부기의 대화 내용을 바탕으로 꼬기가 이야기 생성"""
+    async def generate_story(self):
+        """부기의 대화 내용을 바탕으로 꼬기가 이야기 생성 (비동기 처리)"""
         self.print_header()
         print("대화를 바탕으로 이야기를 만들고 있어요...\n")
         
         # 부기가 이야기 주제 추출
         try:
-            story_outline = self.bugi.suggest_story_idea()
+            story_outline = self.bugi.suggest_story_theme()  # 올바른 메서드명 사용
             
-            if not story_outline or "summary_text" not in story_outline:
+            if not story_outline or "plot_summary" not in story_outline:  # 올바른 키 사용
                 print("이야기 주제를 추출하지 못했습니다. 더 많은 대화가 필요합니다.")
                 return False
                 
             print("=== 부기가 추출한 이야기 주제 ===")
-            print(f"줄거리: {story_outline.get('summary_text', '')}")
-            print(f"태그: {', '.join(story_outline.get('tags', []))}")
+            print(f"제목: {story_outline.get('title', '제목 없음')}")
+            print(f"줄거리: {story_outline.get('plot_summary', '')}")  # 올바른 키 사용
+            print(f"등장인물: {', '.join(story_outline.get('characters', []))}")
+            print(f"배경: {story_outline.get('setting', '')}")
             print("-" * 60)
             print("이 주제로 이야기를 만들까요? (y/n)")
             
@@ -216,21 +219,22 @@ class EnhancedChatBotSystem:
             print("\n꼬기가 상세 이야기를 만들고 있어요...")
             print("(실제 API 호출이 이루어지며 약간의 시간이 소요될 수 있습니다)")
             
-            # 이야기 생성 진행
-            detailed_story = self.kkogi.generate_detailed_story()
+            # 이야기 생성 진행 (비동기 호출)
+            detailed_story_result = await self.kkogi.generate_detailed_story()
             
             # 생성된 이야기 정보 출력
-            if detailed_story:
+            if detailed_story_result:
+                story_data = detailed_story_result.get('story_data', {})
                 print("\n=== 생성된 이야기 정보 ===")
-                print(f"제목: {detailed_story.get('title', '제목 없음')}")
-                print(f"대상 연령: {detailed_story.get('target_age', self.child_info['age'])}세")
-                print(f"등장인물: {len(detailed_story.get('characters', []))}명")
-                print(f"장면 수: {len(detailed_story.get('scenes', []))}개")
+                print(f"제목: {story_data.get('title', '제목 없음')}")
+                print(f"대상 연령: {self.child_info['age']}세")
+                print(f"장면 수: {len(story_data.get('chapters', []))}개")
+                print(f"상태: {detailed_story_result.get('status', '알 수 없음')}")
                 
                 # 이야기 저장
                 story_file = self.output_dir / f"{self.child_info['name']}의_이야기.json"
                 with open(story_file, 'w', encoding='utf-8') as f:
-                    json.dump(detailed_story, f, ensure_ascii=False, indent=2)
+                    json.dump(detailed_story_result, f, ensure_ascii=False, indent=2)
                     
                 print(f"\n이야기가 저장되었습니다: {story_file}")
                 
@@ -238,15 +242,35 @@ class EnhancedChatBotSystem:
                 print("\n이야기에 삽화를 추가할까요? (y/n)")
                 if input().lower() == 'y':
                     print("\n삽화를 생성하고 있어요...")
-                    self.kkogi.generate_illustrations()
-                    print("삽화가 생성되었습니다.")
+                    try:
+                        if hasattr(self.kkogi, 'image_generator'):
+                            image_input = {
+                                "story_data": story_data,
+                                "story_id": detailed_story_result.get('story_id')
+                            }
+                            await self.kkogi.image_generator.generate(image_input)
+                            print("삽화가 생성되었습니다.")
+                        else:
+                            print("삽화 생성기를 찾을 수 없습니다.")
+                    except Exception as e:
+                        print(f"삽화 생성 중 오류: {e}")
                 
                 # 음성 생성 여부 확인
                 print("\n이야기에 음성을 추가할까요? (y/n)")
                 if input().lower() == 'y':
                     print("\n음성을 생성하고 있어요...")
-                    self.kkogi.generate_voice()
-                    print("음성이 생성되었습니다.")
+                    try:
+                        if hasattr(self.kkogi, 'voice_generator'):
+                            voice_input = {
+                                "story_data": story_data,
+                                "story_id": detailed_story_result.get('story_id')
+                            }
+                            await self.kkogi.voice_generator.generate(voice_input)
+                            print("음성이 생성되었습니다.")
+                        else:
+                            print("음성 생성기를 찾을 수 없습니다.")
+                    except Exception as e:
+                        print(f"음성 생성 중 오류: {e}")
                 
                 return True
             else:
@@ -257,8 +281,8 @@ class EnhancedChatBotSystem:
             print(f"이야기 생성 중 오류가 발생했습니다: {str(e)}")
             return False
     
-    def run(self):
-        """메인 프로그램 실행"""
+    async def run(self):
+        """메인 프로그램 실행 (비동기)"""
         try:
             # 아이 정보 입력
             self.get_child_info()
@@ -266,8 +290,8 @@ class EnhancedChatBotSystem:
             # 부기와 대화
             self.chat_with_bugi()
             
-            # 이야기 생성
-            self.generate_story()
+            # 이야기 생성 (비동기 호출)
+            await self.generate_story()
             
             # 종료
             print("\n프로그램을 종료합니다. 생성된 파일은 output 폴더에서 확인할 수 있습니다.")
@@ -294,11 +318,11 @@ def main():
         # 출력 디렉토리 설정 (app.py와 일관성 유지)
         output_dir = os.getenv("MULTIMEDIA_OUTPUT_DIR", "output")
         
-        fairy_tail = WorkflowOrchestrator(
-            output_dir=output_dir,
-            enable_multimedia=os.getenv("ENABLE_MULTIMEDIA", "true").lower() == "true"
-        ) # 워크플로우 오케스트레이터 인스턴스 생성 (app.py와 동일한 파라미터)
-        fairy_tail.run()
+        fairy_tail = EnhancedChatBotSystem(
+            enhanced_mode=True,
+            enable_performance_tracking=True
+        ) # Enhanced 챗봇 시스템 인스턴스 생성
+        asyncio.run(fairy_tail.run())
 
 if __name__ == "__main__":
     main() 

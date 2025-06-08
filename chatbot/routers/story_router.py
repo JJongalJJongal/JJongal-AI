@@ -12,7 +12,7 @@ import asyncio # 비동기 작업을 위한 모듈
 
 from shared.utils.logging_utils import get_module_logger
 # ChatBotB 관련 함수
-from chatbot.models.chat_bot_b import StoryGenerationChatBot
+from chatbot.models.chat_bot_b.chat_bot_b import ChatBotB
 
 # DB 관련 함수
 from chatbot.db import ( 
@@ -76,11 +76,25 @@ async def process_story_generation_task_background(story_id: str):
 
     chatbot_b = None
     try:
-        chatbot_b = StoryGenerationChatBot()
+        # ChatBotB 인스턴스 생성 (환경변수에서 설정 읽기)
+        import os
+        chatbot_b = ChatBotB(
+            vector_db_path=os.getenv("CHROMA_DB_PATH", "/app/chatbot/data/vector_db"),
+            collection_name="fairy_tales",
+            use_enhanced_generators=True,
+            enable_performance_tracking=True
+        )
+        
+        # 대상 연령 설정
         chatbot_b.set_target_age(input_outline_data.get("age"))
+        
+        # 스토리 개요 설정 (올바른 키 구조 사용)
         story_outline_for_b = {
-            "summary_text": input_outline_data.get("story_summary"),
+            "plot_summary": input_outline_data.get("story_summary"),  # plot_summary 키 사용
             "tags": input_outline_data.get("initial_tags", []),
+            "child_name": input_outline_data.get("child_name", "친구"),
+            "age_group": input_outline_data.get("age"),
+            "interests": input_outline_data.get("interests", [])
         }
         chatbot_b.set_story_outline(story_outline_for_b)
         logger.info(f"백그라운드 작업: ChatBot B 인스턴스 생성 및 초기화 완료 (ID: {story_id})")
@@ -94,7 +108,7 @@ async def process_story_generation_task_background(story_id: str):
         update_task_status_in_db(story_id, "generating_text", "백그라운드: 상세 이야기 텍스트 생성 중...")
         logger.info(f"백그라운드 작업 [{story_id}]: 상세 텍스트 생성 시작")
         
-        detailed_story_content = await asyncio.to_thread(chatbot_b.generate_detailed_story)
+        detailed_story_content = await chatbot_b.generate_detailed_story()
         if not detailed_story_content:
             update_task_status_in_db(story_id, "failed_text_generation", "백그라운드: 상세 이야기 텍스트 생성 실패")
             logger.error(f"백그라운드 작업 [{story_id}]: 상세 텍스트 생성 실패")
@@ -107,24 +121,42 @@ async def process_story_generation_task_background(story_id: str):
 
         update_task_status_in_db(story_id, "generating_images", "백그라운드: 삽화 생성 중...", details_update=current_details)
         logger.info(f"백그라운드 작업 [{story_id}]: 삽화 생성 시작")
-        illustrations_result = await asyncio.to_thread(chatbot_b.generate_illustrations)
-        if not illustrations_result:
-            logger.warning(f"백그라운드 작업 [{story_id}]: 삽화 생성 실패 또는 결과 없음. 계속 진행.")
+        # 이미지 생성 (ChatBotB의 image_generator 사용)
+        try:
+            if hasattr(chatbot_b, 'image_generator') and chatbot_b.image_generator:
+                image_input = {
+                    "story_data": detailed_story_content,
+                    "story_id": story_id
+                }
+                illustrations_result = await chatbot_b.image_generator.generate(image_input)
+                logger.info(f"백그라운드 작업 [{story_id}]: 삽화 생성 완료. 결과: {illustrations_result}")
+                current_details["illustrations"] = illustrations_result
+            else:
+                logger.warning(f"백그라운드 작업 [{story_id}]: 이미지 생성기를 찾을 수 없음. 건너뛰기.")
+                current_details["illustration_status"] = "generator_not_found"
+        except Exception as e:
+            logger.warning(f"백그라운드 작업 [{story_id}]: 삽화 생성 실패: {e}. 계속 진행.")
             current_details["illustration_status"] = "failed_or_empty"
-        else:
-            logger.info(f"백그라운드 작업 [{story_id}]: 삽화 생성 완료. 결과: {illustrations_result}")
-            current_details["illustrations"] = illustrations_result
         update_task_status_in_db(story_id, "generating_images", "삽화 생성 완료, 음성 합성 준비 중...", details_update=current_details)
         
         update_task_status_in_db(story_id, "generating_voice", "백그라운드: 음성 합성 중...", details_update=current_details)
         logger.info(f"백그라운드 작업 [{story_id}]: 음성 합성 시작")
-        voice_data_result = await asyncio.to_thread(chatbot_b.generate_voice)
-        if not voice_data_result:
-            logger.warning(f"백그라운드 작업 [{story_id}]: 음성 합성 실패 또는 결과 없음. 계속 진행.")
+        # 음성 생성 (ChatBotB의 voice_generator 사용)
+        try:
+            if hasattr(chatbot_b, 'voice_generator') and chatbot_b.voice_generator:
+                voice_input = {
+                    "story_data": detailed_story_content,
+                    "story_id": story_id
+                }
+                voice_data_result = await chatbot_b.voice_generator.generate(voice_input)
+                logger.info(f"백그라운드 작업 [{story_id}]: 음성 합성 완료. 결과: {voice_data_result}")
+                current_details["voice_data"] = voice_data_result
+            else:
+                logger.warning(f"백그라운드 작업 [{story_id}]: 음성 생성기를 찾을 수 없음. 건너뛰기.")
+                current_details["voice_status"] = "generator_not_found"
+        except Exception as e:
+            logger.warning(f"백그라운드 작업 [{story_id}]: 음성 합성 실패: {e}. 계속 진행.")
             current_details["voice_status"] = "failed_or_empty"
-        else:
-            logger.info(f"백그라운드 작업 [{story_id}]: 음성 합성 완료. 결과: {voice_data_result}")
-            current_details["voice_data"] = voice_data_result
         
         update_task_status_in_db(story_id, "completed", "백그라운드: 이야기 생성 완료 (텍스트, 삽화, 음성)", details_update=current_details)
         logger.info(f"백그라운드 작업: 이야기 생성 작업 완료 (ID: {story_id})" )
