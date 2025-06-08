@@ -108,8 +108,42 @@ async def handle_audio_websocket(
             logger.warning(f"ChatBotA 초기화 실패: {e}, None으로 진행")
             raise
         
-        # 연결 상태 전송
-        await ws_engine.send_status(websocket, "connected", f"안녕 {child_name}! 부기와 함께 재미있는 이야기를 만들어보자!")
+        # 부기의 첫 번째 인사말을 음성과 함께 전송
+        greeting_message = f"안녕 {child_name}! 부기와 함께 재미있는 이야기를 만들어보자!"
+        logger.info(f"[GREETING] 부기 인사말 음성 생성 시작: '{greeting_message}'")
+        
+        # TTS 처리 (부기 첫 번째 음성)
+        greeting_audio = None
+        try:
+            audio_data, status, error_msg, error_code = await audio_processor.synthesize_tts(
+                greeting_message, 
+                client_id=client_id  # 클라이언트별 클론 음성 사용 (첫 번째라 기본 음성)
+            )
+            if status != "error" and audio_data:
+                greeting_audio = audio_data
+                logger.info(f"[GREETING] 부기 인사말 음성 생성 완료: {len(audio_data)} chars (base64)")
+            else:
+                logger.warning(f"[GREETING] 부기 인사말 음성 생성 실패: {error_msg} (code: {error_code})")
+        except Exception as greeting_tts_error:
+            logger.warning(f"[GREETING] 부기 인사말 음성 생성 중 예외: {greeting_tts_error}")
+        
+        # 부기의 첫 번째 인사말 전송 (음성 포함)
+        greeting_packet = {
+            "type": "ai_response",
+            "text": greeting_message,
+            "audio": greeting_audio,
+            "user_text": "",  # 첫 번째 메시지이므로 빈 문자열
+            "confidence": 1.0,  # 시스템 메시지이므로 100% 신뢰도
+            "conversation_length": 1,  # 첫 번째 대화
+            "is_greeting": True,  # 인사말임을 표시
+            "timestamp": datetime.now().isoformat()
+        }
+        
+        await ws_engine.send_json(websocket, greeting_packet)
+        logger.info(f"[GREETING] 부기 인사말 전송 완료 (음성 포함: {greeting_audio is not None}): {greeting_message}")
+        
+        # 연결 상태도 별도로 전송 (호환성 유지)
+        await ws_engine.send_status(websocket, "connected", "부기가 준비되었어요!")
         
         # ConnectionEngine에 AudioProcessor 등록 (음성 정보 공유를 위해)
         connection_engine.register_audio_processor(client_id, audio_processor)
