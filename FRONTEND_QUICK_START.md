@@ -879,5 +879,523 @@ const MobileVoiceButton: React.FC = () => {
 
 ---
 
-이제 프론트엔드 개발자가 꼬꼬북 API를 쉽게 사용할 수 있는 완전한 가이드가 준비되었습니다! 🎉
+## 📱 **프론트엔드 빠른 시작 가이드**
+
+이 가이드는 꼬꼬북 AI의 WebSocket API를 사용하여 프론트엔드를 빠르게 구축하는 방법을 설명합니다.
+
+### 🎯 **Binary 데이터 처리 (개선된 방식)**
+
+서버에서 오디오와 이미지를 WebSocket binary로 전송합니다. 청킹을 통해 순서를 보장합니다.
+
+```typescript
+// src/services/websocket-binary.ts
+export interface AudioMetadata {
+  type: 'audio_metadata';
+  size: number;
+  size_mb: number;
+  format: string;
+  chunks_total: number;
+  chunk_size: number;
+  sequence_id: number;
+}
+
+export interface ChunkHeader {
+  type: 'audio_chunk_header' | 'story_file_chunk_header';
+  sequence_id: number;
+  chunk_index: number;
+  total_chunks: number;
+  chunk_size: number;
+  is_final: boolean;
+}
+
+class BinaryDataReceiver {
+  private audioChunks: Map<number, Uint8Array[]> = new Map();
+  private onAudioComplete: (audioBlob: Blob, metadata: AudioMetadata) => void;
+  
+  constructor(onAudioComplete: (audioBlob: Blob, metadata: AudioMetadata) => void) {
+    this.onAudioComplete = onAudioComplete;
+  }
+
+  handleMessage(event: MessageEvent) {
+    if (typeof event.data === 'string') {
+      // JSON 메시지 처리
+      const message = JSON.parse(event.data);
+      
+      switch (message.type) {
+        case 'audio_metadata':
+          this.handleAudioMetadata(message as AudioMetadata);
+          break;
+        case 'audio_chunk_header':
+          this.handleChunkHeader(message as ChunkHeader);
+          break;
+        case 'audio_transfer_complete':
+          this.handleTransferComplete(message);
+          break;
+      }
+    } else if (event.data instanceof ArrayBuffer) {
+      // Binary 데이터 처리
+      this.handleBinaryData(new Uint8Array(event.data));
+    }
+  }
+
+  private handleAudioMetadata(metadata: AudioMetadata) {
+    console.log(`🎵 오디오 수신 준비: ${metadata.size_mb}MB, ${metadata.chunks_total} 청크`);
+    // 청크 배열 초기화
+    this.audioChunks.set(metadata.sequence_id, []);
+  }
+
+  private currentChunkHeader: ChunkHeader | null = null;
+
+  private handleChunkHeader(header: ChunkHeader) {
+    this.currentChunkHeader = header;
+    console.log(`📦 청크 ${header.chunk_index + 1}/${header.total_chunks} 수신 준비`);
+  }
+
+  private handleBinaryData(data: Uint8Array) {
+    if (!this.currentChunkHeader) {
+      console.warn('청크 헤더 없이 binary 데이터 수신');
+      return;
+    }
+
+    const header = this.currentChunkHeader;
+    const chunks = this.audioChunks.get(header.sequence_id) || [];
+    
+    // 청크 추가
+    chunks[header.chunk_index] = data;
+    this.audioChunks.set(header.sequence_id, chunks);
+    
+    console.log(`✅ 청크 ${header.chunk_index + 1}/${header.total_chunks} 수신 완료`);
+    
+    // 마지막 청크인 경우 조립
+    if (header.is_final) {
+      this.assembleAudio(header.sequence_id);
+    }
+    
+    this.currentChunkHeader = null;
+  }
+
+  private handleTransferComplete(message: any) {
+    console.log(`🎉 오디오 전송 완료: ${message.total_chunks} 청크, ${message.total_size} bytes`);
+  }
+
+  private assembleAudio(sequenceId: number) {
+    const chunks = this.audioChunks.get(sequenceId);
+    if (!chunks) return;
+
+    // 청크들을 순서대로 조립
+    let totalSize = 0;
+    chunks.forEach(chunk => totalSize += chunk.length);
+    
+    const assembled = new Uint8Array(totalSize);
+    let offset = 0;
+    
+    chunks.forEach(chunk => {
+      assembled.set(chunk, offset);
+      offset += chunk.length;
+    });
+
+    // Blob 생성하여 콜백 호출
+    const audioBlob = new Blob([assembled], { type: 'audio/mpeg' });
+    console.log(`🔧 오디오 조립 완료: ${audioBlob.size} bytes`);
+    
+    // 메타데이터와 함께 콜백 호출 (메타데이터는 별도로 저장해야 함)
+    this.onAudioComplete(audioBlob, { 
+      type: 'audio_metadata',
+      size: audioBlob.size,
+      size_mb: audioBlob.size / (1024 * 1024),
+      format: 'mp3',
+      chunks_total: chunks.length,
+      chunk_size: 1024 * 1024,
+      sequence_id: sequenceId
+    });
+    
+    // 정리
+    this.audioChunks.delete(sequenceId);
+  }
+}
+```
+
+### 🎙️ **음성 대화용 WebSocket 클라이언트**
+
+```typescript
+// src/services/voice-chat.ts
+import { BinaryDataReceiver } from './websocket-binary';
+
+class VoiceChatService {
+  private ws: WebSocket | null = null;
+  private binaryReceiver: BinaryDataReceiver;
+  private audioQueue: HTMLAudioElement[] = [];
+  private isPlaying = false;
+
+  constructor() {
+    this.binaryReceiver = new BinaryDataReceiver((audioBlob, metadata) => {
+      this.handleReceivedAudio(audioBlob, metadata);
+    });
+  }
+
+  async connect(childName: string, age: number, interests: string) {
+    const url = `ws://localhost:8001/ws/audio?${new URLSearchParams({
+      child_name: childName,
+      age: age.toString(),
+      interests: interests,
+      token: 'development_token'
+    })}`;
+
+    this.ws = new WebSocket(url);
+    
+    this.ws.onopen = () => {
+      console.log('🔗 음성 대화 연결 성공');
+    };
+
+    this.ws.onmessage = (event) => {
+      // Binary 데이터 처리는 BinaryDataReceiver에 위임
+      this.binaryReceiver.handleMessage(event);
+      
+      // JSON 메시지 처리
+      if (typeof event.data === 'string') {
+        const message = JSON.parse(event.data);
+        this.handleTextMessage(message);
+      }
+    };
+
+    this.ws.onerror = (error) => {
+      console.error('❌ WebSocket 오류:', error);
+    };
+
+    this.ws.onclose = () => {
+      console.log('🔌 연결 종료됨');
+    };
+  }
+
+  private handleTextMessage(message: any) {
+    switch (message.type) {
+      case 'conversation_response':
+        console.log('💬 AI 응답:', message.text);
+        console.log('🎤 사용자 발언:', message.user_text);
+        console.log('🔊 오디오 방식:', message.audio_method);
+        
+        // base64 fallback 처리
+        if (message.audio_method === 'base64_fallback' && message.audio) {
+          this.playBase64Audio(message.audio);
+        }
+        break;
+        
+      case 'audio_metadata':
+        console.log(`🎵 오디오 수신 시작: ${message.size_mb}MB`);
+        break;
+        
+      case 'error':
+        console.error('❌ 서버 오류:', message.error_message);
+        break;
+    }
+  }
+
+  private handleReceivedAudio(audioBlob: Blob, metadata: any) {
+    console.log(`🎵 오디오 수신 완료: ${metadata.size_mb}MB`);
+    
+    // Blob을 Audio 객체로 변환
+    const audioUrl = URL.createObjectURL(audioBlob);
+    const audio = new Audio(audioUrl);
+    
+    // 재생 큐에 추가
+    this.audioQueue.push(audio);
+    
+    // 큐가 비어있으면 즉시 재생
+    if (!this.isPlaying) {
+      this.playNextAudio();
+    }
+  }
+
+  private playBase64Audio(base64Data: string) {
+    const audio = new Audio(`data:audio/mpeg;base64,${base64Data}`);
+    this.audioQueue.push(audio);
+    
+    if (!this.isPlaying) {
+      this.playNextAudio();
+    }
+  }
+
+  private async playNextAudio() {
+    if (this.audioQueue.length === 0) {
+      this.isPlaying = false;
+      return;
+    }
+
+    this.isPlaying = true;
+    const audio = this.audioQueue.shift()!;
+    
+    return new Promise<void>((resolve) => {
+      audio.onended = () => {
+        URL.revokeObjectURL(audio.src); // 메모리 정리
+        resolve();
+        this.playNextAudio(); // 다음 오디오 재생
+      };
+      
+      audio.onerror = (error) => {
+        console.error('🔊 오디오 재생 오류:', error);
+        resolve();
+        this.playNextAudio();
+      };
+      
+      audio.play().catch(error => {
+        console.error('🔊 오디오 재생 실패:', error);
+        resolve();
+        this.playNextAudio();
+      });
+    });
+  }
+
+  sendAudioData(audioData: ArrayBuffer) {
+    if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+      // 바이너리 오디오 데이터 전송
+      this.ws.send(audioData);
+    }
+  }
+
+  sendAudioEnd() {
+    if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+      // 오디오 종료 신호 전송
+      this.ws.send(JSON.stringify({ type: 'audio_end' }));
+    }
+  }
+
+  disconnect() {
+    if (this.ws) {
+      this.ws.close();
+      this.ws = null;
+    }
+    
+    // 재생 중인 오디오들 정리
+    this.audioQueue.forEach(audio => {
+      audio.pause();
+      URL.revokeObjectURL(audio.src);
+    });
+    this.audioQueue = [];
+    this.isPlaying = false;
+  }
+}
+
+export const voiceChatService = new VoiceChatService();
+```
+
+### 📚 **스토리 생성용 WebSocket 클라이언트**
+
+```typescript
+// src/services/story-generation.ts
+class StoryGenerationService {
+  private ws: WebSocket | null = null;
+  private receivedFiles: Map<string, { blob: Blob, metadata: any }> = new Map();
+  private onStoryProgress: (progress: number, message: string) => void = () => {};
+  private onFileReceived: (fileBlob: Blob, metadata: any) => void = () => {};
+  private onStoryComplete: (storyData: any) => void = () => {};
+
+  async connectStoryGeneration(childName: string, age: number, interests: string) {
+    const url = `ws://localhost:8001/ws/story_generation?${new URLSearchParams({
+      child_name: childName,
+      age: age.toString(),
+      interests: interests,
+      token: 'development_token'
+    })}`;
+
+    this.ws = new WebSocket(url);
+    
+    this.ws.onmessage = (event) => {
+      if (typeof event.data === 'string') {
+        const message = JSON.parse(event.data);
+        this.handleStoryMessage(message);
+      } else if (event.data instanceof ArrayBuffer) {
+        this.handleStoryBinaryData(new Uint8Array(event.data));
+      }
+    };
+  }
+
+  private currentFileMetadata: any = null;
+  private currentChunks: Uint8Array[] = [];
+
+  private handleStoryMessage(message: any) {
+    switch (message.type) {
+      case 'story_metadata':
+        console.log(`📖 스토리 시작: ${message.title}`);
+        this.onStoryProgress(20, `${message.title} 생성 시작...`);
+        break;
+        
+      case 'story_file_metadata':
+        console.log(`📁 파일 수신 시작: ${message.file_type} ch${message.chapter}`);
+        this.currentFileMetadata = message;
+        this.currentChunks = [];
+        
+        const progress = (message.sequence_index / message.sequence_total) * 80 + 20;
+        this.onStoryProgress(progress, `${message.file_type} 파일 수신 중...`);
+        break;
+        
+      case 'story_file_chunk_header':
+        console.log(`📦 청크 ${message.chunk_index + 1}/${message.total_chunks} 수신 준비`);
+        break;
+        
+      case 'story_file_complete':
+        this.assembleStoryFile();
+        break;
+        
+      case 'story_transfer_complete':
+        console.log(`🎉 스토리 완성: ${message.title}`);
+        this.onStoryProgress(100, '스토리 완성!');
+        this.onStoryComplete(message);
+        break;
+        
+      case 'error':
+        console.error('❌ 스토리 생성 오류:', message.error_message);
+        break;
+    }
+  }
+
+  private handleStoryBinaryData(data: Uint8Array) {
+    if (!this.currentFileMetadata) {
+      console.warn('파일 메타데이터 없이 binary 데이터 수신');
+      return;
+    }
+
+    // 청크 추가
+    this.currentChunks.push(data);
+    console.log(`✅ 청크 수신: ${data.length} bytes`);
+  }
+
+  private assembleStoryFile() {
+    if (!this.currentFileMetadata || this.currentChunks.length === 0) return;
+
+    // 청크들 조립
+    let totalSize = 0;
+    this.currentChunks.forEach(chunk => totalSize += chunk.length);
+    
+    const assembled = new Uint8Array(totalSize);
+    let offset = 0;
+    
+    this.currentChunks.forEach(chunk => {
+      assembled.set(chunk, offset);
+      offset += chunk.length;
+    });
+
+    // 파일 타입에 따른 MIME 타입 결정
+    const mimeType = this.currentFileMetadata.file_type === 'image' ? 'image/png' : 'audio/mpeg';
+    const fileBlob = new Blob([assembled], { type: mimeType });
+    
+    console.log(`🔧 파일 조립 완료: ${this.currentFileMetadata.file_type} ${fileBlob.size} bytes`);
+    
+    // 파일 저장 및 콜백 호출
+    const fileKey = `${this.currentFileMetadata.sequence_index}_${this.currentFileMetadata.file_type}_ch${this.currentFileMetadata.chapter}`;
+    this.receivedFiles.set(fileKey, { blob: fileBlob, metadata: this.currentFileMetadata });
+    
+    this.onFileReceived(fileBlob, this.currentFileMetadata);
+    
+    // 정리
+    this.currentFileMetadata = null;
+    this.currentChunks = [];
+  }
+
+  setProgressCallback(callback: (progress: number, message: string) => void) {
+    this.onStoryProgress = callback;
+  }
+
+  setFileReceivedCallback(callback: (fileBlob: Blob, metadata: any) => void) {
+    this.onFileReceived = callback;
+  }
+
+  setStoryCompleteCallback(callback: (storyData: any) => void) {
+    this.onStoryComplete = callback;
+  }
+
+  getReceivedFiles() {
+    return this.receivedFiles;
+  }
+
+  disconnect() {
+    if (this.ws) {
+      this.ws.close();
+      this.ws = null;
+    }
+    this.receivedFiles.clear();
+  }
+}
+
+export const storyGenerationService = new StoryGenerationService();
+```
+
+### 🎮 **React 컴포넌트 예제**
+
+```tsx
+// src/components/VoiceChat.tsx
+import React, { useState, useEffect } from 'react';
+import { voiceChatService } from '../services/voice-chat';
+
+const VoiceChat: React.FC = () => {
+  const [isConnected, setIsConnected] = useState(false);
+  const [isRecording, setIsRecording] = useState(false);
+  const [messages, setMessages] = useState<string[]>([]);
+
+  const handleConnect = async () => {
+    await voiceChatService.connect('테스트', 7, '공주,마법');
+    setIsConnected(true);
+  };
+
+  const handleStartRecording = async () => {
+    // 마이크 녹음 시작
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    const mediaRecorder = new MediaRecorder(stream);
+    
+    mediaRecorder.ondataavailable = (event) => {
+      if (event.data.size > 0) {
+        event.data.arrayBuffer().then(buffer => {
+          voiceChatService.sendAudioData(buffer);
+        });
+      }
+    };
+    
+    mediaRecorder.start(1000); // 1초마다 데이터 전송
+    setIsRecording(true);
+    
+    // 3초 후 자동 중지 (테스트용)
+    setTimeout(() => {
+      mediaRecorder.stop();
+      voiceChatService.sendAudioEnd();
+      setIsRecording(false);
+    }, 3000);
+  };
+
+  return (
+    <div className="voice-chat">
+      <h2>🎤 음성 대화</h2>
+      
+      {!isConnected ? (
+        <button onClick={handleConnect}>연결하기</button>
+      ) : (
+        <div>
+          <button 
+            onClick={handleStartRecording} 
+            disabled={isRecording}
+            className={isRecording ? 'recording' : ''}
+          >
+            {isRecording ? '🔴 녹음 중...' : '🎤 말하기'}
+          </button>
+          
+          <div className="messages">
+            {messages.map((msg, idx) => (
+              <div key={idx}>{msg}</div>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+};
+
+export default VoiceChat;
+```
+
+이제 프론트엔드에서 WebSocket binary 데이터를 순서대로 받아서 처리할 수 있습니다! 🎉
+
+**주요 특징:**
+- ✅ **순서 보장**: 청크 헤더 → binary 데이터 순서로 전송
+- ✅ **대용량 지원**: 1MB 청크로 분할하여 안정적 전송  
+- ✅ **자동 조립**: 프론트에서 청크들을 자동으로 조립
+- ✅ **재생 큐**: 오디오들이 순서대로 재생됨
+- ✅ **메모리 관리**: 사용 후 Blob URL 자동 정리
 

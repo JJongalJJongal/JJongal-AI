@@ -251,34 +251,140 @@ async def handle_audio_websocket(
                                                     logger.info(f"[SESSION_INFO] 메모리 타입: {session_info.get('memory_type')}, 메시지 수: {session_info.get('message_count', 0)}")
 
                                                 # TTS 생성
-                                                logger.info(f"[TTS_START] 음성 합성 시작")
-                                                tts_result = await audio_processor.synthesize_tts(ai_response, client_id=client_id)
+                                                tts_start_time = time.time()
+                                                logger.info(f"[TTS] TTS 처리 시작: {ai_response[:50]}...")
+
+                                                # AudioProcessor를 통한 TTS 처리
+                                                audio_data, status, error_msg, error_code = await audio_processor.synthesize_tts(
+                                                    text=ai_response,
+                                                    voice=None,  # 기본 음성 사용 (나중에 클론 음성으로 업데이트)
+                                                    client_id=client_id
+                                                )
                                                 
-                                                if isinstance(tts_result, tuple) and len(tts_result) >= 2:
-                                                    audio_data, status = tts_result[0], tts_result[1]
-                                                    if status == "ok" and audio_data:
-                                                        logger.info(f"[TTS_SUCCESS] 음성 합성 성공")
-                                                    else:
-                                                        logger.warning(f"[TTS_WARNING] 음성 합성 경고: {status}")
-                                                        audio_data = None  # 경고가 있어도 오디오가 있으면 사용
-                                                else:
-                                                    audio_data = None
-                                                    logger.warning(f"[TTS_ERROR] 음성 합성 형식 오류")
+                                                tts_elapsed = time.time() - tts_start_time
+                                                logger.info(f"[TTS] TTS 처리 완료: {tts_elapsed:.2f}초, 상태: {status}")
+
+                                                # 🎯 WebSocket binary 전송 방식
+                                                audio_sent = False
+                                                
+                                                if audio_data and status == "ok":
+                                                    try:
+                                                        # base64 디코딩하여 binary 데이터 얻기
+                                                        audio_bytes = base64.b64decode(audio_data)
+                                                        audio_size_mb = len(audio_bytes) / (1024 * 1024)
+                                                        
+                                                        logger.info(f"[AUDIO_BINARY] 오디오 binary 전송 시작: {audio_size_mb:.2f}MB")
+                                                        
+                                                        # 1. 메타데이터 먼저 전송
+                                                        metadata_packet = {
+                                                            "type": "audio_metadata", 
+                                                            "size": len(audio_bytes),
+                                                            "size_mb": round(audio_size_mb, 2),
+                                                            "format": "mp3",
+                                                            "chunks_total": 1 if len(audio_bytes) <= 1024*1024 else (len(audio_bytes) // (1024*1024)) + 1,
+                                                            "chunk_size": 1024*1024,  # 1MB 청크
+                                                            "sequence_id": int(time.time() * 1000),  # 고유 시퀀스 ID
+                                                            "timestamp": datetime.now().isoformat()
+                                                        }
+                                                        await ws_engine.send_json(websocket, metadata_packet)
+                                                        
+                                                        # 2. 작은 파일 (1MB 미만) - 한 번에 전송
+                                                        if len(audio_bytes) <= 1024*1024:
+                                                            await websocket.send_bytes(audio_bytes)
+                                                            logger.info(f"[AUDIO_BINARY] 작은 파일 전송 완료: {len(audio_bytes)} bytes")
+                                                            audio_sent = True
+                                                        
+                                                        # 3. 큰 파일 - 청킹해서 순서대로 전송
+                                                        else:
+                                                            chunk_size = 1024 * 1024  # 1MB 청크
+                                                            total_chunks = (len(audio_bytes) + chunk_size - 1) // chunk_size
+                                                            
+                                                            for chunk_index in range(total_chunks):
+                                                                start_pos = chunk_index * chunk_size
+                                                                end_pos = min(start_pos + chunk_size, len(audio_bytes))
+                                                                chunk_data = audio_bytes[start_pos:end_pos]
+                                                                
+                                                                # 청크 헤더 전송 (JSON)
+                                                                chunk_header = {
+                                                                    "type": "audio_chunk_header",
+                                                                    "sequence_id": metadata_packet["sequence_id"],
+                                                                    "chunk_index": chunk_index,
+                                                                    "total_chunks": total_chunks,
+                                                                    "chunk_size": len(chunk_data),
+                                                                    "is_final": chunk_index == total_chunks - 1
+                                                                }
+                                                                await ws_engine.send_json(websocket, chunk_header)
+                                                                
+                                                                # 청크 데이터 전송 (Binary)
+                                                                await websocket.send_bytes(chunk_data)
+                                                                
+                                                                # 청크 간 약간의 지연 (순서 보장)
+                                                                await asyncio.sleep(0.1)
+                                                                
+                                                                logger.debug(f"[AUDIO_CHUNK] 청크 {chunk_index+1}/{total_chunks} 전송 완료: {len(chunk_data)} bytes")
+                                                            
+                                                            # 전송 완료 신호
+                                                            completion_packet = {
+                                                                "type": "audio_transfer_complete",
+                                                                "sequence_id": metadata_packet["sequence_id"],
+                                                                "total_size": len(audio_bytes),
+                                                                "total_chunks": total_chunks
+                                                            }
+                                                            await ws_engine.send_json(websocket, completion_packet)
+                                                            
+                                                            logger.info(f"[AUDIO_BINARY] 큰 파일 청킹 전송 완료: {total_chunks} 청크, {len(audio_bytes)} bytes")
+                                                            audio_sent = True
+                                                            
+                                                    except Exception as e:
+                                                        logger.error(f"[AUDIO_BINARY] Binary 전송 실패: {e}")
+                                                        # fallback으로 base64 전송
+                                                        audio_sent = False
 
                                                 # 대화 길이 확인
-                                                conversation_length = len(chatbot_a.conversation) if hasattr(chatbot_a, 'conversation') else 0
+                                                try:
+                                                    conversation_length = 0
+                                                    if hasattr(chatbot_a, 'conversation'):
+                                                        # LegacyConversationManagerAdapter의 경우 get_conversation_length() 메서드 사용
+                                                        if hasattr(chatbot_a.conversation, 'get_conversation_length'):
+                                                            conversation_length = chatbot_a.conversation.get_conversation_length()
+                                                        elif hasattr(chatbot_a.conversation, '__len__'):
+                                                            conversation_length = len(chatbot_a.conversation)
+                                                        else:
+                                                            conversation_length = 0
+                                                    else:
+                                                        conversation_length = 0
+                                                except Exception as e:
+                                                    logger.warning(f"대화 길이 확인 중 오류: {e}")
+                                                    conversation_length = 0
                                                 
-                                                # 응답 패킷 전송
+                                                # 🎯 응답 패킷 (binary 전송 완료 후)
                                                 response_packet = {
                                                     "type": "conversation_response",
                                                     "text": ai_response,
-                                                    "audio": audio_data,
                                                     "user_text": user_text,
                                                     "confidence": confidence,
                                                     "conversation_length": conversation_length,
+                                                    "processing_time": {
+                                                        "stt": stt_elapsed,
+                                                        "ai": ai_elapsed,
+                                                        "tts": tts_elapsed,
+                                                        "total": processing_elapsed
+                                                    },
                                                     "timestamp": datetime.now().isoformat()
                                                 }
                                                 
+                                                # 오디오 전송 방식 정보 추가
+                                                if audio_sent:
+                                                    response_packet["audio_method"] = "websocket_binary"
+                                                    response_packet["audio_status"] = "sent"
+                                                elif audio_data:
+                                                    # fallback: base64로 전송
+                                                    response_packet["audio"] = audio_data
+                                                    response_packet["audio_method"] = "base64_fallback"
+                                                else:
+                                                    response_packet["audio_error"] = error_msg or "TTS 생성 실패"
+                                                    response_packet["audio_method"] = "none"
+
                                                 await ws_engine.send_json(websocket, response_packet)
                                                 logger.info(f"[RESPONSE] 대화 응답 전송 완료")
 

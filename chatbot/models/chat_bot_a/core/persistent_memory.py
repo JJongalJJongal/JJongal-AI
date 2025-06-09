@@ -59,11 +59,13 @@ class PersistentChatMessageHistory(BaseChatMessageHistory):
                     message_type TEXT NOT NULL,
                     content TEXT NOT NULL,
                     metadata TEXT,
-                    timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
-                    INDEX(session_id),
-                    INDEX(timestamp)
+                    timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
                 )
             """)
+            
+            # 인덱스 별도 생성
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_chat_messages_session_id ON chat_messages (session_id)")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_chat_messages_timestamp ON chat_messages (timestamp)")
             
             conn.execute("""
                 CREATE TABLE IF NOT EXISTS chat_sessions (
