@@ -1,10 +1,11 @@
 """
-API Routers Package
+Voice WebSocket Router Module
 
-This package contains APIRouter modules for different API functionalities.
+FastAPI APIRouter 를 사용해서 WebSocket endpoint 를 관리
+
 """
+from .websocket_routers import router as websocket_router
 
-# This file can be left empty or used to import routers for easier access.
-# For example:
-# from .story_router import router as story_api_router
-# from .rag_router import router as rag_api_router 
+__all__ = [
+    "websocket_router"
+]
