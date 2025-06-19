@@ -109,3 +109,33 @@ async def voice_websocket_endpoint(
     finally:
         # 연결 정리
         await connection_manager.unregister_client(client_id)
+        
+@router.websocket("/story/{child_name}")
+async def story_websocket_endpoint(
+    websocket: WebSocket,
+    child_name: str,
+    age: Optional[int] = Query(None, description="아이 나이"),
+    interests: Optional[str] = Query(None, description="관심사 (쉼표 구분)"),
+    # JWT 인증 의존성
+    user_info: Dict[str, Any] = Depends(verify_jwt_token),
+    # child_permission: Dict[str, Any] = Depends(verify_child_permission),
+    # 서비스 의존성
+    connection_manager: ConnectionEngine = Depends(get_connection_manager)
+    
+):
+    
+    """
+    JWT 인증된 동화 생성 WebSocket endpoint
+    
+    Query Parameters:
+        token: JWT 인증 토큰 (필수)
+        age: 아이 나이 (선택)
+        interests: 관심사 목록 (선택)
+        
+    Example:
+        wss://AWS_IP/voice_ws/ws/story/병찬?=token=jwt_token&age=7&interests=여행,자유
+    """
+    
+    await websocket.accept() # WebSocket 연결 수락
+    
+    client_id = f"{user_info}"
