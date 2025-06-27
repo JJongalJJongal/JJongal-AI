@@ -190,7 +190,7 @@ def main():
                 logger.info(f"스토리 ID '{story_id_base}'의 내용이 비어있어 스킵합니다. (DB 유형: {db_type_to_use})")
             continue
 
-        # --- 메타데이터 포맷 통일 (중요) ---
+        # --- 메타데이터 포맷 통일 ---
         # DB에 저장될 age_group 형식을 'age_4_7' 등으로 통일
         raw_age_group = processed_s_data.get('age_group')
         final_age_group = None
