@@ -1,0 +1,136 @@
+services:
+  # 꼬꼬북 메인 애플리케이션 (통합 서버)
+  ccb-ai:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: ccb-ai:latest
+    container_name: ccb-ai-app
+    # user: "${UID:-1000}:${GID:-1000}"  # 이 줄을 주석 처리하여 Dockerfile의 사용자 설정을 따르도록 합니다.
+    ports:
+      - "8001:8000" # 포트 포워딩 (Host:Container)
+    environment:
+      # 환경 변수는 .env 파일에서 로드
+      - PYTHONPATH=/app # 파이썬 Module 검색 경로
+      - APP_ENV=production # Application (OS)
+      
+      # API 키들 (.env 파일 또는 환경변수에서 설정)
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-} # OpenAI API Key (필요시 설정)
+      - ELEVENLABS_API_KEY=${ELEVENLABS_API_KEY:-} # ElevenLabs API Key (필요시 설정)
+      - WS_AUTH_TOKEN=${WS_AUTH_TOKEN:-secure_default_token} # WebSocket 인증 토큰
+      - JWT_SECRET_KEY=${JWT_SECRET_KEY:-ccb_ai_default_secret_key_2024} # JWT 시크릿 키
+      
+
+      # LangSmith Tracing 환경 변수 추가
+      - LANGCHAIN_TRACING_V2=true
+      - LANGCHAIN_API_KEY=${LANGCHAIN_API_KEY}
+      - LANGCHAIN_PROJECT=${LANGCHAIN_PROJECT}
+      - LANGCHAIN_ENDPOINT=${LANGCHAIN_ENDPOINT}
+
+      # 통합 서버 모드 설정
+      - INTEGRATED_MODE=true # 모든 기능을 하나의 서버에서 실행
+      - CHROMA_DB_PATH=/app/chatbot/data/vector_db # ChromaDB 기본 저장 경로 (통일)
+      
+      
+      # 멀티미디어 생성 설정
+      - MULTIMEDIA_OUTPUT_DIR=/app/output # 멀티미디어 파일 출력 디렉토리
+      - ENABLE_MULTIMEDIA=true # 멀티미디어 생성 활성화
+      - MAX_IMAGES_PER_STORY=5 # 스토리당 최대 이미지 수
+      - AUDIO_FORMAT=mp3 # 오디오 파일 형식
+
+      # 성능 최적화 설정
+      - TORCH_NUM_THREADS=4 # PyTorch thread 수
+      - OMP_NUM_THREADS=4 # OpenMP thread 수
+      - TOKENIZERS_PARALLELISM=false # Tokenizer 병렬 처리 비활성화 (Fork 환경에서 경고 제거)
+      
+      # 로깅 설정
+      - LOG_LEVEL=${LOG_LEVEL:-INFO} # 로깅 레벨 (기본 : Info)
+      - LOG_FORMAT=json # JSON 형태로 로그 출력
+      
+    volumes:
+      # 출력 파일들을 호스트에 저장
+      - ./output:/app/output  # 생성된 출력 파일들 저장 (Image, Audio)
+      - ./chatbot/data/vector_db:/app/chatbot/data/vector_db # VectorDB만 마운트
+      - ./chatbot/data/prompts:/app/chatbot/data/prompts # 프롬프트 템플릿 마운트
+      - ./logs:/app/logs # 로그 저장 경로
+      
+      # 캐시 디렉토리 (성능 향상)
+      - ai_cache:/root/.cache # 캐시 데이터 저장 경로
+      
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://0.0.0.0:8000/api/v1/health"] # 상태 확인 명령어
+      interval: 30s # 상태 확인 간격
+      timeout: 10s # 상태 확인 시간 초과
+      retries: 3 # 상태 확인 실패 시 재시도 횟수
+      start_period: 90s # AI 모델 로딩 시간 고려
+    restart: unless-stopped # 컨테이너 재시작 설정
+    networks:
+      - ccb-network # Network 연결
+    
+    # 통합 서버 메모리 설정 (AI + VectorDB)
+    deploy: # 배포 설정
+      resources: # 리소스 설정
+        limits: # 제한 설정
+          memory: 8G  # 메모리 사용량 최적화
+        reservations: # 예약 설정
+          memory: 4G # 예약 메모리
+    
+    # 로그 제한 (디스크 공간 절약)
+    logging: # 로깅 설정
+      driver: "json-file" # JSON 형태로 로그 출력
+      options: # 옵션 설정
+        max-size: "100m" # 로그 파일 최대 크기
+        max-file: "3" # 로그 파일 최대 개수
+
+  # Nginx (리버스 프록시)
+  nginx:
+    image: nginx:alpine
+    container_name: ccb-nginx
+    ports:
+      - "80:80"
+      # HTTPS는 필요시 활성화
+      # - "443:443"
+    volumes:
+      - ./nginx.conf:/etc/nginx/nginx.conf:ro
+      # SSL 설정은 인증서 준비 후 활성화
+      # - ./ssl:/etc/nginx/ssl:ro
+    depends_on:
+      - ccb-ai  # 단순 의존성으로 변경 (헬스체크 대기 제거)
+    healthcheck:
+      test: ["CMD", "sh", "-c", "nc -z ccb-ai 8000 && nginx -t"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 120s  # ccb-ai 컨테이너 시작 대기 시간
+    restart: unless-stopped
+    networks:
+      - ccb-network
+    
+    deploy:
+      resources:
+        limits:
+          memory: 256M  # Nginx 메모리 최적화
+        reservations:
+          memory: 128M
+    
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "50m"
+        max-file: "2"
+
+# 볼륨 정의
+volumes:
+  ai_cache:
+    driver: local
+    # 캐시 데이터는 임시로 저장
+
+# 네트워크 정의
+networks:
+  ccb-network:
+    driver: bridge
+    name: ccb-network
+
+# 개발 환경용 오버라이드 (docker-compose.override.yml)
+# 개발 시에는 다음과 같이 실행:
+# docker-compose -f docker-compose.yml -f docker-compose.dev.yml up 
