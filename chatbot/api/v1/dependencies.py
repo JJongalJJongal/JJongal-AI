@@ -90,8 +90,8 @@ async def verify_jwt_token(
        
 async def get_connection_manager():
     """연결 관리자 의존성"""
-    from ...models.voice_ws.core import ConnectionEngine
-    return ConnectionEngine()
+    from shared.utils import ConnectionManager
+    return ConnectionManager(connection_timeout=1800) # 30분 타임아웃
 
 async def get_audio_processor():
     """오디오 processor 의존성"""

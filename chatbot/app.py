@@ -52,7 +52,8 @@ app = FastAPI(
     description="AI 기반 개인화된 동화 생성 플랫폼",
     version="1.0.0",
     docs_url="/docs",
-    redoc_url="/redoc"
+    redoc_url="/redoc",
+    lifespan=lifespan
 )
 
 # CORS Middleware (Development / Operation)

@@ -10,7 +10,7 @@ from ..models import AudioConfigMessage, TranscriptionMessage
 
 # voice_ws
 from chatbot.models.voice_ws.handlers.audio_handler import handler_audio_websocket
-from chatbot.models.voice_ws.core.connection_engine import ConnectionEngine
+from shared.utils import ConnectionManager
 
 # Logging
 from shared.utils.logging_utils import get_module_logger
@@ -25,7 +25,7 @@ async def audio_websocket_endpoint(
     # JWT authentication
     user_info: Dict[str, Any] = Depends(verify_jwt_token),
     # Dependency Injection
-    connection_manager: ConnectionEngine = Depends(get_connection_manager)
+    connection_manager: ConnectionManager = Depends(get_connection_manager)
 ):
     """
     Real-time Audio Conversation WebSocket
