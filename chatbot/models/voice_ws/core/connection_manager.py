@@ -1,5 +1,5 @@
 from fastapi import WebSocket
-from typing import Dict, List
+from typing import Dict, List, Any
 
 
 class ConnectionManager: 
@@ -8,6 +8,8 @@ class ConnectionManager:
         self.active_connections: Dict[str, WebSocket] = {}
         # 사용자별 연결 관리
         self.user_connections: Dict[str, List[str]] = {}
+        # 연결 메타데이터
+        self.connection_metadata: Dict[str, Dict[str, Any]] = {}
         
     async def connect(self, client_id: str, websocket: WebSocket) -> None:
         """WebSocket 연결 수락 및 등록"""

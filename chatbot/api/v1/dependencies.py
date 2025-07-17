@@ -10,7 +10,7 @@ import jwt
 import asyncio
 from datetime import datetime
 
-from .processors.auth_processor import AuthProcessor
+from chatbot.models.voice_ws.processors.auth_processor import AuthProcessor
 
 logger = get_module_logger(__name__)
 
@@ -90,12 +90,12 @@ async def verify_jwt_token(
        
 async def get_connection_manager():
     """연결 관리자 의존성"""
-    from .core.connection_engine import ConnectionEngine
+    from ...models.voice_ws.core import ConnectionEngine
     return ConnectionEngine()
 
 async def get_audio_processor():
     """오디오 processor 의존성"""
-    from .processors.audio_processor import AudioProcessor
+    from ...models.voice_ws.processors.audio_processor import AudioProcessor
     return AudioProcessor()
 
 # 개발용 간단 인증

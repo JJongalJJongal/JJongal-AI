@@ -37,7 +37,6 @@ async def voice_websocket_endpoint(
     # child_permission: Dict[str, Any] = Depends(verify_child_permission),
     # 서비스 의존성
     connection_manager: ConnectionEngine = Depends(get_connection_manager),
-    audio_processor: AudioProcessor = Depends(get_audio_processor)
 ):
     """
     JWT 인증 음성 WebSocket endpoint
@@ -87,7 +86,7 @@ async def voice_websocket_endpoint(
                 # JSON
                 data = await websocket.receive_json()
                 await handle_voice_message(
-                    data, cliend_id, websocket,
+                    data, client_id, websocket,
                     connection_manager, audio_processor
                 )
             
@@ -138,4 +137,58 @@ async def story_websocket_endpoint(
     
     await websocket.accept() # WebSocket 연결 수락
     
-    client_id = f"{user_info}"
+    client_id = f"{user_info['user_id']}_{child_name}_story"
+    
+    try:
+        # connection register
+        await connection_manager.register_client(client_id, websocket, {
+            "user_info": user_info,
+            "connection_type": "story",
+            # "child_info": child_permission,
+            "child_age": age,
+            "interests": interests.split(',') if interests else [],
+            "connection_at": datetime.now().isoformat()
+        })
+        
+        # parent permission 은 추후 추가 예정
+        logger.info(f"인증된 동화 WebSocket 연결: child={child_name}, age={age}")
+        
+        await websocket.send_json({
+            "type": "connection_success"
+        })
+
+@router.websocket("/voice-training/{child_name}")
+async def voice_training_endpoint(
+    websocket: WebSocket,
+    child_name: str, 
+    user_info: Dict[str, Any] = Depends(verify_jwt_token), # JWT 인증 의존성
+    connection_manager: ConnectionEngine = Depends(get_connection_manager) # 서비스 의존성
+    
+):
+    """
+    아이 음성 수집 및 Voice Clone 생성 WebSocket endpoint
+
+    - 부모 인증 필수는 추후 추가 예정
+    - 아이 음성 샘플 수집
+    - 실시간 품질 체크
+    """
+    
+    await websocket.accept() # WebSocket 연결 수락
+    
+    try:
+        # Parent Authentication check 는 추후 추가 예정
+        # parent_id = user_info.get('user_id')
+        
+        # 음성 수집 session 시작
+        await websocket.send_json({
+            "type": "voice_training_start",
+            "child_name": child_name,
+            # "parent_id": parent_id,
+            "child_name": child_name,
+            "required_samples": 5, # 필요 샘플 수
+            "sample_duration": 30, # 각 샘플 30초
+            "instructions": [
+                "아이의"
+            ]
+        })
+        
