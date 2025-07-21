@@ -16,7 +16,7 @@ from ..dependencies import (
     get_audio_processor
 )
 
-from ..core.connection_engine import ConnectionEngine
+from shared.utils import ConnectionManager
 from ..processors.audio_processor import AudioProcessor
 from shared.utils.logging_utils import get_module_logger
 
@@ -36,7 +36,7 @@ async def voice_websocket_endpoint(
     user_info: Dict[str, Any] = Depends(verify_jwt_token),
     # child_permission: Dict[str, Any] = Depends(verify_child_permission),
     # 서비스 의존성
-    connection_manager: ConnectionEngine = Depends(get_connection_manager),
+    connection_manager: ConnectionManager = Depends(get_connection_manager),
 ):
     """
     JWT 인증 음성 WebSocket endpoint
@@ -119,7 +119,7 @@ async def story_websocket_endpoint(
     user_info: Dict[str, Any] = Depends(verify_jwt_token),
     # child_permission: Dict[str, Any] = Depends(verify_child_permission),
     # 서비스 의존성
-    connection_manager: ConnectionEngine = Depends(get_connection_manager)
+    connection_manager: ConnectionManager = Depends(get_connection_manager)
     
 ):
     
@@ -162,7 +162,7 @@ async def voice_training_endpoint(
     websocket: WebSocket,
     child_name: str, 
     user_info: Dict[str, Any] = Depends(verify_jwt_token), # JWT 인증 의존성
-    connection_manager: ConnectionEngine = Depends(get_connection_manager) # 서비스 의존성
+    connection_manager: ConnectionManager = Depends(get_connection_manager) # 서비스 의존성
     
 ):
     """

@@ -239,22 +239,26 @@ Client (Web/App)
 
 ## 7. WebSocket API 엔드포인트
 
-### 7.1. 실시간 음성 대화 (`/ws/v1/audio`)
-- **목적**: 아이의 음성을 실시간으로 서버에 스트리밍하고, 챗봇의 응답을 받습니다.
-- **핵심 원칙**: JSON 메시지를 통한 제어(Control)와 순수 바이너리(Raw Binary)를 통한 데이터 전송을 분리하여 효율성과 성능을 극대화합니다.
+### 7.1. 실시간 음성 대화 (`/wss/v1/audio`)
+- **목적**: 프론트엔드에서 Google STT로 변환된 텍스트를 받아 챗봇 대화를 처리하고, Voice Clone용 오디오 샘플을 수집합니다.
+- **핵심 원칙**: 프론트엔드는 Google STT를 사용하여 음성을 텍스트로 변환 후 전송하며, Voice Clone용 오디오는 별도 바이너리로 전송합니다.
 - **프로토콜 흐름**:
-  1. **연결 수립**: `wss://.../ws/v1/audio?token=<jwt>`
-  2. **대화 시작 (Client→Server, JSON)**: 연결 성공 후, 오디오 설정을 알리는 메시지 전송.
+  1. **연결 수립**: `wss://.../wss/v1/audio?token=<jwt>&child_name=민준&age=7`
+  2. **대화 시작 (Client→Server, JSON)**: 대화 세션 초기화
      ```json
-     { "event": "start_conversation", "payload": { "audio_config": { "sample_rate": 16000, "encoding": "pcm_s16le" } } }
+     { "type": "start_conversation", "payload": { "child_name": "민준", "age": 7, "interests": ["공주", "마법"] } }
      ```
-  3. **오디오 스트리밍 (Client→Server, Binary)**: 이후 마이크의 오디오 데이터를 **순수 바이너리 프레임**으로 연속 전송합니다.
-  4. **서버 응답 (Server→Client, JSON)**: 서버는 다양한 이벤트를 JSON 메시지로 전송합니다.
-     - **중간 인식 결과**: `{ "event": "interim_transcription", "payload": { "text": "..." } }`
-     - **최종 인식 결과**: `{ "event": "final_transcription", "payload": { "text": "...", "confidence": 0.95 } }`
-     - **봇 응답**: `{ "event": "bot_response", "payload": { "text": "...", "audio": { "object": "file", ... } } }`
-     - **에러 발생**: `{ "event": "error", "payload": { "code": "...", "message": "..." } }`
-  5. **대화 종료 (Client→Server, JSON)**: `{ "event": "end_conversation", "payload": {} }`
+     3. **텍스트 메시지 전송 (Client→Server, JSON)**: Google STT 결과를 JSON으로 전송
+     ```json
+     { "type": "user_message", "text": "공주님이 나오는 이야기 해줘" }
+     ```
+  4. **Voice Clone 오디오 전송 (Client→Server, Binary)**: 음성 복제용 오디오 파일을 바이너리로 전송
+  5. **서버 응답 (Server→Client, JSON)**: 서버는 다양한 이벤트를 JSON 메시지로 전송합니다.
+     - **AI 응답**: `{ "type": "ai_response", "text": "...", "audio_url": "https://...", "user_text": "..." }`
+     - **Voice Clone 진행상황**: `{ "type": "voice_clone_progress", "sample_count": 3, "ready_for_cloning": false }`
+     - **Voice Clone 성공**: `{ "type": "voice_clone_success", "voice_id": "...", "message": "목소리 복제 완료!" }`
+     - **에러 발생**: `{ "type": "error", "error_message": "...", "error_code": "..." }`
+  6. **대화 종료 (Client→Server, JSON)**: `{ "type": "end_conversation" }`
 
 ---
 

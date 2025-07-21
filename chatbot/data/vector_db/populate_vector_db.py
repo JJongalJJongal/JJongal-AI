@@ -7,7 +7,7 @@ from dotenv import load_dotenv
 from typing import List, Dict, Any
 
 """
-꼬꼬북 프로젝트 벡터 데이터베이스 데이터 채우기 도구
+쫑알쫑알 프로젝트 벡터 데이터베이스 데이터 채우기 도구
 
 이 모듈은 전처리된 스토리 데이터를 세 가지 주요 벡터 데이터베이스 유형에 추가합니다:
 1. main DB: 일반적인 검색 목적으로 사용, 전체 스토리와 메타데이터 포함
@@ -117,7 +117,7 @@ def main():
     except Exception:
         vector_db.create_collection(
             name=collection_to_use,
-            metadata={"description": f"꼬꼬북 {db_type_to_use} 동화 데이터", "type": db_type_to_use}
+            metadata={"description": f"쫑알쫑알 {db_type_to_use} 동화 데이터", "type": db_type_to_use}
         )
         logger.info(f"새 컬렉션 '{collection_to_use}' 생성.")
     

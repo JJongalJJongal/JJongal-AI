@@ -52,7 +52,8 @@ app = FastAPI(
     description="AI 기반 개인화된 동화 생성 플랫폼",
     version="1.0.0",
     docs_url="/docs",
-    redoc_url="/redoc"
+    redoc_url="/redoc",
+    lifespan=lifespan
 )
 
 # CORS Middleware (Development / Operation)
@@ -71,14 +72,23 @@ app.add_middleware(
 )
 
 # WebSocket Router 등록
+# 통합 쫑알쫑알 WebSocket API (API 문서 v1.0 기준)
+from chatbot.api.v1.ws.unified_audio import router as unified_audio_router
+
+app.include_router(
+    unified_audio_router,
+    prefix="/wss/v1" # /wss/v1/audio 통합 엔드포인트
+)
+
+# 기존 라우터들 (향후 제거 예정)
 app.include_router(
     websocket_router,
-    prefix="/api/v1" # /api/v1/wss/...
+    prefix="/api/v1" # /api/v1/wss/... (레거시)
 )
 
 app.include_router(
     audio_router,
-    prefix="/wss/v1" # /wss/v1/audio/...
+    prefix="/wss/v1/legacy" # /wss/v1/legacy/audio/... (레거시)
 )
 
 # 전역 예외 처리기

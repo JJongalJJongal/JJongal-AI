@@ -5,7 +5,7 @@ from pathlib import Path
 from typing import List, Dict, Any
 
 """
-꼬꼬북 프로젝트 벡터 데이터베이스 컬렉션 관리 도구
+쫑알쫑알 프로젝트 벡터 데이터베이스 컬렉션 관리 도구
 
 이 모듈은 세 가지 벡터 데이터베이스를 관리합니다:
 1. main DB: 일반적인 검색 목적으로 사용, 전체 스토리와 메타데이터 포함
@@ -64,7 +64,7 @@ def create_db_collection(vector_db_instance: VectorDB, collection_name="fairy_ta
     try:
         vector_db_instance.create_collection(
             name=collection_name,
-            metadata={"description": "꼬꼬북 프로젝트 동화 데이터"} # VectorDB.create_collection의 metadata 인자 형식에 맞춤
+            metadata={"description": "쫑알쫑알 프로젝트 동화 데이터"} # VectorDB.create_collection의 metadata 인자 형식에 맞춤
         )
         logger.info(f"컬렉션 '{collection_name}'이 성공적으로 생성되었습니다.")
         return True
@@ -105,7 +105,7 @@ def get_db_collection_info_cli(vector_db_instance: VectorDB, collection_name: st
                 logger.info(f"  - {key.replace('_', ' ').capitalize()}: {value}")
 
 def main():
-    parser = argparse.ArgumentParser(description='꼬꼬북 ChromaDB 컬렉션 관리 도구')
+    parser = argparse.ArgumentParser(description='쫑알쫑알 ChromaDB 컬렉션 관리 도구')
     parser.add_argument('action', type=str, choices=['list', 'create', 'delete', 'info'],
                       help='수행할 작업: list (컬렉션 목록), create (컬렉션 생성), delete (컬렉션 삭제), info (컬렉션 정보)')
     parser.add_argument('--db-dir-type', type=str, choices=['main', 'detailed', 'summary'], default='main',
