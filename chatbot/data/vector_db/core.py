@@ -255,7 +255,7 @@ class VectorDB:
         try:
             # 하이브리드 모드를 위한 메타데이터 확장
             enhanced_metadata = {
-                "description": "꼬꼬북 프로젝트 동화 데이터",
+                "description": "쫑알쫑알 프로젝트 동화 데이터",
                 "hybrid_mode": str(self.use_hybrid_mode),
                 "lfu_cache": str(self.enable_lfu_cache),
                 "cache_size": str(self.memory_cache_size),

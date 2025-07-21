@@ -25,7 +25,7 @@ class ChatBotService:
             
             vector_db = VectorDB(
                 persist_directory=vector_db_path,
-                embedding_model="nipal-lab/KURE-v1",
+                embedding_model="nlpai-lab/KURE-v1",
                 use_hybrid_mode=True
             )
             

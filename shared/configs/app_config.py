@@ -79,7 +79,7 @@ def get_app_settings() -> Dict[str, Any]:
     
     return {
         # 일반 설정
-        "app_name": "꼬꼬북 AI",
+        "app_name": "쫑알쫑알 AI",
         "app_version": "1.0.0",
         "app_description": "아동 동화 생성 시스템",
         

@@ -68,6 +68,7 @@ langchain-community==0.3.24
 langchain-core==0.3.60
 langchain-openai==0.3.17
 langchain-text-splitters==0.3.8
+langgraph==0.2.56
 langsmith==0.3.42
 librosa==0.10.2
 limits==5.2.0

@@ -27,7 +27,7 @@ def generate_jwt_token(payload: Dict[str, Any], expiry_hours: int = 24) -> str:
     """
 
     env_vars = get_env_vars()
-    secret_key = env_vars.get("jwt_secret_key", "꼬꼬북_기본_시크릿키")
+    secret_key = env_vars.get("jwt_secret_key", "쫑알쫑알_기본_시크릿키")
     
     # 만료 시간 추가
     expiry = datetime.utcnow() + timedelta(hours=expiry_hours)
@@ -55,7 +55,7 @@ def decode_jwt_token(token: str) -> Tuple[bool, Optional[Dict[str, Any]], Option
     """
     
     env_vars = get_env_vars()
-    secret_key = env_vars.get("jwt_secret_key", "꼬꼬북_기본_시크릿키")
+    secret_key = env_vars.get("jwt_secret_key", "쫑알쫑알_기본_시크릿키")
     
     try:
         payload = jwt.decode(token, secret_key, algorithms=["HS256"])
