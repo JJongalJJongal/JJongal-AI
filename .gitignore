@@ -197,3 +197,43 @@ htmlcov/
 ._*
 .Trashes
 ehthumbs.db
+
+#----------------------
+# Claude Code 관련 파일
+#----------------------
+# Claude Code 설정 및 캐시
+.claude/
+.claude-*
+*.claude
+.anthropic/
+
+# Claude 프롬프트 및 설정 파일
+CLAUDE.md
+claude.md
+.claude.md
+claude-*.md
+
+# Claude 대화 기록 및 세션
+.conversations/
+conversations/
+.claude_conversations/
+*.conversation
+*.claude_session
+
+# Claude 임시 파일
+.claude-temp/
+claude-temp/
+.claude_cache/
+claude_cache/
+
+# Claude Code 출력 파일
+claude-output/
+.claude-output/
+claude_*.json
+claude_*.yaml
+claude_*.yml
+
+# Claude MCP 관련
+.mcp/
+mcp-*/
+*.mcp
