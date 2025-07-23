@@ -66,11 +66,13 @@ class ConversationMemoryManager:
                     content TEXT NOT NULL,
                     metadata TEXT,
                     timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
-                    token_count INTEGER DEFAULT 0,
-                    INDEX(session_id),
-                    INDEX(timestamp)
+                    token_count INTEGER DEFAULT 0
                 )
             """)
+            
+            # Create indexes separately
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_session_id ON message_store(session_id)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_timestamp ON message_store(timestamp)")
             
             # Session metadata table
             cursor.execute("""

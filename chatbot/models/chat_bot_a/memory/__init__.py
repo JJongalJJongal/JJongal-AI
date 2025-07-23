@@ -6,9 +6,7 @@ intelligent conversation context management.
 """
 
 from .conversation_memory import ConversationMemoryManager
-from .story_memory import StoryMemoryManager
 
 __all__ = [
-    "ConversationMemoryManager",
-    "StoryMemoryManager"
+    "ConversationMemoryManager"
 ]
