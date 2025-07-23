@@ -16,7 +16,7 @@ from shared.utils.age_group_utils import AgeGroupManager
 from langchain.schema import AIMessage, HumanMessage
 from langchain.prompts import PromptTemplate
 
-from shared.utils import format_with_josa
+from shared.utils.korean_utils import format_with_josa
 
 from .chains.conversation_chain import ConversationChain
 from .memory.conversation_memory import ConversationMemoryManager
@@ -24,7 +24,7 @@ from .monitoring.langsmith_config import setup_langsmith_tracing, ChatBotATracer
 from .tools.story_analysis_tool import StoryAnalysisTool
 
 logger = get_module_logger(__name__)
-    
+
 
 class ChatBotA:
     """
@@ -106,16 +106,20 @@ class ChatBotA:
                     interests=child_interests or []
                 )
             
+            # Get age group configuration
+            age_group_config = self.age_group_manager.get_age_group_by_age(child_age)
+            
             # sessin state init
             self.active_sessions[session_id] = {
                 "child_name": child_name,
                 "child_age": child_age,
                 "child_interests": child_interests or [],
+                "age_group_config": age_group_config,
                 "story_elements": {
                     "character": [],
-                    "settings": [],
-                    "problems": [],
-                    "resolutions": [],
+                    "setting": [],
+                    "problem": [],
+                    "resolution": [],
                 },
                 "conversation_stage": "greeting", # greeting -> collection -> completion
                 "turn_count": 0,
@@ -124,7 +128,7 @@ class ChatBotA:
             }
             
             # first hello
-            greeting = await self.conversation_greeting(child_name, child_age)
+            greeting = await self._generate_greeting(child_name, child_age, child_interests)
             
             # AI Message add to memory
             ai_message = AIMessage(content=greeting)
@@ -264,10 +268,10 @@ class ChatBotA:
                     "interests": session["child_interests"]
                 },
                 "story_elements": {
-                    "main_characters": story_elements["characters"],
-                    "settings": story_elements["settings"],
-                    "central_problems": story_elements["problems"],
-                    "proposed_resolutions": story_elements["resolutions"]
+                    "main_characters": story_elements["character"],
+                    "settings": story_elements["setting"],
+                    "central_problems": story_elements["problem"],
+                    "proposed_resolutions": story_elements["resolution"]
                 },
                 "conversation_summary": conversation_summary,
                 "story_theme": await self._generate_story_theme(session_id),
@@ -384,13 +388,13 @@ class ChatBotA:
         current_elements = session["story_elements"]
         needed_elements = []
         
-        if len(current_elements["characters"]) < 2:
+        if len(current_elements["character"]) < 2:
             needed_elements.append("character")
-        if len(current_elements["settings"]) < 1:
+        if len(current_elements["setting"]) < 1:
             needed_elements.append("setting")
-        if len(current_elements["problems"]) < 1:
+        if len(current_elements["problem"]) < 1:
             needed_elements.append("problem")
-        if len(current_elements["resolutions"]) < 1:
+        if len(current_elements["resolution"]) < 1:
             needed_elements.append("resolution")
         
         # extract elements with highest priority
@@ -448,17 +452,17 @@ class ChatBotA:
         
         # 필수 요소별 가중치
         weights = {
-            "characters": 30,  # 캐릭터 2개 이상
-            "settings": 20,    # 배경 1개 이상
-            "problems": 25,    # 문제 1개 이상
-            "resolutions": 25  # 해결책 1개 이상
+            "character": 30,   # 캐릭터 2개 이상
+            "setting": 20,     # 배경 1개 이상
+            "problem": 25,     # 문제 1개 이상
+            "resolution": 25   # 해결책 1개 이상
         }
         
         total_score = 0
         for element_type, weight in weights.items():
             element_list = elements.get(element_type, [])
             
-            if element_type == "characters":
+            if element_type == "character":
                 # 캐릭터는 2개 이상 필요
                 score = min(len(element_list) / 2.0, 1.0) * weight
             else:
