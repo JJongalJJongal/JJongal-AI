@@ -14,32 +14,35 @@ from pathlib import Path
 
 from .story_schema import StoryDataSchema, MultimediaAssets
 
+# 로깅 설정
+logger = logging.getLogger(__name__)
+
 # 외부 라이브러리 임포트 (선택적)
 try:
     import openai
     OPENAI_AVAILABLE = True
-    print("OPENAI_AVAILABLE 이용 가능")
+    logger.info("OpenAI 라이브러리 이용 가능")
 except ImportError:
     OPENAI_AVAILABLE = False
-    print("OPENAI_AVAILABLE 이용 불가")
+    logger.warning("OpenAI 라이브러리 이용 불가")
 
 try:
     from elevenlabs import save
     ELEVENLABS_AVAILABLE = True
-    print("ELEVENLABS_AVAILABLE 이용 가능")
+    logger.info("ElevenLabs 라이브러리 이용 가능")
 except ImportError:
     ELEVENLABS_AVAILABLE = False
-    print("ELEVENLABS_AVAILABLE 이용 불가")
+    logger.warning("ElevenLabs 라이브러리 이용 불가")
 
 # ChatBotB Import 추가
 try:
     from chatbot.models.chat_bot_b import ChatBotB
     from chatbot.models.chat_bot_b.generators.voice_generator import VoiceGenerator
     CHATBOT_B_AVAILABLE = True
-    print("ChatBotB 이용 가능")
+    logger.info("ChatBotB 모듈 이용 가능")
 except ImportError as e:
     CHATBOT_B_AVAILABLE = False
-    print(f"ChatBotB 이용 불가: {e}")
+    logger.warning(f"ChatBotB 모듈 이용 불가: {e}")
 
 class MultimediaCoordinator:
     """

@@ -12,7 +12,7 @@ from datetime import datetime, timedelta
 import uuid
 
 from langchain.memory import ConversationSummaryBufferMemory
-from langchain.memory.chat_message_histories import SQLChatMessageHistory
+from langchain_community.chat_message_histories import SQLChatMessageHistory
 from langchain.schema import BaseMessage, HumanMessage, AIMessage
 from langchain_openai import ChatOpenAI
 
@@ -56,17 +56,13 @@ class ConversationMemoryManager:
             conn = sqlite3.connect(self.db_path)
             cursor = conn.cursor()
             
-            # Enhanced message history table
+            # LangChain compatible message history table
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS message_store (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     session_id TEXT NOT NULL,
-                    message_id TEXT UNIQUE,
-                    message_type TEXT NOT NULL,
-                    content TEXT NOT NULL,
-                    metadata TEXT,
-                    timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
-                    token_count INTEGER DEFAULT 0
+                    message TEXT NOT NULL,
+                    timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
                 )
             """)
             

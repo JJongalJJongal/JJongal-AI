@@ -47,7 +47,7 @@ class ConversationChain:
         self.llm = ChatOpenAI(
             model=model_name, 
             temperature=temperature,
-            model_kwargs={"top_p": 0.9}
+            top_p=0.9
         )
         
         self.prompts = load_chatbot_a_prompts()
@@ -56,21 +56,13 @@ class ConversationChain:
     def _setup_chains(self):
         """Setup LangChain conversation chains"""
         
-        # Main conversation chain
-        self.conversation_prompt = ChatPromptTemplate.from_messages([
-            ("system", self._get_system_prompt()),
-            MessagesPlaceholder(variable_name="conversation_history"),
-            ("human", "{user_input}")
-        ])
-        
-        self.conversation_chain = (
-            RunnablePassthrough.assign(
-                formatted_context=RunnableLambda(self._format_conversation_context)
-            )
-            | self.conversation_prompt
-            | self.llm
-            | StrOutputParser()
-        )
+        # Main conversation chain - we'll create this dynamically per request
+        # Store the template for now
+        self.conversation_prompt_template = {
+            "system": self._get_system_prompt(),  # Default template
+            "history": MessagesPlaceholder(variable_name="conversation_history"),
+            "human": "{user_input}"
+        }
         
         # Story collection chain
         self.story_collection_prompt = ChatPromptTemplate.from_messages([
@@ -103,16 +95,28 @@ JSON 형식으로 답변해주세요:
             | StrOutputParser()
         )
         
-        # Response enhancement chain
+        # Response enhancement chain - 간결하고 친근한 반말 응답 생성
         self.enhancement_prompt = ChatPromptTemplate.from_messages([
-            ("system", "You are a helpful assistant that enhances the response to be more engaging and interesting."),
+            ("system", """You are a helpful assistant that makes responses shorter and more engaging for children. 
+            
+            CRITICAL RULES:
+            - Keep responses to 1-2 sentences maximum
+            - Use simple, child-friendly language
+            - Ask only ONE simple question
+            - Be warm and encouraging but concise
+            - Minimize emoji use
+            - Focus on the main point only
+            - MOST IMPORTANT: Always use informal Korean speech (반말). Never use formal speech (존댓말).
+            - Use casual endings like '야', '어', '아', '지' instead of formal endings"""),
             ("human", """
-            Original Response: {original_response}
-            Child Name: {child_name}
-            Child Age: {child_age}
-            Child Interests: {child_interests}
+아래 응답을 더 짧고 간결하게 만들어주세요. 반드시 반말로 응답해야 합니다:
 
-            Enhanced Response: {enhanced_response}
+원본 응답: {original_response}
+아이 이름: {child_name}
+아이 나이: {child_age}세
+아이 관심사: {child_interests}
+
+반드시 1-2문장으로 간결한 반말 응답을 만들어주세요. 존댓말은 절대 사용하지 마세요.
             """)
             ])
         
@@ -122,12 +126,16 @@ JSON 형식으로 답변해주세요:
             | StrOutputParser()
         )
     
-    def _get_system_prompt(self) -> str:
-        """Get system prompt for conversation"""
+    def _get_system_prompt(self, child_age: int = 6) -> str:
+        """Get system prompt for conversation with dynamic age injection"""
         base_prompt = self.prompts.get("system_message_template", [])
         if isinstance(base_prompt, list):
-            return "\n".join(base_prompt)
-        return str(base_prompt)
+            prompt_text = "\n".join(base_prompt)
+        else:
+            prompt_text = str(base_prompt)
+        
+        # Replace {age} placeholder with actual age
+        return prompt_text.replace("{age}", str(child_age))
     
     def _get_story_collection_prompt(self) -> str:
         """Get system prompt for story collection"""
@@ -140,15 +148,15 @@ JSON 형식으로 답변해주세요:
    - problem (문제): 갈등, 위기상황, 문제, 도전
    - resolution (해결): 문제 해결 방법, 결말, 교훈
 
-2. 아이의 연령대에 맞는 이해도 고려
+2. 간결하고 자연스러운 대화로 정보 수집
 3. 창의적인 상상력을 존중하며 격려
-4. 자연스럽고 즐거운 대화 유도
+4. 1-2문장의 짧고 명확한 질문으로 유도
 
 응답 시 고려사항:
 - 아이다운 순수한 상상력 존중
-- 아이의 관심사와 흥미 파악
-- 긍정적이고 따뜻한 피드백 제공
-- 연령대에 적합한 어휘 사용"""
+- 긍정적이고 따뜻하지만 간결한 피드백 제공
+- 연령대에 적합한 간단한 어휘 사용
+- 한 번에 하나의 간단한 질문만"""
     
     def _format_conversation_context(self, inputs: Dict[str, Any]) -> str:
         """Format conversation context for the prompt"""
@@ -214,10 +222,26 @@ JSON 형식으로 답변해주세요:
                 elif msg["type"] == "AIMessage":
                     lc_messages.append(AIMessage(content=msg["content"]))
             
+            # Get child age for dynamic prompt
+            child_age = child_profile.get("age", 6)
+            
+            # Create conversation prompt dynamically with child age
+            conversation_prompt = ChatPromptTemplate.from_messages([
+                ("system", self._get_system_prompt(child_age)),
+                MessagesPlaceholder(variable_name="conversation_history"),
+                ("human", "{user_input}")
+            ])
+            
+            # Create conversation chain dynamically
+            conversation_chain = (
+                conversation_prompt
+                | self.llm
+                | StrOutputParser()
+            )
+            
             # Generate response
-            response = await self.conversation_chain.ainvoke({
+            response = await conversation_chain.ainvoke({
                 "user_input": user_input,
-                "session_id": session_id,
                 "conversation_history": lc_messages
             })
             
@@ -229,7 +253,7 @@ JSON 형식으로 답변해주세요:
             
         except Exception as e:
             logger.error(f"Error generating response: {e}")
-            return "앗, 미안해! 잠깐 생각이 복잡해졌어. 다시 말해줄 수 있을까?"
+            return "앗, 미안! 다시 말해줄래?"
     
     @trace_chatbot_method("collect_story_elements")
     async def collect_story_elements(
@@ -256,7 +280,7 @@ JSON 형식으로 답변해주세요:
                 return {
                     "elements_found": [],
                     "continue_collection": True,
-                    "suggested_question": "더 자세히 말해줄 수 있을까?"
+                    "suggested_question": "더 자세히 말해줄래?"
                 }
                 
         except Exception as e:
@@ -264,7 +288,7 @@ JSON 형식으로 답변해주세요:
             return {
                 "elements_found": [],
                 "continue_collection": True,
-                "suggested_question": "정말 재미있는 이야기구나! 더 들려줄래?"
+                "suggested_question": "재미있는 이야기네! 더 들려줄래?"
             }
     
     async def _enhance_response(self, response: str, child_profile: Dict[str, Any]) -> str:
@@ -296,20 +320,20 @@ JSON 형식으로 답변해주세요:
             ("system", """당신은 아이들로부터 이야기 요소를 수집하는 도우미 전문가입니다.
             
 목표 요소: {target_element}
-아이가 {target_element}에 대해 이야기할 수 있도록 자연스럽게 유도하는 질문을 만들어주세요.
+아이가 {target_element}에 대해 이야기할 수 있도록 간단하고 자연스럽게 유도하는 질문을 만들어주세요.
 
 지침:
-1. 아이의 상상력을 자극하는 재미있는 질문
+1. 1문장의 간단하고 명확한 질문
 2. 연령대에 맞는 쉽고 친근한 표현
 3. 창의적 사고를 격려하는 분위기
 4. 재미있고 흥미로운 접근 방식
-5. 자연스러운 대화 유도
+5. 복잡한 설명 없이 바로 질문
             """),
             ("human", """
 찾고자 하는 요소: {target_element}
 참고 정보: {rag_context}
 
-{target_element}에 대한 이야기를 자연스럽게 유도하는 질문을 만들어주세요.
+{target_element}에 대한 간단한 질문 1개를 만들어주세요.
             """)
         ])
         
@@ -335,7 +359,7 @@ JSON 형식으로 답변해주세요:
             }
             
             element_korean = element_names.get(target_element, target_element)
-            return f"네 이야기의 {element_korean}에 대해 더 말해줄래? 어떤 {element_korean}인지 궁금해!"
+            return f"어떤 {element_korean}인지 말해줄래?"
     
     def create_conversation_summary(self, session_id: str) -> str:
         """Create a summary of the conversation for handoff to ChatBot B"""

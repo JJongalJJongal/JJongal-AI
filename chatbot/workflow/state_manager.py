@@ -5,14 +5,14 @@ CCB_AI State Manager
 이야기 생성 과정의 진행 상태를 추적하고 저장/복원 기능을 제공합니다.
 """
 
-import os
-import json
 import asyncio
+import json
 import logging
-from typing import Dict, List, Any, Optional
+import os
+from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
-from dataclasses import dataclass, field
+from typing import Dict, List, Any, Optional
 
 from .story_schema import StoryDataSchema, StoryStage
 

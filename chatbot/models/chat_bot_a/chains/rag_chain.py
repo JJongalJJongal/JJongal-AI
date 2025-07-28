@@ -159,10 +159,11 @@ class RAGChain:
         """
         try:
             # Retrieve relevant fairy tale context
+            child_age = session_context.get('child_age', 6) if session_context else 6
             retrieved_docs = await self.retrieve_context(
                 query=user_input,
                 target_element=target_element,
-                child_age=child_name,
+                child_age=child_age,
                 top_k=3
             )
             
@@ -233,7 +234,7 @@ class RAGChain:
         except Exception as e:
             logger.error(f"Error generating story guidance: {e}")
             # Fallback to JSON story prompting questions
-            return self._get_fallback_guidance(child_name, target_element)
+            return self._get_fallback_story_question(child_name, target_element)
         
     def _build_context_query(self, current_elements: Dict[str, List]) -> str:
         """Build context query from current story elements"""
@@ -322,7 +323,7 @@ class RAGChain:
             # Build comprehensive search query from story elements
             query_parts = []
             
-            for elements in story_elements.items():
+            for element_type, elements in story_elements.items():
                 if elements:
                     element_contents = [
                         elem.get("content", str(elem)) if isinstance(elem, dict) else str(elem)
@@ -330,16 +331,16 @@ class RAGChain:
                     ]
                     query_parts.append(" ".join(element_contents))
                 
-                search_query = " ".join(query_parts) if query_parts else "동화 이야기"
-                
-                # Search for similar stories
-                similar_stories = await self.retrieve_context(
-                    query=search_query,
-                    child_age=child_age,
-                    top_k=top_k
-                )
-                
-                return similar_stories
+            search_query = " ".join(query_parts) if query_parts else "동화 이야기"
+            
+            # Search for similar stories
+            similar_stories = await self.retrieve_context(
+                query=search_query,
+                child_age=child_age,
+                top_k=top_k
+            )
+            
+            return similar_stories
         except Exception as e:
             logger.error(f"Error searching similar stories: {e}")
             return []

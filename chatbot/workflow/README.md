@@ -240,6 +240,10 @@ logger = logging.getLogger('chatbot.workflow')
 
 # 상세 로그 확인
 logger.setLevel(logging.DEBUG)
+
+# 각 모듈은 자체 로거를 사용합니다:
+# - MultimediaCoordinator: 라이브러리 가용성을 로깅
+# - 기타 모듈: 표준 로깅 패턴 적용
 ```
 
 ## 🚨 오류 처리
