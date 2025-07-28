@@ -8,14 +8,14 @@ CCB_AI Story Data Schema
 데이터 구조를 표준화.
 """
 
-from typing import Dict, List, Any, Optional
+import json
+import os
+import sys
+import uuid
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
-import uuid
-import json
-import sys
-import os
+from typing import Dict, List, Any, Optional
 
 # 상위 디렉토리의 shared 모듈 임포트를 위한 경로 추가
 sys.path.append(os.path.join(os.path.dirname(__file__), '..', '..'))

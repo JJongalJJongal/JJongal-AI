@@ -8,15 +8,15 @@ CCB_AI Integration Manager
 이 모듈은 WorkflowOrchestrator와의 통합 로직만 담당합니다.
 """
 
-import os
-# HuggingFace Tokenizers 병렬 처리 경고 해결
-os.environ["TOKENIZERS_PARALLELISM"] = "false"
-
 import asyncio
 import logging
-from typing import Dict, List, Any, Optional
-from datetime import datetime
+import os
 import uuid
+from datetime import datetime
+from typing import Dict, List, Any, Optional
+
+# HuggingFace Tokenizers 병렬 처리 경고 해결
+os.environ["TOKENIZERS_PARALLELISM"] = "false"
 
 from .story_schema import ChildProfile, AgeGroup
 

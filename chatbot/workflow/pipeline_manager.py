@@ -7,10 +7,10 @@ CCB_AI Pipeline Manager
 
 import asyncio
 import logging
-from typing import Dict, List, Any, Optional, Callable
+from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
-from dataclasses import dataclass, field
+from typing import Dict, List, Any, Optional, Callable
 
 from .story_schema import StoryDataSchema, StoryStage
 

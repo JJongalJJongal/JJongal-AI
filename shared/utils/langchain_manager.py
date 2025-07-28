@@ -23,7 +23,7 @@ from langchain_core.runnables import RunnableConfig
 from langchain_core.chat_history import BaseChatMessageHistory
 from langchain_core.runnables.history import RunnableWithMessageHistory
 from langchain_core.messages import trim_messages
-from langchain.callbacks import get_openai_callback
+from langchain_community.callbacks.manager import get_openai_callback
 
 # Project imports
 from shared.utils.logging_utils import get_module_logger

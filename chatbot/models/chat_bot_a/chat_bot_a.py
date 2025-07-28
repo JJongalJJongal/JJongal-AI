@@ -5,22 +5,20 @@ This is the main chatbot for the Jjongi project.
 Langchain + Langsmith 
 """
 
-from typing import Dict, Any, List, Optional, Tuple
+from typing import Dict, Any, List
 from datetime import datetime
 import time
 
 from shared.utils.logging_utils import get_module_logger
-from shared.utils.langchain_manager import langchain_manager
 from shared.utils.age_group_utils import AgeGroupManager
 
 from langchain.schema import AIMessage, HumanMessage
-from langchain.prompts import PromptTemplate
 
-from shared.utils.korean_utils import format_with_josa
+from shared.utils.korean_utils import format_with_josa, process_template_with_particles
 
 from .chains.conversation_chain import ConversationChain
 from .memory.conversation_memory import ConversationMemoryManager
-from .monitoring.langsmith_config import setup_langsmith_tracing, ChatBotATracer
+from .monitoring.langsmith_config import setup_langsmith_tracing
 from .tools.story_analysis_tool import StoryAnalysisTool
 
 logger = get_module_logger(__name__)
@@ -228,7 +226,7 @@ class ChatBotA:
             logger.error(f"Error generating response for session {session_id}: {e}")
             
             # 에러 시 기본 응답
-            fallback_response = f"앗, {session['child_name']}아! 잠깐 생각이 꼬였네. 다시 말해줄래?"
+            fallback_response = f"앗, {session['child_name']}아! 다시 말해줄래?"
             return {
                 "response": fallback_response,
                 "story_elements_found": [],
@@ -360,17 +358,18 @@ class ChatBotA:
             templates = prompts.get("greeting_templates", [])
             
             if not templates:
-                return f"안녕, {child_name}아! 니는 쫑이야! 오늘 나와 함께 재미있는 이야기를 만들자!"
+                return f"안녕 {child_name}아! 난 쫑이야! 오늘 재미있는 이야기 만들어보자!"
             
             greeting_template = random.choice(templates)
             
-            # format with child name and interests
-            greeting = greeting_template.format(
-                name=child_name,
-                interests=", ".join(interests) if interests else "여러 가지"
+            # Use the centralized template processing with particle adjustment
+            greeting = process_template_with_particles(
+                greeting_template,
+                {
+                    "name": child_name,
+                    "interests": ", ".join(interests) if interests else "여러 가지"
+                }
             )
-            
-            greeting = self._adjust_korean_particles(greeting, child_name)
             
             logger.debug(f"Generated greeting for {child_name} : {greeting[:50]}...")
             return greeting
@@ -378,7 +377,7 @@ class ChatBotA:
         except Exception as e:
             logger.error(f"Error generating greeting: {e}")
             # 에러 시 기본 인사말
-            return f"안녕, {format_with_josa(child_name, '아/야')} 나는 쫑이야! 오늘 너와 함께 재미있는 이야기를 만들어보고 싶어."
+            return f"안녕 {format_with_josa(child_name, '아/야')}! 난 쫑이야! 재미있는 이야기 만들어보자!"
     
     async def _extract_story_elements(self, user_input: str, session_id: str) -> List[Dict[str, Any]]:
         """사용자 입력에서 이야기 요소 추출"""
@@ -526,4 +525,5 @@ class ChatBotA:
             requirements.append("include_princess_theme")
         
         return requirements
+    
     

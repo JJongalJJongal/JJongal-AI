@@ -9,6 +9,7 @@ from pathlib import Path
 
 from .app_config import get_project_root
 from ..utils.file_utils import load_json
+from ..utils.korean_utils import process_template_with_particles, extract_particles_from_templates
 
 logger = logging.getLogger(__name__)
 
@@ -121,8 +122,8 @@ def get_default_chatbot_b_prompts() -> Dict[str, Any]:
     return {
         "system": {
             "role": [
-                "너는 꼬기라는 이름을 가진 챗봇이야. 너는 부기 (chatbot_a) 와 대화를 하면서 동화를 만들어줄거야.",
-                "너는 부기 (chatbot_a) 가 만들어 준 대략적인 동화 스토리를 통해 상세한 스토리를 만들어줄거야.",
+                "너는 아리라는 이름을 가진 챗봇이야. 너는 쫑이 (chatbot_a) 와 대화를 하면서 동화를 만들어줄거야.",
+                "너는 쫑이 (chatbot_a) 가 만들어 준 대략적인 동화 스토리를 통해 상세한 스토리를 만들어줄거야.",
                 "너는 상세한 스토리를 만들고 그 상세한 스토리를 바탕으로 동화 이미지와 내레이션, 동화 인물의 대사를 만들어줄거야.",
                 "너는 동화 이미지를 만들 때 아이들의 연령대, 관심사에 맞게 이미지를 만들어야 해. 예를 들어, 공룡을 좋아하는 5세 아이에게는 귀엽고 친근한 공룡 이미지를 제공해.",
                 "너는 동화 내래이션을 만들 때 동화의 스토리, 이미지에 맞게 내레이션을 만들어야 해. 내레이션은 아이들이 쉽게 이해할 수 있는 언어로 구성해야 해.",
@@ -140,4 +141,80 @@ def get_default_chatbot_b_prompts() -> Dict[str, Any]:
         "narration_prompt_template": "당신은 아이들에게 동화를 들려주는 따뜻한 목소리의 성우입니다. 다음 문장을 아이들이 이해하기 쉽고 감정을 잘 느낄 수 있도록 실감 나게 읽어주세요. 문장: {narration}",
         "rag_story_enrichment_template": "다음 아이디어를 바탕으로 {age_group}세 아이에게 맞는 동화 아이디어를 더 풍부하게 만들어주세요.\n\n기본 아이디어: {query_text}\n\n참고 자료:\n{context}",
         "rag_story_generation_template": "아래 정보를 바탕으로 {age_group}세 어린이를 위한 짧은 동화의 시작 부분을 만들어주세요.\n\n[컨텍스트]\n{context}\n\n[요청사항]\n{user_request}"
-    } 
+    }
+
+
+def process_prompt_with_korean_particles(template: str, **kwargs) -> str:
+    """
+    프롬프트 템플릿에서 한국어 조사 처리를 포함한 변수 치환
+    
+    Args:
+        template (str): 프롬프트 템플릿
+        **kwargs: 치환할 변수들
+        
+    Returns:
+        str: 처리된 프롬프트
+    """
+    try:
+        return process_template_with_particles(template, kwargs)
+    except Exception as e:
+        logger.error(f"Error processing prompt with Korean particles: {e}")
+        # Fallback to simple format if particle processing fails
+        return template.format(**kwargs)
+
+
+def analyze_prompts_for_particles() -> Dict[str, Any]:
+    """
+    현재 로드된 프롬프트들에서 한국어 조사 패턴 분석
+    
+    Returns:
+        Dict[str, Any]: 분석 결과
+    """
+    try:
+        # Analyze ChatBot A prompts
+        chatbot_a_prompts = load_chatbot_a_prompts()
+        
+        analysis = {
+            "chatbot_a": {},
+            "summary": {
+                "total_patterns": 0,
+                "categories": {}
+            }
+        }
+        
+        # Analyze greeting templates
+        if "greeting_templates" in chatbot_a_prompts:
+            greeting_patterns = extract_particles_from_templates(
+                chatbot_a_prompts["greeting_templates"]
+            )
+            analysis["chatbot_a"]["greeting_templates"] = greeting_patterns
+            analysis["summary"]["total_patterns"] += len(greeting_patterns)
+            analysis["summary"]["categories"]["greeting_templates"] = len(greeting_patterns)
+        
+        # Analyze follow-up questions
+        if "follow_up_questions" in chatbot_a_prompts:
+            followup_patterns = extract_particles_from_templates(
+                chatbot_a_prompts["follow_up_questions"]
+            )
+            analysis["chatbot_a"]["follow_up_questions"] = followup_patterns
+            analysis["summary"]["total_patterns"] += len(followup_patterns)
+            analysis["summary"]["categories"]["follow_up_questions"] = len(followup_patterns)
+        
+        # Analyze story prompting questions
+        if "story_prompting_questions" in chatbot_a_prompts:
+            story_patterns = {}
+            for category, questions in chatbot_a_prompts["story_prompting_questions"].items():
+                patterns = extract_particles_from_templates(questions)
+                story_patterns[category] = patterns
+                analysis["summary"]["total_patterns"] += len(patterns)
+            analysis["chatbot_a"]["story_prompting_questions"] = story_patterns
+            analysis["summary"]["categories"]["story_prompting_questions"] = sum(
+                len(patterns) for patterns in story_patterns.values()
+            )
+        
+        logger.info(f"Found {analysis['summary']['total_patterns']} Korean particle patterns in prompts")
+        return analysis
+        
+    except Exception as e:
+        logger.error(f"Error analyzing prompts for particles: {e}")
+        return {"error": str(e)} 
