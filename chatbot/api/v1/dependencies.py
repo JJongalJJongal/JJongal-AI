@@ -112,3 +112,15 @@ async def verify_development_token(
         "username": "개발용_사용자",
         # "role": "child",
     }
+
+# ChatBot B 의존성
+async def get_chatbot_b():
+    """ChatBot B 인스턴스 의존성"""
+    from chatbot.models.chat_bot_b import ChatBotB
+    return ChatBotB()
+
+# WorkflowOrchestrator 의존성  
+async def get_workflow_orchestrator():
+    """Workflow Orchestrator 인스턴스 의존성"""
+    from chatbot.workflow.orchestrator import WorkflowOrchestrator
+    return WorkflowOrchestrator()
