@@ -1,10 +1,11 @@
 """
-꼬기 (ChatBot B) - Enhanced 동화 생성 챗봇 통합 클래스
+Ari (ChatBot B) - Unified Fairy Tale Generation Chatbot
 
-부기에서 수집한 이야기 요소를 바탕으로 완전한 멀티미디어 동화를 생성하는 메인 클래스
-- 개선된 프롬프트 시스템 (v2.0) 적용
-- 연령별 특화 생성 (4-7세, 8-9세)
-- 성능 추적 및 최적화
+Main class for generating complete multimedia fairy tales based on story elements 
+collected from Jjongi (ChatBot A)
+- Advanced prompt system (v3.0) applied
+- Age-specific generation (4-7 years, 8-9 years)
+- Performance tracking and optimization
 """
 
 from shared.utils.logging_utils import get_module_logger
@@ -26,163 +27,141 @@ logger = get_module_logger(__name__)
 
 class ChatBotB:
     """
-    꼬기 - Enhanced 동화 생성 챗봇 메인 클래스
+    Ari - Unified Fairy Tale Generation Chatbot Main Class
     
-    부기에서 수집한 이야기 요소를 바탕으로:
-    1. 상세 스토리 텍스트 생성 (연령별 특화)
-    2. 챕터별 이미지 생성 (DALL-E 3, Enhanced)
-    3. 등장인물별 음성 생성 (ElevenLabs)
-    4. 완전한 멀티미디어 동화 제작
+    Based on story elements collected from Jjongi:
+    1. Generate detailed story text (age-specific)
+    2. Generate chapter-wise images (DALL-E 3)
+    3. Generate character voices (ElevenLabs with voice cloning)
+    4. Create complete multimedia fairy tales
     
     Features:
-    - 개선된 프롬프트 엔지니어링 (v2.0)
-    - 연령별 맞춤 생성 (4-7세, 8-9세)
-    - 체인 오브 소트 추론
-    - 성능 추적 및 최적화
+    - Advanced prompt engineering (v3.0)
+    - Age-customized generation (4-7 years, 8-9 years)
+    - Chain-of-thought reasoning
+    - Performance tracking and optimization
     """
     
     def __init__(self, 
                  output_dir: str = "output",
                  vector_db_path: str = None,
                  collection_name: str = "fairy_tales",
-                 use_enhanced_generators: bool = True,
                  enable_performance_tracking: bool = True):
         """
-        꼬기 챗봇 초기화
+        Initialize Ari chatbot
         
         Args:
-            output_dir: 출력 디렉토리 경로
-            vector_db_path: ChromaDB 벡터 데이터베이스 경로
-            collection_name: ChromaDB 컬렉션 이름
-            use_enhanced_generators: Enhanced 생성기 사용 여부
-            enable_performance_tracking: 성능 추적 활성화
+            output_dir: Output directory path
+            vector_db_path: ChromaDB vector database path
+            collection_name: ChromaDB collection name
+            enable_performance_tracking: Enable performance tracking
         """
         self.output_dir = Path(output_dir)
         self.output_dir.mkdir(parents=True, exist_ok=True)
         
-        self.use_enhanced_generators = use_enhanced_generators
         self.enable_performance_tracking = enable_performance_tracking
         
-        # 통일된 벡터DB 경로 설정
+        # Set unified vector DB path
         if vector_db_path is None:
             import os
             chroma_base = os.getenv("CHROMA_DB_PATH", "/app/chatbot/data/vector_db")
-            vector_db_path = os.path.join(chroma_base, "main")  # 기본값: main DB 사용
-            logger.info(f"벡터DB 경로가 지정되지 않음. 환경변수에서 설정: {vector_db_path}")
+            vector_db_path = os.path.join(chroma_base, "main")  # Default: use main DB
+            logger.info(f"Vector DB path not specified. Setting from env var: {vector_db_path}")
         
         self.vector_db_path = vector_db_path
         self.collection_name = collection_name
         
-        # 클라이언트 초기화
+        # Client initialization
         self.openai_client = None
         self.elevenlabs_api_key = None
         
-        # 스토리 설정
+        # Story settings
         self.target_age = None
         self.story_outline = None
         
-        # 핵심 엔진들
+        # Core engines
         self.story_engine = None
         self.content_pipeline = None
         
-        # 생성기들 (기본 + Enhanced)
+        # Generators
         self.text_generator = None
         self.image_generator = None
         self.voice_generator = None
-        self.enhanced_text_generator = None
-        self.enhanced_image_generator = None
         
-        # 성능 메트릭
+        # Performance metrics
         self.performance_metrics = {
             "total_stories_generated": 0,
             "successful_generations": 0,
             "average_generation_time": 0,
-            "enhanced_mode_usage": 0,
             "age_group_statistics": {}
         }
         
-        # 초기화
+        # Initialize components
         self._initialize_clients()
         self._initialize_engines(self.vector_db_path, collection_name)
         
     def _initialize_clients(self):
-        """API 클라이언트 초기화"""
+        """Initialize API clients"""
         try:
-            # OpenAI 클라이언트 초기화
+            # Initialize OpenAI client
             self.openai_client = initialize_client()
             
-            # ElevenLabs API 키 로드
+            # Load ElevenLabs API key
             raw_key = os.getenv("ELEVENLABS_API_KEY")
             if raw_key:
-                logger.info(f"ElevenLabs API 키 로드 성공 (길이: {len(raw_key)})")
+                logger.info(f"ElevenLabs API key loaded successfully (length: {len(raw_key)})")
             else:
-                logger.warning("ElevenLabs API 키가 환경 변수에 설정되지 않음")
+                logger.warning("ElevenLabs API key not set in environment variables")
             
             self.elevenlabs_api_key = raw_key
             
-            logger.info("API 클라이언트 초기화 완료")
+            logger.info("API clients initialization completed")
             
         except Exception as e:
-            logger.error(f"API 클라이언트 초기화 실패: {e}")
+            logger.error(f"API clients initialization failed: {e}")
             raise
             
     def _initialize_engines(self, vector_db_path: str, collection_name: str):
-        """엔진 및 생성기 초기화 (Enhanced 포함)"""
+        """Initialize engines and generators"""
         try:
-            # 통일된 temp 경로 설정
+            # Set unified temp path
             base_temp_path = self.output_dir / "temp"
             base_temp_path.mkdir(parents=True, exist_ok=True)
             
-            # 1. 기본 생성기들 초기화
+            # 1. Initialize generators
             self.text_generator = TextGenerator(
                 openai_client=self.openai_client,
                 vector_db_path=vector_db_path,
-                collection_name=collection_name
+                collection_name=collection_name,
+                enable_performance_tracking=self.enable_performance_tracking
             )
             
             self.image_generator = ImageGenerator( 
                 openai_client=self.openai_client,
                 model_name="dall-e-3",
-                temp_storage_path=str(base_temp_path / "images")   # output/temp/images (중복 제거)
+                temp_storage_path=str(base_temp_path / "images"),
+                enable_performance_tracking=self.enable_performance_tracking
             )
             
             self.voice_generator = VoiceGenerator(
                 elevenlabs_api_key=self.elevenlabs_api_key,
-                temp_storage_path=str(base_temp_path / "audio"),   # output/temp/audio (중복 제거)
-                voice_id="xi3rF0t7dg7uN2M0WUhr", # Yuna (기본 내레이터 음성)
-                model_id="eleven_multilingual_v2", # 기본 모델 ID (한국어 지원)
-                voice_settings=None, # 음성 설정 (stability, similarity_boost, style, use_speaker_boost)
-                max_retries=3, # 최대 재시도 횟수
-                enable_chunking=True, # 텍스트 청킹 활성화 (큰 음성 파일 방지)
-                max_chunk_length=500 # 청크 최대 길이 (문자 수)
+                temp_storage_path=str(base_temp_path / "audio"),
+                voice_id="xi3rF0t7dg7uN2M0WUhr",  # Yuna (default narrator voice)
+                model_id="eleven_multilingual_v2",  # Default model ID (Korean support)
+                voice_settings=None,  # Voice settings (stability, similarity_boost, style, use_speaker_boost)
+                max_retries=3,  # Maximum retry count
+                enable_chunking=True,  # Enable text chunking (prevent large audio files)
+                max_chunk_length=500  # Maximum chunk length (character count)
             )
             
-            # 2. Enhanced 생성기들 초기화 (선택적)
-            if self.use_enhanced_generators:
-                self.enhanced_text_generator = TextGenerator(
-                    openai_client=self.openai_client,
-                    vector_db_path=vector_db_path,
-                    collection_name=collection_name,
-                    enable_performance_tracking=self.enable_performance_tracking
-                )
-                
-                self.enhanced_image_generator = ImageGenerator(
-                    openai_client=self.openai_client,
-                    model_name="dall-e-3",
-                    temp_storage_path=str(base_temp_path / "images"),  # 동일한 경로 사용
-                    enable_performance_tracking=self.enable_performance_tracking
-                )
-                
-                logger.info("생성자들 초기화 완료")
-            
-            # 3. 스토리 생성 엔진 초기화
+            # 2. Initialize story generation engine
             self.story_engine = StoryGenerationEngine(
                 openai_client=self.openai_client,
                 elevenlabs_client=None,
-                output_dir=str(self.output_dir)  # temp 제외한 기본 output 경로만 전달
+                output_dir=str(self.output_dir)  # Pass basic output path only (excluding temp)
             )
             
-            # 생성기들을 엔진에 주입
+            # Inject generators into engine
             self.story_engine.set_generators(
                 text_generator=self.text_generator,
                 image_generator=self.image_generator,
@@ -190,169 +169,154 @@ class ChatBotB:
                 rag_enhancer=None
             )
             
-            # 4. 콘텐츠 파이프라인 초기화
+            # 3. Initialize content pipeline
             self.content_pipeline = ContentPipeline(
                 openai_client=self.openai_client,
                 vector_db_path=vector_db_path,
                 collection_name=collection_name
             )
             
-            logger.info(f"엔진 및 생성기 초기화 완료 (통일된 temp 경로: {base_temp_path})")
+            logger.info(f"Engines and generators initialization completed (unified temp path: {base_temp_path})")
             
         except Exception as e:
-            logger.error(f"엔진 초기화 실패: {e}")
+            logger.error(f"Engine initialization failed: {e}")
             raise
     
     def set_target_age(self, age: int):
-        """대상 연령 설정"""
+        """Set target age for story generation"""
         self.target_age = age
-        logger.info(f"대상 연령 설정: {age}세 ({'Enhanced 모드' if self.use_enhanced_generators else '기본 모드'})")
+        logger.info(f"Target age set: {age} years old")
     
     def set_cloned_voice_info(self, child_voice_id: str, main_character_name: str):
-        """음성 클로닝 정보 설정"""
+        """Set cloned voice information for characters"""
         self.child_voice_id = child_voice_id
         self.main_character_name = main_character_name
         
-        # VoiceGenerator에 캐릭터 음성 매핑 설정
+        # Set character voice mapping in VoiceGenerator
         if self.voice_generator:
             character_mapping = {
                 main_character_name: child_voice_id
             }
             self.voice_generator.set_character_voice_mapping(character_mapping)
-            logger.info(f"음성 클로닝 정보 설정 완료: {main_character_name} -> {child_voice_id}")
+            logger.info(f"Voice cloning info set: {main_character_name} -> {child_voice_id}")
         else:
-            logger.warning("VoiceGenerator가 초기화되지 않아 음성 매핑을 설정할 수 없습니다.")
+            logger.warning("VoiceGenerator not initialized, cannot set voice mapping")
      
     def set_story_outline(self, story_outline: Dict[str, Any]):
-        """부기에서 수집한 스토리 개요 설정"""
+        """Set story outline collected from ChatBot A"""
         self.story_outline = story_outline
-        logger.info("스토리 개요 설정 완료")
+        logger.info("Story outline set successfully")
     
     async def generate_detailed_story(self, 
-                                    use_enhanced: bool = None,
                                     use_websocket_voice: bool = True,
                                     progress_callback: Optional[Callable] = None) -> Dict[str, Any]:
         """
-        상세 동화 생성 (메인 메서드, WebSocket 스트리밍 지원)
+        Generate detailed story (main method with WebSocket streaming support)
         
         Args:
-            use_enhanced: Enhanced 생성기 사용 여부 (None이면 초기화 설정 사용)
-            use_websocket_voice: WebSocket 음성 스트리밍 사용 여부 (기본 True)
-            progress_callback: 진행 상황 콜백 함수
+            use_websocket_voice: Enable WebSocket voice streaming (default True)
+            progress_callback: Progress callback function
             
         Returns:
-            Dict: 생성된 동화 데이터 with 성능 메트릭
+            Dict: Generated story data with performance metrics
         """
         if not self.story_outline:
-            raise ValueError("스토리 개요가 설정되지 않았습니다. set_story_outline()을 먼저 호출하세요.")
+            raise ValueError("Story outline not set. Call set_story_outline() first.")
         
         if not self.target_age:
-            raise ValueError("대상 연령이 설정되지 않았습니다. set_target_age()를 먼저 호출하세요.")
+            raise ValueError("Target age not set. Call set_target_age() first.")
         
         start_time = time.time()
-        use_enhanced_mode = use_enhanced if use_enhanced is not None else self.use_enhanced_generators
         
-        result = {} # Initialize result
+        result = {}
         try:
-            # 성능 추적 시작
+            # Start performance tracking
             self.performance_metrics["total_stories_generated"] += 1
-            if use_enhanced_mode:
-                self.performance_metrics["enhanced_mode_usage"] += 1
             
-            # 연령대별 통계 업데이트
+            # Update age group statistics
             age_group_key = self._get_age_group_key(self.target_age)
             if age_group_key not in self.performance_metrics["age_group_statistics"]:
                 self.performance_metrics["age_group_statistics"][age_group_key] = 0
             self.performance_metrics["age_group_statistics"][age_group_key] += 1
         
-            # 스토리 개요에 연령 정보 추가
+            # Add age information to story outline
             enhanced_outline = {
                 **self.story_outline,
                 "age_group": self.target_age,
                 "target_age": self.target_age,
-                "enhanced_mode": use_enhanced_mode,
                 "websocket_voice": use_websocket_voice
             }
             
-            if use_enhanced_mode and self.enhanced_text_generator:
-                # Enhanced 모드로 생성
-                result = await self._generate_with_enhanced_mode(
-                    enhanced_outline, 
-                    use_websocket_voice,
-                    progress_callback
-                )
-            else:
-                # 기본 모드로 생성
-                result = await self._generate_with_basic_mode(
-                    enhanced_outline,
-                    use_websocket_voice,
-                    progress_callback
-                )
+            # Generate story with current generators
+            result = await self._generate_story(
+                enhanced_outline,
+                use_websocket_voice,
+                progress_callback
+            )
         
-            # 성능 메트릭 업데이트
+            # Update performance metrics
             generation_time = time.time() - start_time
             self.performance_metrics["successful_generations"] += 1
             self._update_average_generation_time(generation_time)
             
-            # 결과에 메타데이터 추가
+            # Add metadata to result
             result["metadata"] = result.get("metadata", {})
             result["metadata"].update({
-                "enhanced_mode": use_enhanced_mode,
                 "websocket_voice": use_websocket_voice,
                 "generation_time": generation_time,
-                "prompt_version": "2.0_enhanced_websocket" if use_enhanced_mode else "1.0_basic_websocket",
+                "prompt_version": "3.0_unified",
                 "age_group": age_group_key
             })
             
             return result
             
         except Exception as e:
-            logger.error(f"스토리 생성 실패: {e}")
+            logger.error(f"Story generation failed: {e}")
             raise
 
-    async def _generate_with_enhanced_mode(self, 
-                                         enhanced_outline: Dict[str, Any],
-                                         use_websocket_voice: bool,
-                                         progress_callback: Optional[Callable] = None) -> Dict[str, Any]:
-        """Enhanced 생성기 모드로 완전한 스토리 생성"""
+    async def _generate_story(self, 
+                            enhanced_outline: Dict[str, Any],
+                            use_websocket_voice: bool,
+                            progress_callback: Optional[Callable] = None) -> Dict[str, Any]:
+        """Generate complete story with all generators"""
         
-        # 1. Enhanced 텍스트 생성
+        # 1. Text generation
         if progress_callback:
             await progress_callback({
-                "step": "enhanced_story_planning",
+                "step": "story_generation",
                 "status": "starting",
-                "mode": "enhanced"
+                "phase": "text"
             })
         
-        story_data = await self.enhanced_text_generator.generate(
+        story_data = await self.text_generator.generate(
             enhanced_outline, progress_callback
         )
         
-        # 2. Enhanced 이미지 생성
+        # 2. Image generation
         if progress_callback:
             await progress_callback({
-                "step": "enhanced_image_planning",
+                "step": "image_generation",
                 "status": "starting",
                 "chapters": len(story_data.get("chapters", []))
             })
         
-        # 부기의 원본 분석 데이터를 이미지 생성기에도 전달
+        # Pass original analysis data from ChatBot A to image generator
         image_input_data = {
             "story_data": story_data,
             "story_id": story_data.get("story_id"),
-            # 부기의 분석 데이터 추가 전달
+            # Additional analysis data from ChatBot A
             "conversation_summary": enhanced_outline.get("conversation_summary", ""),
             "extracted_keywords": enhanced_outline.get("extracted_keywords", []),
             "conversation_analysis": enhanced_outline.get("conversation_analysis", {}),
             "child_profile": enhanced_outline.get("child_profile", {}),
-            "story_generation_method": enhanced_outline.get("story_generation_method", "enhanced")
+            "story_generation_method": "unified"
         }
         
-        image_data = await self.enhanced_image_generator.generate(
+        image_data = await self.image_generator.generate(
             image_input_data, progress_callback
         )
         
-        # 3. 음성 생성 (WebSocket 지원)
+        # 3. Voice generation (with WebSocket support)
         if progress_callback:
             await progress_callback({
                 "step": "voice_generation",
@@ -360,73 +324,42 @@ class ChatBotB:
                 "websocket_enabled": use_websocket_voice
             })
         
-        # 부기의 원본 분석 데이터를 음성 생성기에도 전달
+        # Pass original analysis data from ChatBot A to voice generator
         voice_input_data = {
             "story_data": story_data,
             "story_id": story_data.get("story_id"),
-            # 부기의 분석 데이터 추가 전달
+            # Additional analysis data from ChatBot A
             "conversation_summary": enhanced_outline.get("conversation_summary", ""),
             "extracted_keywords": enhanced_outline.get("extracted_keywords", []),
             "conversation_analysis": enhanced_outline.get("conversation_analysis", {}),
             "child_profile": enhanced_outline.get("child_profile", {}),
-            "story_generation_method": enhanced_outline.get("story_generation_method", "enhanced")
+            "story_generation_method": "unified"
         }
         
         voice_data = await self.voice_generator.generate(
             voice_input_data, progress_callback, use_websocket=use_websocket_voice
         )
         
-        # 4. 결과 통합
+        # 4. Combine results
         return {
             "story_data": story_data,
             "image_paths": [img.get("image_path") for img in image_data.get("images", [])],
             "audio_paths": voice_data.get("audio_files", []),
             "story_id": story_data.get("story_id"),
-            "status": "enhanced_complete",
-            "enhanced_metadata": {
-                "text_metrics": self.enhanced_text_generator.get_performance_metrics(),
-                "image_metrics": self.enhanced_image_generator.get_performance_metrics()
+            "status": "complete",
+            "generator_metadata": {
+                "text_metrics": self.text_generator.get_performance_metrics() if hasattr(self.text_generator, 'get_performance_metrics') else {},
+                "image_metrics": self.image_generator.get_performance_metrics() if hasattr(self.image_generator, 'get_performance_metrics') else {}
             },
             "voice_metadata": voice_data.get("metadata", {})
         }
     
-    async def _generate_with_basic_mode(self, 
-                                      enhanced_outline: Dict[str, Any],
-                                      use_websocket_voice: bool,
-                                      progress_callback: Optional[Callable] = None) -> Dict[str, Any]:
-        """기본 모드로 스토리 생성 (WebSocket 음성 지원)"""
-        
-        # 기본 StoryEngine 사용하되 WebSocket 음성은 별도 처리
-        story_result = await self.story_engine.generate_complete_story(enhanced_outline)
-        
-        # WebSocket 음성 생성
-        if progress_callback:
-            await progress_callback({
-                "step": "voice_generation",
-                "status": "starting",
-                "websocket_enabled": use_websocket_voice
-            })
-        
-        voice_data = await self.voice_generator.generate({
-            "story_data": story_result.get("story_data", {}),
-            "story_id": story_result.get("story_id")
-        }, progress_callback, use_websocket=use_websocket_voice)
-        
-        # 기존 결과와 음성 결과 통합
-        story_result["audio_paths"] = voice_data.get("audio_files", [])
-        story_result["voice_metadata"] = voice_data.get("metadata", {})
-        story_result["status"] = "basic_complete"
-        
-        return story_result
     
     async def generate_text_only(self, 
-                                use_enhanced: bool = None,
                                 progress_callback: Optional[Callable] = None) -> Dict[str, Any]:
-        """텍스트만 생성 (생성자 지원)"""
+        """Generate text only (without images and audio)"""
         if not self.story_outline or not self.target_age:
-            raise ValueError("스토리 개요와 대상 연령을 먼저 설정하세요.")
-        
-        use_enhanced_mode = use_enhanced if use_enhanced is not None else self.use_enhanced_generators
+            raise ValueError("Story outline and target age must be set first.")
         
         enhanced_outline = {
             **self.story_outline,
@@ -434,28 +367,24 @@ class ChatBotB:
             "target_age": self.target_age
         }
         
-        if use_enhanced_mode and self.enhanced_text_generator:
-            story_data = await self.enhanced_text_generator.generate(enhanced_outline, progress_callback)
-        else:
-            story_data = await self.text_generator.generate(enhanced_outline, progress_callback)
+        story_data = await self.text_generator.generate(enhanced_outline, progress_callback)
         
         return {
             "story_data": story_data,
             "image_paths": [],
             "audio_paths": [],
             "story_id": story_data.get("story_id"),
-            "status": "text_only_enhanced" if use_enhanced_mode else "text_only",
+            "status": "text_only",
             "metadata": {
-                "enhanced_mode": use_enhanced_mode,
-                "prompt_version": "2.0_enhanced" if use_enhanced_mode else "1.0_basic"
+                "prompt_version": "3.0_unified"
             }
         } 
     
     async def generate_with_pipeline(self, 
                                    progress_callback: Optional[Callable] = None) -> Dict[str, Any]:
-        """콘텐츠 파이프라인을 통한 생성"""
+        """Generate story through content pipeline"""
         if not self.story_outline or not self.target_age:
-            raise ValueError("스토리 개요와 대상 연령을 먼저 설정하세요.")
+            raise ValueError("Story outline and target age must be set first.")
         
         enhanced_outline = {
             **self.story_outline,
@@ -463,13 +392,13 @@ class ChatBotB:
             "target_age": self.target_age
         }
         
-        # 콘텐츠 파이프라인으로 생성
+        # Generate through content pipeline
         result = await self.content_pipeline.execute_pipeline(enhanced_outline, progress_callback=progress_callback)
         
         return result
     
     def _get_age_group_key(self, age: int) -> str:
-        """연령대 키 반환"""
+        """Return age group key"""
         if 4 <= age <= 7:
             return "age_4_7"
         elif 8 <= age <= 9:
@@ -478,42 +407,34 @@ class ChatBotB:
             return "age_other"
     
     def _update_average_generation_time(self, new_time: float):
-        """평균 생성 시간 업데이트"""
+        """Update average generation time"""
         current_avg = self.performance_metrics["average_generation_time"]
         successful_count = self.performance_metrics["successful_generations"]
         
         if successful_count == 1:
             self.performance_metrics["average_generation_time"] = new_time
         else:
-            # 증분 평균 계산
+            # Incremental average calculation
             self.performance_metrics["average_generation_time"] = (
                 (current_avg * (successful_count - 1) + new_time) / successful_count
             )
     
     def get_generation_status(self) -> Dict[str, Any]:
-        """생성자 생성 상태 조회"""
+        """Get generator status"""
         status = {
             "story_engine_status": "ready" if self.story_engine else "not_initialized",
             "text_generator_status": "ready" if self.text_generator else "not_initialized",
             "image_generator_status": "ready" if self.image_generator else "not_initialized",
             "voice_generator_status": "ready" if self.voice_generator else "not_initialized",
-            "enhanced_mode_available": bool(self.enhanced_text_generator and self.enhanced_image_generator),
             "target_age_set": self.target_age is not None,
             "story_outline_set": self.story_outline is not None,
             "performance_metrics": self.performance_metrics
         }
         
-        # Enhanced 생성기 상태 추가
-        if self.use_enhanced_generators:
-            status.update({
-                "enhanced_text_status": "ready" if self.enhanced_text_generator else "not_initialized",
-                "enhanced_image_status": "ready" if self.enhanced_image_generator else "not_initialized"
-            })
-        
         return status
     
     async def health_check(self) -> Dict[str, bool]:
-        """상태 확인"""
+        """Health check for all components"""
         health_status = {
             "openai_client": bool(self.openai_client),
             "elevenlabs_api_key": bool(self.elevenlabs_api_key),
@@ -524,65 +445,54 @@ class ChatBotB:
             "content_pipeline": bool(self.content_pipeline)
         }
         
-        # Enhanced 생성기 상태 확인
-        if self.use_enhanced_generators:
-            health_status.update({
-                "enhanced_text_generator": bool(self.enhanced_text_generator),
-                "enhanced_image_generator": bool(self.enhanced_image_generator)
-            })
+        # Individual generator health checks
+        if self.text_generator and hasattr(self.text_generator, 'health_check'):
+            text_health = await self.text_generator.health_check()
+            health_status["text_generator_detailed"] = text_health
             
-            # Enhanced 생성기 개별 헬스 체크
-            if self.enhanced_text_generator:
-                enhanced_text_health = await self.enhanced_text_generator.health_check()
-                health_status["enhanced_text_detailed"] = enhanced_text_health
-                
-            if self.enhanced_image_generator:
-                enhanced_image_health = await self.enhanced_image_generator.health_check()
-                health_status["enhanced_image_detailed"] = enhanced_image_health
+        if self.image_generator and hasattr(self.image_generator, 'health_check'):
+            image_health = await self.image_generator.health_check()
+            health_status["image_generator_detailed"] = image_health
         
-        # 전체 상태
-        basic_health = all([health_status[key] for key in ["openai_client", "text_generator", "image_generator", "voice_generator"]])
-        enhanced_health = True
-        
-        if self.use_enhanced_generators:
-            enhanced_health = health_status.get("enhanced_text_generator", False) and health_status.get("enhanced_image_generator", False)
-        
-        health_status["overall_healthy"] = basic_health and (enhanced_health if self.use_enhanced_generators else True)
+        # Overall health status
+        core_components = ["openai_client", "text_generator", "image_generator", "voice_generator"]
+        health_status["overall_healthy"] = all([health_status[key] for key in core_components])
         
         return health_status
     
     def get_performance_metrics(self) -> Dict[str, Any]:
-        """메트릭 조회"""
+        """Get performance metrics"""
         metrics = {
             "chatbot_metrics": self.performance_metrics
         }
         
-        # Enhanced 생성기 메트릭 추가
-        if self.use_enhanced_generators:
-            if self.enhanced_text_generator:
-                metrics["text_metrics"] = self.enhanced_text_generator.get_performance_metrics()
-            
-            if self.enhanced_image_generator:
-                metrics["image_metrics"] = self.enhanced_image_generator.get_performance_metrics()
+        # Add generator metrics if available
+        if self.text_generator and hasattr(self.text_generator, 'get_performance_metrics'):
+            metrics["text_metrics"] = self.text_generator.get_performance_metrics()
+        
+        if self.image_generator and hasattr(self.image_generator, 'get_performance_metrics'):
+            metrics["image_metrics"] = self.image_generator.get_performance_metrics()
         
         return metrics
     
     def cleanup(self):
-        """리소스 정리"""
-        logger.info("ChatBot B 리소스 정리 시작")
+        """Resource cleanup"""
+        logger.info("ChatBot B resource cleanup started")
         
-        # 생성기들 정리
+        # Cleanup generators
         if self.story_engine:
             self.story_engine = None
         
         if self.content_pipeline:
             self.content_pipeline = None
         
-        # Enhanced 생성기들 정리
-        if self.enhanced_text_generator:
-            self.enhanced_text_generator = None
+        if self.text_generator:
+            self.text_generator = None
         
-        if self.enhanced_image_generator:
-            self.enhanced_image_generator = None
+        if self.image_generator:
+            self.image_generator = None
         
-        logger.info("ChatBot B 리소스 정리 완료")
+        if self.voice_generator:
+            self.voice_generator = None
+        
+        logger.info("ChatBot B resource cleanup completed")
