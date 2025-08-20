@@ -93,6 +93,23 @@ python -m pytest tests/ -v
 python app.py
 ```
 
+### API Testing
+```bash
+# API 문서 확인 (Swagger UI)
+http://localhost:8000/docs
+
+# API 문서 확인 (ReDoc)
+http://localhost:8000/redoc
+
+# 개발용 JWT 토큰 생성
+curl -X POST "http://localhost:8000/api/v1/auth/token" \
+  -H "Content-Type: application/json" \
+  -d '{"user_id": "dev_user_001", "password": "dev"}'
+
+# WebSocket 연결 테스트
+# wss://localhost:8000/wss/v1/audio?token=YOUR_JWT_TOKEN
+```
+
 ### Vector Database Management
 ```bash
 # Use existing scripts
@@ -109,9 +126,46 @@ python scripts/data/manage_vector_db.py
 - **Vector Database** (`src/data/vector_db/`): LangChain + ChromaDB for RAG system
 - **Workflow System** (`src/core/workflow/`): Orchestrates the complete story generation pipeline
 
-### WebSocket API Endpoints
-- **Main Endpoint**: `/wss/v1/audio` - Unified audio processing with real-time voice cloning
-- **Legacy Endpoints**: `/api/v1/wss/` and `/wss/v1/legacy/` - Backward compatibility
+### API Architecture Overview
+
+#### **Integrated API Structure**
+```
+External Backend API ←→ JJongal AI Service ←→ Client App
+   (User/Community)        (AI/Story Generation)
+```
+
+#### **JJongal AI REST API** (`/api/v1/*`)
+- `POST /api/v1/auth/external-login` - 외부 토큰으로 내부 인증
+- `POST /api/v1/auth/refresh` - 내부 토큰 갱신
+- `GET /api/v1/users/me` - 외부 API에서 사용자 정보 조회
+- `POST /api/v1/stories/generate` - AI 동화 생성 + 커뮤니티 공유
+- `GET /api/v1/stories` - 생성된 동화 목록
+- `GET /api/v1/stories/{story_id}` - 동화 상세 조회
+- `PATCH /api/v1/stories/{story_id}` - 동화 정보 수정
+- `DELETE /api/v1/stories/{story_id}` - 동화 삭제
+- `GET /api/v1/community/stories` - 커뮤니티 동화 조회
+
+#### **External API Integration** (백엔드 연동)
+- `POST /user/signup` - 회원가입 (외부 처리)
+- `POST /user/login` - 로그인 (외부 처리)
+- `POST /oauth/{provider}` - 소셜 로그인 (외부 처리)
+- `POST /board/create` - 동화 커뮤니티 공유 (자동 연동)
+- `GET /board/read` - 커뮤니티 동화 목록 (연동 조회)
+
+#### **WebSocket API** (`/wss/v1/audio`)
+- Connection: `wss://domain/wss/v1/audio?token=JWT_TOKEN`
+- Message Types: `start_conversation`, `user_message`, `end_conversation`
+- Binary Audio: Voice cloning sample collection (5 samples → instant clone)
+- Server Events: `conversation_started`, `ai_response`, `voice_clone_progress`
+- Real-time Features: STT → ChatBot A → Voice Clone → TTS
+
+#### **Authentication Flow**
+```
+1. User login via External API → External Token
+2. External Token → JJongal AI → Internal JWT Token  
+3. API Calls: Authorization: Bearer {internal_token} + X-External-Token: {external_token}
+4. WebSocket: wss://domain/wss/v1/audio?token={internal_token}
+```
 
 ### Key Features
 1. **Real-time Voice Cloning**: Automatically collects and clones child's voice during conversation
@@ -182,37 +236,50 @@ If you feel tempted to create a new file, STOP and ask yourself:
 - **Legacy Endpoints**: `/api/v1/wss/` and `/wss/v1/legacy/` - Backward compatibility
 
 ### Technology Stack
-- **Backend**: FastAPI, SQLite, WebSockets
+- **Backend**: FastAPI, WebSockets, External API Integration
 - **AI/ML**: OpenAI (GPT-4, DALL-E 3, Whisper), ElevenLabs, LangChain
-- **Vector DB**: ChromaDB with OpenAI embeddings
+- **Vector DB**: ChromaDB with OpenAI embeddings (RAG knowledge base)
 - **Audio**: RNNoise for noise reduction, real-time voice cloning
+- **External Integration**: HTTP Client (aiohttp), JWT validation
 - **Deployment**: Docker, Docker Compose, Nginx
 
 ### Data Flow
 ```
-[Child Voice Input] → [WebSocket Audio Processing] → [쫑이 (ChatBot A): Story Collection + Voice Cloning]
-                                                         ↓
-[RAG System: Story Enhancement] → [아리 (ChatBot B): Complete Story Generation] → [Multimedia Output]
+[External API: User/Auth] ←→ [JJongal AI Service] ←→ [ChromaDB: RAG Knowledge]
+        ↓                           ↓                        ↓
+[Story Metadata Storage]    [AI Processing Pipeline]   [Vector Embeddings]
+        ↓                           ↓                        ↓
+[Community Board]      [WebSocket: Real-time Chat]    [Story Enhancement]
+                               ↓
+                    [쫑이→아리: Complete Story] → [Multimedia Output]
+                               ↓
+                    [Save to External API] → [Optional Community Sharing]
 ```
 
 ### Configuration
 - **Environment Variables**: Defined in `.env` file (OpenAI, ElevenLabs API keys)
-- **App Config**: `src/shared/configs/app.py` - Central configuration management
-- **Prompts**: `src/shared/configs/prompts.py` - Age-specific conversation prompts
+- **App Config**: `shared/configs/app_config.py` - Central configuration management
+- **Prompts**: `shared/configs/prompts_config.py` - Age-specific conversation prompts
 
 ### Testing
 - **Test Suite**: Use existing files in `tests/unit/` and `tests/integration/`
 - **Manual Testing**: WebSocket test endpoints and demo commands available
 - **Health Checks**: Built-in health monitoring at `/api/v1/health`
 
-### Output Structure
+### Data Storage Architecture
 ```
-output/
-├── stories/           # Generated story content and metadata
-├── temp/             # Temporary files (audio samples, images)
-├── conversations/    # Saved conversation history
-└── workflow_states/  # Story generation state management
+External API (SQL DB)          JJongal AI Service           ChromaDB (Vector)
+├── users/                    ├── temp/                    ├── embeddings/
+├── stories/                  │   ├── audio_samples/       ├── fairy_tale_kb/
+├── children_profiles/        │   ├── generated_images/    └── rag_documents/
+├── community_posts/          │   └── temp_audio/
+└── authentication/           └── sessions/ (memory)
 ```
+
+### Persistent vs Temporary Data
+- **External API**: All permanent data (users, stories, community)
+- **JJongal AI**: Temporary processing data, active sessions
+- **ChromaDB**: Vector embeddings for RAG knowledge base
 
 ### Important Notes
 - **Voice Cloning**: Requires 5 audio samples before cloning activation
@@ -221,13 +288,13 @@ output/
 - **Memory Management**: Persistent conversation storage with SQLite + LangChain
 - **Resource Limits**: Docker containers configured with memory limits (8GB for AI services)
 
-### Common Development Tasks (MODIFY EXISTING FILES ONLY)
-- **Adding New Story Elements**: Modify `src/core/chatbots/chat_bot_a/chat_bot_a.py`
-- **Updating Voice Processing**: Edit `src/core/voice/` components  
-- **RAG System Changes**: Work with `src/data/vector_db/` modules
-- **WebSocket Modifications**: Update `src/api/v1/endpoints/` handlers
-- **Chatbot Personality Updates**: Edit prompts in `src/shared/configs/prompts.py`
-- **Vector Database Management**: Use `scripts/data/manage_vector_db.py`
+### Common Development Tasks
+- **Adding New Story Elements**: Modify `chatbot/models/chat_bot_a/core/story_engine.py`
+- **Updating Voice Processing**: Edit `chatbot/models/voice_ws/` components  
+- **RAG System Changes**: Work with `chatbot/data/vector_db/` modules
+- **WebSocket Modifications**: Update `chatbot/api/v1/ws/` handlers
+- **Chatbot Personality Updates**: Edit prompts in `shared/configs/prompts_config.py`
+- **Vector Database Management**: Use `chatbot/data/vector_db/manage_vector_db.py`
 
 ### Project Evolution Notes
 - **Service rebranded** from "꼬꼬북" to "쫑알쫑알" (legacy references may still exist in some files)
