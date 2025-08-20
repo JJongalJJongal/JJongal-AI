@@ -1,15 +1,63 @@
-# CLAUDE.md
+# CLAUDE.md - JJongal-AI Project Guidelines
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+This file provides **STRICT RULES AND GUIDANCE** for Claude Code when working with this repository.
 
-## Project Overview
+## 🚫 CRITICAL RULES - NEVER BREAK THESE
+
+### 1. **NEVER CREATE NEW FILES WITHOUT EXPLICIT PERMISSION**
+- ❌ **DO NOT** create new Python files, test files, or any other files
+- ❌ **DO NOT** create new folders or directories  
+- ✅ **ONLY MODIFY** existing files that are already in the project structure
+- ✅ **ASK PERMISSION** before creating any new file
+
+### 2. **USE EXISTING STRUCTURE ONLY**
+- The project structure is already complete and well-organized
+- All necessary files, folders, and modules already exist
+- Your job is to **IMPROVE EXISTING FILES**, not create new ones
+- Work within the established architecture
+
+### 3. **EXISTING LOCATIONS FOR EVERYTHING**
+
+#### Tests (DO NOT CREATE NEW TEST FILES):
+- ✅ Use: `tests/unit/test_chatbot_a.py`
+- ✅ Use: `tests/unit/test_chatbot_b.py` 
+- ✅ Use: `tests/integration/test_api.py`
+- ✅ Use: `tests/integration/test_workflow.py`
+- ❌ **DO NOT** create `test_modern_chatbots.py` or any new test files
+
+#### Core Chatbots (MODIFY THESE):
+- ✅ Use: `src/core/chatbots/chat_bot_a/chat_bot_a.py`
+- ✅ Use: `src/core/chatbots/chat_bot_b/chat_bot_b.py`
+- ✅ Use: `src/core/chatbots/collaboration/jjong_ari_collaborator.py`
+
+#### Chains (MODIFY THESE):
+- ✅ Use: `src/core/chatbots/chat_bot_a/chains/conversation_chain.py`
+- ✅ Use: `src/core/chatbots/chat_bot_a/chains/rag_chain.py`
+
+#### Documentation (USE EXISTING):
+- ✅ Use: `docs/development/` for technical docs
+- ✅ Use: `docs/api/` for API documentation  
+- ✅ Use: `README.md` for project overview
+
+### 4. **MODIFICATION APPROACH**
+- **Enhance existing functions** rather than replacing them
+- **Add features to existing classes** rather than creating new ones
+- **Maintain backward compatibility** always
+- **Keep existing import paths** working
+
+### 5. **WHEN IN DOUBT**
+- **ASK** "Should I modify existing file X or create a new file?"
+- **DEFAULT** to modifying existing files
+- **NEVER ASSUME** you need a new file
+
+## 📋 Project Overview
 
 CCB_AI is an EduTech project called "쫑알쫑알" (JjongAlJjongAl/Chattering) that creates interactive fairy tale books from children's imagination using AI. The system consists of two main AI chatbots working together:
 
 - **ChatBot A (쫑이/Jjongi)**: Voice-interactive story collection bot that gathers story elements from children through real-time conversation
 - **ChatBot B (아리/Ari)**: Story completion bot that generates complete multimedia fairy tales with text, images, and voice
 
-## Development Commands
+## 🛠️ Development Commands
 
 ### Docker-based Development
 ```bash
@@ -38,11 +86,10 @@ make monitor              # Real-time performance monitoring
 # Install dependencies
 pip install -r requirements.txt
 
-# Run tests
-python -m pytest chatbot/tests/ -v
+# Run tests (USE EXISTING TEST FILES ONLY)
+python -m pytest tests/ -v
 
 # Direct server start (development)
-cd chatbot
 python app.py
 ```
 
@@ -65,24 +112,19 @@ curl -X POST "http://localhost:8000/api/v1/auth/token" \
 
 ### Vector Database Management
 ```bash
-# Initialize RAG system with sample data
-python -c "from chatbot.data.vector_db.core import VectorDB; VectorDB().initialize_with_samples()"
-
-# Populate vector database
-python chatbot/data/vector_db/populate_vector_db.py
-
-# Manage vector database
-python chatbot/data/vector_db/manage_vector_db.py
+# Use existing scripts
+python scripts/data/populate_vector_db.py
+python scripts/data/manage_vector_db.py
 ```
 
-## Architecture Overview
+## 🏗️ Architecture Overview
 
 ### Core Components
-- **FastAPI Application** (`chatbot/app.py`): Main server with WebSocket endpoints
-- **ChatBot A (쫑이)** (`chatbot/models/chat_bot_a/`): Story collection via voice interaction
-- **ChatBot B (아리)** (`chatbot/models/chat_bot_b/`): Complete story generation with multimedia
-- **Vector Database** (`chatbot/data/vector_db/`): LangChain + ChromaDB for RAG system
-- **Workflow System** (`chatbot/workflow/`): Orchestrates the complete story generation pipeline
+- **FastAPI Application** (`app.py`): Main server with WebSocket endpoints
+- **ChatBot A (쫑이)** (`src/core/chatbots/chat_bot_a/`): Story collection via voice interaction
+- **ChatBot B (아리)** (`src/core/chatbots/chat_bot_b/`): Complete story generation with multimedia
+- **Vector Database** (`src/data/vector_db/`): LangChain + ChromaDB for RAG system
+- **Workflow System** (`src/core/workflow/`): Orchestrates the complete story generation pipeline
 
 ### API Architecture Overview
 
@@ -132,6 +174,67 @@ External Backend API ←→ JJongal AI Service ←→ Client App
 4. **Age-Appropriate Content**: Specialized prompts for 4-7 and 8-9 age groups
 5. **WebSocket Streaming**: Real-time audio processing with binary data transfer
 
+## 🛠️ Development Commands
+
+### Docker-based Development
+```bash
+# Build and run development environment
+make dev                    # Start development environment with live reload
+make build                  # Build Docker images
+make run                    # Start production environment
+make stop                   # Stop all services
+```
+
+### Python Environment
+```bash
+# Install dependencies
+pip install -r requirements.txt
+
+# Run tests (USE EXISTING TEST FILES)
+python -m pytest tests/ -v
+
+# Direct server start (development)
+python app.py
+```
+
+### Vector Database Management
+```bash
+# Use existing scripts
+python scripts/data/populate_vector_db.py
+python scripts/data/manage_vector_db.py
+```
+
+## 📁 File Structure Rules
+
+```
+JJongal-AI/
+├── src/core/chatbots/           # MODIFY THESE FOR CHATBOT CHANGES
+│   ├── chat_bot_a/              # ChatBot A (쫑이)
+│   ├── chat_bot_b/              # ChatBot B (아리)  
+│   └── collaboration/           # Cooperation between A & B
+├── src/data/vector_db/          # MODIFY FOR RAG CHANGES
+├── tests/                       # USE EXISTING TEST FILES ONLY
+├── docs/                        # USE EXISTING DOCS STRUCTURE
+└── config/                      # Configuration files
+```
+
+## ⚠️ REMEMBER
+
+**Your role is to IMPROVE what exists, not CREATE what doesn't.**
+
+If you feel tempted to create a new file, STOP and ask yourself:
+1. "Is there already a file that does something similar?"  
+2. "Can I add this functionality to an existing file?"
+3. "Did the user explicitly ask for a new file?"
+
+99% of the time, the answer is to modify an existing file.
+
+---
+
+### WebSocket API Endpoints
+- **Main Endpoint**: `/wss/v1/audio` - Unified audio processing with real-time voice cloning
+- **Legacy Endpoints**: `/api/v1/wss/` and `/wss/v1/legacy/` - Backward compatibility
+
 ### Technology Stack
 - **Backend**: FastAPI, WebSockets, External API Integration
 - **AI/ML**: OpenAI (GPT-4, DALL-E 3, Whisper), ElevenLabs, LangChain
@@ -154,16 +257,12 @@ External Backend API ←→ JJongal AI Service ←→ Client App
 ```
 
 ### Configuration
-- **Environment Variables**: Defined in `.env` file
-  - `EXTERNAL_API_URL`: Backend API endpoint
-  - `EXTERNAL_API_KEY`: Backend API authentication
-  - `OPENAI_API_KEY`, `ELEVENLABS_API_KEY`: AI service keys
-  - `CHROMA_DB_PATH`: ChromaDB vector database path
+- **Environment Variables**: Defined in `.env` file (OpenAI, ElevenLabs API keys)
 - **App Config**: `shared/configs/app_config.py` - Central configuration management
 - **Prompts**: `shared/configs/prompts_config.py` - Age-specific conversation prompts
 
 ### Testing
-- **Test Suite**: `chatbot/tests/test_chatbot.py`
+- **Test Suite**: Use existing files in `tests/unit/` and `tests/integration/`
 - **Manual Testing**: WebSocket test endpoints and demo commands available
 - **Health Checks**: Built-in health monitoring at `/api/v1/health`
 
@@ -190,23 +289,12 @@ External API (SQL DB)          JJongal AI Service           ChromaDB (Vector)
 - **Resource Limits**: Docker containers configured with memory limits (8GB for AI services)
 
 ### Common Development Tasks
-- **Adding REST API Endpoints**: Modify `chatbot/api/v1/routers/api_routers.py`
 - **Adding New Story Elements**: Modify `chatbot/models/chat_bot_a/core/story_engine.py`
 - **Updating Voice Processing**: Edit `chatbot/models/voice_ws/` components  
 - **RAG System Changes**: Work with `chatbot/data/vector_db/` modules
 - **WebSocket Modifications**: Update `chatbot/api/v1/ws/` handlers
 - **Chatbot Personality Updates**: Edit prompts in `shared/configs/prompts_config.py`
 - **Vector Database Management**: Use `chatbot/data/vector_db/manage_vector_db.py`
-- **Authentication System**: Configure JWT settings in `chatbot/api/v1/dependencies.py`
-- **Data Models**: Update Pydantic models in `chatbot/api/v1/models.py`
-
-### API Development Guidelines
-- **REST API**: Follow FastAPI conventions with proper error handling and response models
-- **Authentication**: JWT-based authentication for both REST and WebSocket APIs
-- **Response Format**: Standardized JSON responses with success/error structure
-- **WebSocket**: Mixed JSON/Binary protocol for real-time audio processing
-- **Rate Limiting**: Implement appropriate limits for API endpoints
-- **Documentation**: Auto-generated via FastAPI/Swagger at `/docs` endpoint
 
 ### Project Evolution Notes
 - **Service rebranded** from "꼬꼬북" to "쫑알쫑알" (legacy references may still exist in some files)
@@ -214,3 +302,17 @@ External API (SQL DB)          JJongal AI Service           ChromaDB (Vector)
 - **Performance optimized** LangChain implementation with 60% memory reduction
 - **API standardized** to v1.0 specification with unified `/wss/v1/audio` endpoint
 - **Chatbot names**: Currently "부기" and "꼬기" in code, transitioning to "쫑이" and "아리"
+- **2025 LangChain Best Practices Applied**: LCEL, modern RAG, simplified architecture
+
+## ⚠️ REMEMBER
+
+**Your role is to IMPROVE what exists, not CREATE what doesn't.**
+
+If you feel tempted to create a new file, STOP and ask yourself:
+1. "Is there already a file that does something similar?"  
+2. "Can I add this functionality to an existing file?"
+3. "Did the user explicitly ask for a new file?"
+
+99% of the time, the answer is to modify an existing file.
+
+**Follow these rules strictly. The project structure is intentional and complete.**

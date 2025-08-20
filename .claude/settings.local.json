@@ -3,9 +3,7 @@
     "allow": [
       "Bash(rm:*)",
       "Bash(mkdir:*)",
-      "Bash(python3:*)",
-      "Bash(deactivate)",
-      "Bash(brew install:*)"
+      "Bash(python3:*)"
     ],
     "deny": []
   }
