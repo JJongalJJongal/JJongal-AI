@@ -10,7 +10,7 @@
 # import logging # get_module_logger 사용
 from typing import Dict, List, Any, Optional
 
-from .core import VectorDB # 상대 경로 유지 (같은 패키지 내)
+from .core import ModernVectorDB as VectorDB # Modern VectorDB 사용
 from src.shared.utils.logging import get_module_logger
 
 # 로깅 설정
@@ -22,65 +22,59 @@ def query_vector_db(
     collection_name: str = "fairy_tales",
     n_results: int = 8,
     metadata_filter: Optional[Dict[str, Any]] = None,
-    # age_group, theme, doc_type 등은 metadata_filter로 통합됨 (get_similar_stories 참고)
-) -> Dict[str, Any]: # VectorDB.query의 반환 타입과 일치 또는 format_query_results를 거친 타입
+) -> List[Dict[str, Any]]:
     """
-    벡터 DB에서 쿼리 실행 (내부 사용 함수 또는 get_similar_stories의 일부로 통합 고려)
+    Modern VectorDB 쿼리 실행
     
     Args:
-        vector_db: VectorDB 인스턴스
+        vector_db: ModernVectorDB 인스턴스
         query_text: 쿼리 텍스트
-        collection_name: 컬렉션 이름 (VectorDB는 이미 컬렉션이 설정된 상태)
+        collection_name: 컬렉션 이름 (무시됨 - 이미 설정됨)
         n_results: 반환할 결과 수
-        metadata_filter: ChromaDB 'where' 절에 직접 사용될 필터
+        metadata_filter: 메타데이터 필터
         
     Returns:
-        Dict: ChromaDB 검색 결과 (또는 VectorDB.query의 결과)
+        List[Dict]: 검색 결과 목록
     """
-    logger.info(f"컬렉션 '{collection_name}'에서 '{query_text[:50]}...' 쿼리 실행. 필터: {metadata_filter}")
+    logger.info(f"Modern VectorDB에서 '{query_text[:50]}...' 쿼리 실행. 필터: {metadata_filter}")
     try:
-        # VectorDB.query()는 collection_name을 파라미터로 받지 않음 
-        # (이미 get_collection으로 설정된 상태)
-        results = vector_db.query(
-            query_texts=[query_text],
-            n_results=n_results,
-            where=metadata_filter
+        # Modern VectorDB의 similarity_search 사용
+        results = vector_db.similarity_search(
+            query=query_text,
+            k=n_results,
+            filter=metadata_filter  # Modern VectorDB는 'filter' 파라미터 사용
         )
         return results
     except Exception as e:
-        logger.error(f"벡터 DB 쿼리 중 오류 발생: {e}", exc_info=True)
-        return {} # 오류 시 빈 결과 반환
+        logger.error(f"Modern VectorDB 쿼리 중 오류 발생: {e}", exc_info=True)
+        return []  # 오류 시 빈 결과 반환
 
-def format_query_results(results: Dict[str, List[Any]]) -> List[Dict[str, Any]]:
+def format_query_results(results: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     """
-    ChromaDB 쿼리 결과를 가공하여 반환 (기존 기능 유지, 필요시 수정)
+    Modern VectorDB 검색 결과를 표준 형식으로 변환
     
     Args:
-        results: ChromaDB 쿼리 결과 (또는 VectorDB.query의 결과)
+        results: Modern VectorDB의 similarity_search 결과
         
     Returns:
-        List[Dict]: 가공된 결과 리스트 (문서 내용, 메타데이터, 유사도 등 포함 가능)
+        List[Dict]: 표준화된 결과 리스트
     """
-    formatted = []
-    if not results or not results.get('ids') or not results.get('ids')[0]:
-        logger.info("쿼리 결과가 비어있거나 형식이 올바르지 않아 포맷팅할 수 없습니다.")
-        return formatted
+    if not results:
+        logger.info("쿼리 결과가 비어있습니다.")
+        return []
 
-    ids = results.get('ids')[0]
-    documents = results.get('documents', [[]])[0] # 문서 내용이 없을 수 있음
-    metadatas = results.get('metadatas', [[]])[0] # 메타데이터가 없을 수 있음
-    distances = results.get('distances', [[]])[0] # 유사도(거리)가 없을 수 있음
-    
-    for i, doc_id in enumerate(ids):
+    formatted = []
+    for i, result in enumerate(results):
         entry = {
-            "id": doc_id,
-            "document": documents[i] if documents and i < len(documents) else None,
-            "metadata": metadatas[i] if metadatas and i < len(metadatas) else {},
-            "distance": distances[i] if distances and i < len(distances) else None
+            "id": f"doc_{i}",  # Modern VectorDB는 별도 ID가 없으므로 생성
+            "document": result.get("content", ""),
+            "metadata": result.get("metadata", {}),
+            "distance": None,  # Modern VectorDB는 거리 점수를 따로 제공하지 않음
+            "source": result.get("source", "unknown")
         }
         formatted.append(entry)
     
-    # logger.debug(f"포맷된 쿼리 결과: {formatted}") # 너무 길 수 있으므로 주의
+    logger.debug(f"포맷된 쿼리 결과 {len(formatted)}개")
     return formatted
 
 def get_similar_stories(

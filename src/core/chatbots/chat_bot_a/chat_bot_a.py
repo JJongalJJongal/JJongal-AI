@@ -58,10 +58,12 @@ class ChatBotA:
         )
         
         # Modern RAG chain (2025 best practices)
+        import os
+        vector_db_path = os.getenv("VECTOR_DB_PATH", "data/chroma_db")
         self.rag_chain = ModernRAGChain(
             model_name=model_name,
             temperature=temperature,
-            vector_db_path=None  # Will be set from environment or config
+            vector_db_path=vector_db_path
         )
         
         self.story_tool = StoryAnalysisTool()

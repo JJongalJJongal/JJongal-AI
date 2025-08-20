@@ -22,8 +22,8 @@ from langchain_openai import ChatOpenAI
 
 # Project imports
 from .base_generator import BaseGenerator
-from chatbot.data.vector_db.core import VectorDB
-from chatbot.data.vector_db.query import get_similar_stories
+from src.data.vector_db.core import ModernVectorDB as VectorDB
+from src.data.vector_db.query import get_similar_stories
 
 # logging 설정
 logger = get_module_logger(__name__)
@@ -42,14 +42,14 @@ class TextGenerator(BaseGenerator):
     
     def __init__(self,
                  openai_client = None,
-                 vector_db_path: str = None,
+                 vector_db_path = None,
                  collection_name: str = "fairy_tales",
                  prompts_file_path: str = "chatbot/data/prompts/chatbot_b_prompts.json",
                  max_retries: int = 3,
                  model_name: str = "gpt-4o",
                  temperature: float = 0.7,
                  enable_performance_tracking: bool = True,
-                 model_kwargs: Dict[str, Any] = None):
+                 model_kwargs = None):
         """
         Args:
             openai_client: OpenAI 클라이언트
@@ -85,7 +85,7 @@ class TextGenerator(BaseGenerator):
         self.vector_store = None
         self.retriever = None
         self.text_chains = {}  # 연령별 체인
-        self.prompts = None
+        self.prompts
         
         # 성능 추적
         self.performance_metrics = {
@@ -154,28 +154,22 @@ class TextGenerator(BaseGenerator):
         
         try:
             self.vector_store = VectorDB(
-                persist_directory=self.vector_db_path, 
-                embedding_model='nlpai-lab/KURE-v1', 
-                use_hybrid_mode=True
-            )
+                persist_directory=self.vector_db_path
+                )
             logger.info(f"VectorDB 객체 생성 완료")
             
-            # 컬렉션 존재 확인
-            try:
-                collection = self.vector_store.get_collection(self.collection_name)
-                logger.info(f"ChromaDB 컬렉션 '{self.collection_name}' 연결 완료")
-                
-                # 컬렉션 데이터 개수 확인
+            # vectorstore 
+            if hasattr(self.vector_store, 'vectorstore') and self.vector_store.vectorstore:
+                logger.info(f"VectorDB '{self.collection_name}' complete")
+
                 try:
-                    count = collection.count()
-                    logger.info(f"컬렉션 '{self.collection_name}' 데이터 개수: {count}")
-                except Exception as count_e:
-                    logger.warning(f"컬렉션 데이터 개수 확인 실패: {count_e}")
-                    
-            except Exception as e:
-                logger.warning(f"컬렉션 '{self.collection_name}' 연결 실패: {e}")
-                logger.warning("RAG 기능은 사용할 수 없지만 기본 생성은 가능합니다")
-        
+                    test_results = self.vector_store.similarity_search("test", k=1)
+                    logger.info(f"VectorDB test complete")
+                except Exception as test_e:
+                    logger.warning(f"VectorDB Test failed: {test_e}")
+            else:
+                logger.warning(f"VectorDB link state not found")
+
         except Exception as e:
             logger.error(f"ChromaDB 초기화 실패: {e}")
             self.vector_store = None
@@ -199,27 +193,16 @@ class TextGenerator(BaseGenerator):
     def _create_age_specific_chain(self, age_group: str):
         """연령별 특화 체인 생성"""
         try:
-            # Enhanced 프롬프트 구조에서 연령별 프롬프트 가져오기
-            enhanced_prompts = self.prompts.get("enhanced_story_generation", {})
+            if self.prompts is None:
+                logger.warning("Prompts not loaded, using fallback values")
+                enhanced_prompts = {}
+            else:
+                enhanced_prompts = self.prompts.get("enhanced_story_generation", {})
+
             age_config = enhanced_prompts.get(age_group, {})
             structured_prompt = age_config.get("structured_prompt", {})
             
-            # 구조화된 프롬프트 구성
-            role = structured_prompt.get("role", "전문 동화 작가로서")
-            objective = structured_prompt.get("objective", "몰입감 있는 동화를 제작해주세요.")
-            instructions = structured_prompt.get("instructions", [])
-            reasoning_steps = structured_prompt.get("reasoning_steps", [])
-            
-            # 프롬프트 템플릿 생성
-            system_template = self._build_structured_prompt(
-                role=role,
-                objective=objective,
-                instructions=instructions,
-                reasoning_steps=reasoning_steps,
-                age_group=age_group
-            )
-            
-            prompt_template = ChatPromptTemplate.from_template(system_template)
+            prompt_template = ChatPromptTemplate.from_template(structured_prompt)
             
             # LLM 모델 설정
             llm = ChatOpenAI(
@@ -243,7 +226,7 @@ class TextGenerator(BaseGenerator):
         """구조화된 프롬프트 생성 (OpenAI 권장 형식)"""
         
         # Chain-of-Thought 추론 단계 통합
-        cot_templates = self.prompts.get("chain_of_thought_templates", {})
+        cot_templates = self.prompts("chain_of_thought_templates")
         # reasoning_template = cot_templates.get("story_development_reasoning", {}) # 현재 미사용
         
         prompt_parts = [
@@ -431,7 +414,8 @@ class TextGenerator(BaseGenerator):
             return result
             
         except Exception as e:
-            self._update_performance_metrics(0, False, age_group_key if 'age_group_key' in locals() else "unknown")
+            age_group = locals().get('age_group_key', 'unknown')
+            self._update_performance_metrics(0, False, age_group=age_group)
             logger.error(f"Enhanced 텍스트 생성 실패: {e}")
             raise
 
@@ -741,8 +725,8 @@ class TextGenerator(BaseGenerator):
         """상호작용 질문 추출"""
         question_patterns = [
             r'질문[:\s]*(.*?\?)',
-            r'(.*?는\s*어떻게\s*생각하나요\?)',
-            r'(.*?라면\s*어떻게\s*할까요\?)'
+            r'(.*?는\s*어떻게\s*생각해\?)',
+            r'(.*?라면\s*어떻게\s*할까\?)'
         ]
         
         for pattern in question_patterns:
@@ -787,18 +771,3 @@ class TextGenerator(BaseGenerator):
                                      key=self.performance_metrics["age_group_usage"].get, 
                                      default="unknown") if self.performance_metrics["age_group_usage"] else "unknown"
         }
-    
-    async def health_check(self) -> Dict[str, bool]:
-        """Enhanced 상태 확인"""
-        health_status = {
-            "enhanced_prompts_loaded": bool(self.prompts),
-            "vector_db_connected": bool(self.vector_store),
-            "age_4_7_chain_ready": "age_4_7" in self.text_chains,
-            "age_8_9_chain_ready": "age_8_9" in self.text_chains,
-            "performance_tracking": self.enable_performance_tracking
-        }
-        
-        # 전체 상태
-        health_status["overall_healthy"] = all(health_status.values())
-        
-        return health_status 

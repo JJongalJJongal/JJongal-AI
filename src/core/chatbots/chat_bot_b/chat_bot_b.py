@@ -8,17 +8,14 @@ Simplified story generation based on API_DOCUMENTATION.md v2.0:
 - 2025 LangChain LCEL chains for efficiency
 """
 
-import os
 import time
 import uuid
-import asyncio
-from typing import Dict, Any, Optional, Callable, List
+from typing import Dict, Any, Optional, Callable
 from datetime import datetime
 
 # 2025 LangChain imports
 from langchain_core.prompts import ChatPromptTemplate
-from langchain_core.runnables import RunnableParallel, RunnablePassthrough
-from langchain_core.output_parsers import StrOutputParser, JsonOutputParser
+from langchain_core.output_parsers import JsonOutputParser
 from langchain_openai import ChatOpenAI
 
 from src.shared.utils.logging import get_module_logger
@@ -33,11 +30,11 @@ logger = get_module_logger(__name__)
 
 class ModernAri:
     """
-    Modern Ari (ChatBot B) - API v2.0 Compliant Story Generation
+    Modern Ari (ChatBot B) - Story Generation
     
     Features:
-    1. Accepts StoryRequest (API v2.0 format)
-    2. Returns Story with chapters (API v2.0 format)
+    1. Accepts StoryRequest 
+    2. Returns Story with chapters 
     3. LCEL-based generation chains
     4. Voice configuration support
     5. Multimedia generation (images + audio)
@@ -47,7 +44,7 @@ class ModernAri:
                  model_name: str = "gpt-4o-mini",
                  output_dir: str = "output"):
         """
-        Initialize Modern Ari
+        Initialize Ari
         
         Args:
             model_name: LLM model name
@@ -293,7 +290,6 @@ JSON 형식으로 응답:
 
 # Backward compatibility aliases
 ChatBotB = ModernAri
-EnhancedAri = ModernAri
 
 # Factory function  
 def create_modern_ari(**kwargs) -> ModernAri:

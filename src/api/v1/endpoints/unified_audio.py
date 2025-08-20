@@ -25,11 +25,10 @@ from shared.utils import ConnectionManager
 from src.shared.utils.logging import get_module_logger
 
 # Services
-from chatbot.models.chat_bot_a import ChatBotA
-from chatbot.data.vector_db.core import VectorDB
-from chatbot.models.voice_ws.processors.voice_cloning_processor import VoiceCloningProcessor
+from src.core.chatbots.chat_bot_a.chat_bot_a import ChatBotA
+from src.data.vector_db.core import ModernVectorDB
+from src.core.chatbots.collaboration.jjong_ari_collaborator import ModernJjongAriCollaborator
 from src.shared.utils.audio import generate_speech
-from shared.utils.langchain_manager import langchain_manager
 
 logger = get_module_logger(__name__)
 
@@ -40,7 +39,7 @@ class JjongAlAudioWebSocket:
     
     def __init__(self):
         self.active_sessions = {}
-        self.voice_cloning_processor = VoiceCloningProcessor()
+        self.collaborator = ModernJjongAriCollaborator()
     
     async def initialize_chatbot_session(self, client_id: str, user_info: Dict[str, Any], 
                                        start_message: Dict[str, Any]) -> ChatBotA:
@@ -51,29 +50,15 @@ class JjongAlAudioWebSocket:
             age = payload.get("age", 7)
             interests = payload.get("interests", [])
             
-            # VectorDB 초기화
-            import os
-            chroma_base = os.getenv("CHROMA_DB_PATH", "/app/chatbot/data/vector_db")
-            vector_db_path = os.path.join(chroma_base, "main")
-            
-            vector_db = VectorDB(
-                persist_directory=vector_db_path,
-                embedding_model="nlpai-lab/KURE-v1",
-                use_hybrid_mode=True
-            )
-            
-            # ChatBot A 인스턴스 생성 (새로운 LangChain 관리자 활용)
+            # Modern ChatBot A 인스턴스 생성
             chatbot_a = ChatBotA(
-                vector_db_instance=vector_db,
-                token_limit=10000,
-                use_langchain=True,
-                enhanced_mode=True,
-                session_id=f"session_{client_id}",
-                langchain_manager=langchain_manager  # 통합 관리자 주입
+                model_name="gpt-4o-mini",
+                temperature=0.8,
+                enable_monitoring=True
             )
             
             # 초기화
-            greeting = chatbot_a.initialize_chat(
+            greeting = await chatbot_a.initialize_chat(
                 child_name=child_name,
                 age=age,
                 interests=interests

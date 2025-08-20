@@ -11,7 +11,7 @@
 from .core import VectorDB
 from .importers import process_story_data
 from .query import get_similar_stories
-from shared.utils.file_utils import (
+from src.shared.utils.file_utils import (
     ensure_directory,
     load_json,
     save_json
@@ -29,7 +29,7 @@ def get_db_type_path(base_directory: str, db_type: str) -> str:
 
 def check_collection_info(vector_db_instance, collection_name: str):
     """컬렉션 정보 확인 함수를 지연 import로 호출"""
-    from shared.utils.vector_db_utils import check_collection_info as _check_collection_info
+    from src.shared.utils.vector_db_utils import check_collection_info as _check_collection_info
     return _check_collection_info(vector_db_instance, collection_name)
 
 __all__ = [

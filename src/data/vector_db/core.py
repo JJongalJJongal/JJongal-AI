@@ -1,19 +1,8 @@
-"""
-Modern Vector Database Core - 2025 ChromaDB Best Practices
-
-Simplified ChromaDB integration with LangChain compatibility.
-Focuses on essential RAG functionality for the JJongal-AI project.
-"""
-
 import os
-import uuid
-import logging
-from typing import Dict, List, Optional, Union, Any
+from typing import Dict, List, Optional, Any
 
 # Modern ChromaDB and LangChain imports
 try:
-    import chromadb
-    from chromadb.config import Settings
     from langchain_community.vectorstores import Chroma
     from langchain_openai import OpenAIEmbeddings
     from langchain_community.embeddings import HuggingFaceEmbeddings
@@ -40,7 +29,7 @@ class ModernVectorDB:
     """
 
     def __init__(self, 
-                 persist_directory: str = None, 
+                 persist_directory = None, 
                  collection_name: str = "fairy_tales",
                  use_openai: bool = True):
         """
@@ -63,18 +52,7 @@ class ModernVectorDB:
         
         logger.info(f"Modern VectorDB initialized: {collection_name} at {persist_directory}")
     def _setup_embeddings(self):
-        """Setup modern embeddings with OpenAI fallback"""
-        if self.use_openai:
-            try:
-                # Try OpenAI embeddings first
-                return OpenAIEmbeddings(
-                    model="text-embedding-3-small",
-                    chunk_size=1000
-                )
-            except Exception as e:
-                logger.warning(f"OpenAI embeddings failed: {e}, falling back to Korean model")
-        
-        # Fallback to Korean model
+        """Setup modern embeddings"""
         try:
             return HuggingFaceEmbeddings(
                 model_name="nlpai-lab/KURE-v1",
@@ -154,7 +132,7 @@ class ModernVectorDB:
 # Backward compatibility
 VectorDB = ModernVectorDB
 
-def create_vector_db(persist_directory: str = None, **kwargs) -> ModernVectorDB:
+def create_vector_db(persist_directory = None, **kwargs) -> ModernVectorDB:
     """Factory function for creating ModernVectorDB"""
     return ModernVectorDB(persist_directory=persist_directory, **kwargs)
     

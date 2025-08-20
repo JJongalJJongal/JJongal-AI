@@ -22,7 +22,8 @@ def get_prompts_dir() -> Path:
         Path: 프롬프트 디렉토리 경로
     """
     project_root = get_project_root()
-    return project_root / "chatbot" / "data" / "prompts"
+    # Updated to use correct prompts directory
+    return project_root / "config" / "prompts"
 
 
 def load_chatbot_a_prompts() -> Dict[str, Any]:
@@ -80,7 +81,7 @@ def get_default_chatbot_a_prompts() -> Dict[str, Any]:
     """
     return {
         "system_message_template": [
-            "당신은 '부기'라는 이름의 아이들과 대화하는 AI 챗봇입니다.",
+            "당신은 '쫑이'라는 이름의 아이들과 대화하는 AI 챗봇입니다.",
             "당신의 역할은 {age_group}세 아이와 대화하며 재미있는 동화 만들기를 돕는 것입니다.",
             "아이의 이름은 {child_name}이고, 관심사는 {interests}입니다.",
             "아이와 친근하고 재미있게 대화하며, 질문을 통해 동화 요소(캐릭터, 배경, 문제 상황, 해결책)를 수집하세요.",
@@ -90,9 +91,9 @@ def get_default_chatbot_a_prompts() -> Dict[str, Any]:
             "한국어 조사 규칙을 정확히 준수하세요 (예: '민준이'와 '지은이'처럼 받침 유무에 따라 다른 조사 사용)."
         ],
         "greeting_templates": [
-            "안녕 {child_name}아/야! 난 부기야. 오늘은 우리 재미있는 이야기를 만들어볼까?",
-            "반가워 {child_name}아/야! 부기라고 해. 함께 신나는 동화를 만들어보자!",
-            "{child_name}아/야, 안녕! 나는 부기야. 너랑 같이 멋진 이야기를 만들고 싶어!"
+            "안녕 {child_name}아/야! 난 쫑이야. 오늘은 우리 재미있는 이야기를 만들어볼까?",
+            "반가워 {child_name}아/야! 쫑이라고 해. 함께 신나는 동화를 만들어보자!",
+            "{child_name}아/야, 안녕! 나는 쫑이야. 너랑 같이 멋진 이야기를 만들고 싶어!"
         ],
         "follow_up_questions": [
             "어떤 동물이 이야기에 나오면 좋을까?",
@@ -122,8 +123,8 @@ def get_default_chatbot_b_prompts() -> Dict[str, Any]:
     return {
         "system": {
             "role": [
-                "너는 아리라는 이름을 가진 챗봇이야. 너는 쫑이 (chatbot_a) 와 대화를 하면서 동화를 만들어줄거야.",
-                "너는 쫑이 (chatbot_a) 가 만들어 준 대략적인 동화 스토리를 통해 상세한 스토리를 만들어줄거야.",
+                "너는 **아리(Ari)**라는 이름을 가진 챗봇이야. 너는 쫑이(Jjongi, chatbot_a)와 협력하여 동화를 만들어줄거야.",
+                "너는 쫑이(Jjongi)가 만들어 준 대략적인 동화 스토리를 통해 상세한 스토리를 만들어줄거야.",
                 "너는 상세한 스토리를 만들고 그 상세한 스토리를 바탕으로 동화 이미지와 내레이션, 동화 인물의 대사를 만들어줄거야.",
                 "너는 동화 이미지를 만들 때 아이들의 연령대, 관심사에 맞게 이미지를 만들어야 해. 예를 들어, 공룡을 좋아하는 5세 아이에게는 귀엽고 친근한 공룡 이미지를 제공해.",
                 "너는 동화 내래이션을 만들 때 동화의 스토리, 이미지에 맞게 내레이션을 만들어야 해. 내레이션은 아이들이 쉽게 이해할 수 있는 언어로 구성해야 해.",
@@ -217,4 +218,42 @@ def analyze_prompts_for_particles() -> Dict[str, Any]:
         
     except Exception as e:
         logger.error(f"Error analyzing prompts for particles: {e}")
-        return {"error": str(e)} 
+        return {"error": str(e)}
+
+
+def load_prompts_config(chatbot_type: str) -> Dict[str, Any]:
+    """
+    Unified prompts loading function for both chatbots
+    
+    Args:
+        chatbot_type: "chatbot_a" or "chatbot_b"
+        
+    Returns:
+        Dict[str, Any]: Prompts configuration
+    """
+    prompts_dir = get_prompts_dir()
+    prompts_file = prompts_dir / f"{chatbot_type}_prompts.json"
+    
+    try:
+        with open(prompts_file, 'r', encoding='utf-8') as f:
+            config = json.load(f)
+        
+        logger.info(f"Successfully loaded {chatbot_type} prompts from {prompts_file}")
+        
+        # Return specific section for chatbot_a, full config for chatbot_b
+        if chatbot_type == "chatbot_a" and "chatbot_a" in config:
+            return config["chatbot_a"]
+        elif chatbot_type == "chatbot_b":
+            return config
+        else:
+            logger.warning(f"Unexpected config structure for {chatbot_type}")
+            return config
+            
+    except Exception as e:
+        logger.error(f"Failed to load {chatbot_type} prompts: {e}")
+        
+        # Return appropriate defaults
+        if chatbot_type == "chatbot_a":
+            return get_default_chatbot_a_prompts()
+        else:
+            return get_default_chatbot_b_prompts() 
