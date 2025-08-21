@@ -1,132 +1,212 @@
-"""
-WebSocket JWT 인증 의존성
-
-FastAPI 의존성 주입을 사용한 JWT 토큰 검증
-"""
-from fastapi import WebSocket, status, WebSocketException, Query, Depends, status
-from typing import Dict, Any, Optional
-from src.shared.utils.logging import get_module_logger
+import os
 import jwt
 import asyncio
-from datetime import datetime
 
-from chatbot.models.voice_ws.processors.auth_processor import AuthProcessor
+from datetime import datetime, timedelta
+from typing import Dict, Any, Optional, Callable, Type, TypeVar
+from functools import lru_cache, wraps
+from fastapi import WebSocket, WebSocketException, Query, Depends, status, HTTPException
+from contextlib import asynccontextmanager
+
+from src.shared.utils.logging import get_module_logger
+from src.shared.configs.app import get_env_vars, get_app_settings
+from src.shared.utils.websocket import ConnectionManager
 
 logger = get_module_logger(__name__)
 
-# AuthProcessor Instance 생성
-auth_processor = AuthProcessor() 
+T = TypeVar('T')
 
-class WebSocketAuthError(WebSocketException):
-    """WebSocket 인증 오류"""
+# ======= Authentication Dependencies ======
+
+class AuthenticationError(WebSocketException):
     def __init__(self, reason: str = "Authentication Failed"):
         super().__init__(code=status.WS_1008_POLICY_VIOLATION, reason=reason)
 
+class HTTPAuthenticationError(HTTPException):
+    def __init__(self, detail: str = "Authentication Failed"):
+        super().__init__(status_code=status.HTTP_401_UNAUTHORIZED, detail=detail)
 
-async def verify_jwt_token(
-    websocket: WebSocket,
-    token: Optional[str] = Query(None, description="JWT 인증 토큰")
-) -> Dict[str, Any]:
-    
-    """
-    WebSocket JWT 토큰 검증 의존성
-    
-    Args:
-        websocket: WebSocket 연결 객체
-        token: Query parameter로 전달된 JWT 토큰
-    
-    Returns:
-        Dict[str, Any]: 토큰에서 추출한 사용자 정보
+class JWTManager:
+    def __init__(self):
+        self.env_vars = get_env_vars()
+        self.secret_key = self.env_vars.get("jwt_secret_key", "jjongal_default_secret")
+        self.algorithm = "HS256"
+        self.default_expiry_hours = 24
         
-    Raises:
-        WebSocketAuthError: 인증 실패 시
-    """
+    def generate_token(self, payload: Dict[str, Any], expiry_hours: int = None) -> str:
+        expiry_hours = expiry_hours or self.default_expiry_hours
+        expiry = datetime.utcnow() + timedelta(hours=expiry_hours)
+        
+        token_data = {
+            "exp": expiry,
+            "iat": datetime.utcnow(),
+            **payload
+        }
+        
+        return jwt.encode(token_data, self.secret_key, algorithm=self.algorithm)
+
+    def verify_token(self, token: str) -> Dict[str, Any]:
+        return jwt.decode(token, self.secret_key, algorithms=[self.algorithm])
+    
+    def create_development_token(self, user_id: str = "dev_user") -> str:
+        payload = {
+            "user_id": user_id,
+            "user_name": "dev_user",
+            "role": "developer",
+            "dev": True
+        }
+        return self.generate_token(payload=payload)
+
+# Singleton JWT manager
+@lru_cache()
+def get_jwt_manager() -> JWTManager:
+    return JWTManager()
+
+async def verify_jwt_token_websocket(
+    websocket: WebSocket,
+    token: Optional[str] = Query(None, description="JWT authentication token"),
+    jwt_manager: JWTManager = Depends(get_jwt_manager)
+) -> Dict[str, Any]:
     if not token:
-        logger.warning("WebSocket 연결 시도 : 토큰 없음")
-        raise WebSocketAuthError("토큰이 필요합니다.") # 인증 실패 시 예외 발생
+        logger.warning("Websocket connection attempt : no token")
+        raise AuthenticationError("JWT token required")
     
     try:
-        user_info = auth_processor.verify_jwt_token(token)
-        
-        if not user_info:
-            logger.warning("WebSocket 인증 실패 : 유효하지 않은 토큰")
-            raise WebSocketAuthError("유효하지 않은 토큰입니다.") # 인증 실패 시 예외 발생
-        
-        logger.info(f"WebSocket 인증 성공 : {user_info.get('user_id', 'unknown')}") # 인증 성공 시
+        user_info: jwt_manager.verify_token(token)
+        logger.info(f"WebSocket auth success: {user_info.get("user_id", "unknown")}")
         return user_info
-    
     except jwt.ExpiredSignatureError:
-        logger.warning("WebSocket 인증 실패 : 토큰 만료")
-        raise WebSocketAuthError("토큰이 만료되었습니다.") # 인증 실패 시 예외 발생
-    
+        logger.warning("WebSocket auth failed: token expired")
+        raise AuthenticationError("Token expired")
     except jwt.InvalidTokenError as e:
-        logger.warning(f"WebSocket 인증 실패 : 잘못된 토큰 - {e}")
-        raise WebSocketAuthError("잘못된 토큰입니다.") # 인증 실패 시 예외 발생
-    
+        logger.warning(f"WebSocket auth failed: invalid token - {e}")
+        raise AuthenticationError("Invalid token")
     except Exception as e:
-        logger.error(f"WebSocket 인증 중 오류 : {e}")
-        raise WebSocketAuthError("인증 처리 중 오류가 발생했습니다.") # 인증 실패 시 예외 발생
-  
-# 현재는 아이 접근 권한 검증 로직 없음. 추후 추가 예정
-# async def verify_child_permission(
-#     child_name: str, 
-#     user_info: Dict[str, Any] = Depends(verify_jwt_token) # JWT 토큰 검증 의존성 주입
-# ) -> Dict[str, Any]:
+        logger.error(f"WebSocket auth error: {e}")
+        raise AuthenticationError("Authentication error occured")
     
-#     """
-#     아이 접근 권한 검증 의존성
+# ==== Service Factory Pattern ====
+class ServiceFactory:
+    _instances: Dict[str, Any] = {}
+    _initializers: Dict[str, Callable] = {}
     
-#     Args:
-#         child_name: 접근하려는 아이 이름
-#         user_info: JWT에서 추출한 사용자 정보
+    @classmethod
+    def register(cls, service_name: str, initializer: Callable) -> None:
+        cls._initializers[service_name] = initializer
         
-#     Returns:
-#         Dict[str, Any]: 검증된 사용자 정보
+    @classmethod
+    async def get_instance(cls, service_name: str) -> Any:
+        # Get service instance (singleton)
+        if service_name not in cls._instances:
+            if service_name not in cls._initializers:
+                raise ValueError(f"Unknown serivce: {service_name}")
+            
+            initializer = cls._initializers[service_name]
+            if asyncio.iscoroutinefunction(initializer):
+                cls._instances[service_name] = await initializer()
+            else:
+                cls._instances[service_name] = initializer()
+        
+        return cls._instances[service_name]
     
-#     Raises:
-#         WebSocketAuthError: 권한 없음
-#     """
+# Service initializers
+def _init_connection_manager() -> ConnectionManager:
+    app_settings = get_app_settings()
+    timeout = app_settings.get("ws_connection_timeout", 1800)
+    return ConnectionManager(connection_timeout=timeout)
 
-       
-async def get_connection_manager():
-    """연결 관리자 의존성"""
-    from shared.utils import ConnectionManager
-    return ConnectionManager(connection_timeout=1800) # 30분 타임아웃
+def _init_chatbot_a():
+    from src.core.chatbots.chat_bot_a.chat_bot_a import ChatBotA
+    return ChatBotA(model_name="gpt-4o-mini", temperature=0.8, enable_monitoring=True)
 
-async def get_audio_processor():
-    """오디오 processor 의존성"""
-    from ...models.voice_ws.processors.audio_processor import AudioProcessor
-    return AudioProcessor()
+def _init_voice_cloning_processor():
+    from src.core.voice.processors.voice_cloning_processor import VoiceCloningProcessor
+    return VoiceCloningProcessor()
 
-# 개발용 간단 인증
+def _init_jjong_ari_collaborator():
+    from src.core.chatbots.collaboration.jjong_ari_collaborator import ModernJjongAriCollaborator
+    return ModernJjongAriCollaborator()
+
+# Register services
+ServiceFactory.register("connection_manager", _init_connection_manager)
+ServiceFactory.register("chatbot_a", _init_chatbot_a)
+ServiceFactory.register("voice_processor", _init_voice_cloning_processor)
+ServiceFactory.register("collaborator", _init_jjong_ari_collaborator)
+
+# ==== Dependency Injection Functions ====
+
+async def get_connection_manager() -> ConnectionManager:
+    return await ServiceFactory.get_instance("connection_manager")
+
+async def get_chatbot_a():
+    return await ServiceFactory.get_instance("chatbot_a")
+
+async def get_voice_cloning_processor():
+    return await ServiceFactory.get_instance("voice_processor")
+
+async def get_jjong_ari_collaborate():
+    return await ServiceFactory.get_instance("collaborate")
+
+# ==== Context Managers ====
+
+@asynccontextmanager
+async def websocket_session_context(client_id: str, websocket: WebSocket, connection_manager: ConnectionManager):
+    # Websocket session context manager - Auto-manage connection lifecycle
+    try:
+        await connection_manager.connect(websocket, client_id)
+        logger.info(f"WebSocket session started: {client_id}")
+        yield connection_manager
+    except Exception as e:
+        logger.error(f"WebSocket session error: {e}")
+        raise
+    finally:
+        connection_manager.disconnect(client_id=client_id)
+        logger.info(f"WebSocket session ended: {client_id}")
+
+# ==== Decorators ====
+def Websocket_error_handler(func: Callable) -> Callable:
+    @wraps(func)
+    async def wrapper(*args, **kwargs):
+        try:
+            return await func(*args, **kwargs)
+        except AuthenticationError:
+            raise
+        except Exception as e:
+            logger.error(f"WebSocket handler error ({func.__name__}): {e}")
+            raise
+    return wrapper
+
+# ====== Development / Testing Support ======
+
 async def verify_development_token(
     websocket: WebSocket,
-    token: Optional[str] = Query(None, description="개발용 토큰")
+    token: Optional[str] = Query(None, description="Development token"),
+    jwt_manager: JWTManager = Depends(get_jwt_manager)
 ) -> Dict[str, Any]:
-    """개발용 간단 인증"""
-    if not token or token != "dev-token":
-        raise WebSocketAuthError("개발 토큰이 필요합니다.")
+    # Development simple authentication
+    env_vars = get_env_vars()
     
-    return {
-        "user_id": "dev_user",
-        "username": "개발용_사용자",
-        # "role": "child",
-    }
+    if os.getenv("ENVIRONMENT") != "development":
+        raise AuthenticationError("Available only in development mode")
+    
+    if not token:
+        raise AuthenticationError("Development token required")
+    
+    # Support fixed dev token or JWT token
+    if token == env_vars.get("ws_auth_token", "dev-token"):
+        return {
+            "user_id": "dev_user",
+            "username": "dev_user",
+            "role": "developer",
+            "dev": True
+        }
+        
+    try:
+        return jwt_manager.verify_token(token)
+    except Exception:
+        raise AuthenticationError("Invalid development token")
 
-# ChatBot B 의존성
-async def get_chatbot_b():
-    """ChatBot B 인스턴스 의존성"""
-    from chatbot.models.chat_bot_b import ChatBotB
-    return ChatBotB()
-
-# WorkflowOrchestrator 의존성  
-async def get_workflow_orchestrator():
-    """Workflow Orchestrator 인스턴스 의존성"""
-    from chatbot.workflow.orchestrator import WorkflowOrchestrator
-    return WorkflowOrchestrator()
-
-# External API Service 의존성
-async def get_external_api_service():
-    """External API Service 인스턴스 의존성"""
-    from chatbot.api.v1.services.external_api_service import ExternalAPIService
-    return ExternalAPIService()
+    
+    
+        
+    
