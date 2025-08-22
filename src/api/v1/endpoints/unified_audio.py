@@ -85,7 +85,7 @@ class JjongAlAudioHandler:
         self.message_handlers = {
             "start_conversation": self.handle_start_conversation,
             "user_message": self.handle_user_message,
-            "end_conversation": self.handle_end_versation,
+            "end_conversation": self.handle_end_conversation,
             "audio_config": self.handle_audio_config,
         }
 
@@ -349,7 +349,7 @@ class JjongAlAudioHandler:
 
                 # Generate story asynchronously
                 asyncio.create_task(
-                    self._generate_story_async(
+                    self._generate_story_with_progress(
                         websocket, client_id, session, collaborator
                     )
                 )
@@ -412,14 +412,55 @@ class JjongAlAudioHandler:
             logger.warning(f"TTS generation failed: {e}")
             return None
 
-    async def _generate_story_async(
+    async def _generate_story_with_progress(
         self,
         websocket: WebSocket,
         client_id: str,
         session: Dict[str, Any],
         collaborator,
     ):
+        """Real-time story generation with detailed progress tracking"""
         try:
+
+            await websocket.send_json(
+                WebSocketMessageBuilder.progress(
+                    "story_generation_progress",
+                    current=1,
+                    total=5,
+                    message="쫑이가 대화 내용을 분석하고 있어요...",
+                )
+            )
+            await asyncio.sleep(2)  # Simulate analysis time
+
+            await websocket.send_json(
+                WebSocketMessageBuilder.progress(
+                    "story_generation_progress",
+                    current=2,
+                    total=5,
+                    message="아리가 동화 구조를 설계하고 있어요...",
+                )
+            )
+            await asyncio.sleep(3)
+
+            await websocket.send_json(
+                WebSocketMessageBuilder.progress(
+                    "story_generation_progress",
+                    current=3,
+                    total=5,
+                    message="등장인물과 배경을 만들고 있어요...",
+                )
+            )
+            await asyncio.sleep(2)
+
+            await websocket.send_json(
+                WebSocketMessageBuilder.progress(
+                    "story_generation_progress",
+                    current=4,
+                    total=5,
+                    message="멋진 동화를 완성하고 있어요...",
+                )
+            )
+
             story_id = await collaborator.create_story(
                 child_name=session.get("child_name", "friend"),
                 age=session.get("age", 7),
@@ -429,14 +470,25 @@ class JjongAlAudioHandler:
                 },
             )
 
+            await websocket.send_json(
+                WebSocketMessageBuilder.progress(
+                    "story_generation_progress",
+                    current=5,
+                    total=5,
+                    message="그림과 음성을 추가하고 있어요...",
+                )
+            )
+            await asyncio.sleep(2)
+
             if story_id:
                 await websocket.send_json(
                     WebSocketMessageBuilder.success(
                         "story_completed",
                         {
                             "story_id": story_id,
-                            "message": "Your fairy tale is ready!",
+                            "message": f"{session.get('child_name', '친구')}만의 특별한 동화가 완성되었어요!",
                             "api_url": f"/api/v1/stories/{story_id}",
+                            "completion_time": datetime.now().isoformat(),
                         },
                     )
                 )
