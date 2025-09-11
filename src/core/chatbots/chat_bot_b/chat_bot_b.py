@@ -96,18 +96,26 @@ class ModernAri:
 4. 3-5개 챕터로 구성
 5. 각 챕터는 이미지화 가능하도록 묘사
 
+**중요**: 이미지 생성을 위한 image_prompt는 반드시 **영어로** 작성하세요. 
+이미지 품질 향상을 위해 영어 묘사가 필요합니다.
+
 JSON 형식으로 응답:
 {{
   "title": "동화 제목",
   "chapters": [
     {{
       "chapter_number": 1,
-      "title": "챕터 제목",
-      "content": "챕터 내용",
-      "image_prompt": "이미지 생성을 위한 프롬프트"
+      "title": "챕터 제목 (한글)",
+      "content": "챕터 내용 (한글, 대사 포함)",
+      "image_prompt": "English image description for DALL-E 3: characters, setting, mood, style details"
     }}
   ]
-}}"""),
+}}
+
+**image_prompt 작성 예시:**
+- "Cozy children's book illustration of a friendly rabbit and a young child in a magical garden with colorful flowers, hand-drawn watercolor style, soft pastels, warm lighting"
+- "Beautiful storybook scene showing a gentle bear helping a lost princess in a peaceful forest, colored pencil sketch with watercolor washes, nostalgic fairy tale atmosphere"
+"""),
             ("human", "위 정보를 바탕으로 동화를 생성해주세요.")
         ])
         

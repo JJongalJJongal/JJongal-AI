@@ -120,7 +120,13 @@ class ImageGenerator(BaseGenerator):
     
     async def _generate_chapter_image(self, chapter: Dict[str, Any], story_id: str, target_age: int, chapter_index: int) -> Dict[str, Any]:
         try:
-            prompt = self._create_dalle_prompt(chapter, target_age)
+            # Use pre-generated English image_prompt if available, otherwise create one
+            if "image_prompt" in chapter and chapter["image_prompt"].strip():
+                prompt = chapter["image_prompt"]
+                logger.info(f"Chapter {chapter_index + 1} using pre-generated English prompt")
+            else:
+                prompt = self._create_dalle_prompt(chapter, target_age)
+                logger.info(f"Chapter {chapter_index + 1} generated prompt from Korean content")
 
             logger.info(f"Chapter {chapter_index + 1} Image generation ...")
 
@@ -168,9 +174,13 @@ class ImageGenerator(BaseGenerator):
             
             characters = self._extract_characters(chapter)
             setting = self._extract_setting(chapter)
+            
+            # Create scene description for age_8_9 template
+            scene_description = f"{characters} {setting}"
 
             final_prompt = prompt_template.replace("{{characters}}", characters)
             final_prompt = final_prompt.replace("{{setting}}", setting)
+            final_prompt = final_prompt.replace("{{scene_description}}", scene_description)
 
             safe_prompt = self._apply_safety_filters(final_prompt, optimization_config)
 
@@ -184,12 +194,35 @@ class ImageGenerator(BaseGenerator):
         content = chapter.get("content", "")
         text = f"{title} {content}".lower()
 
-        characters = []
-        char_keywords = ["토끼", "곰", "새", "고양이", "강아지", "공주", "왕자", "아이", "친구"]
+        # Korean to English character mapping
+        char_mapping = {
+            "토끼": "rabbit",
+            "곰": "bear", 
+            "새": "bird",
+            "고양이": "cat",
+            "강아지": "puppy",
+            "공주": "princess",
+            "왕자": "prince",
+            "아이": "child",
+            "친구": "friend",
+            "소년": "boy",
+            "소녀": "girl",
+            "할머니": "grandmother",
+            "할아버지": "grandfather",
+            "엄마": "mother",
+            "아빠": "father",
+            "사자": "lion",
+            "코끼리": "elephant",
+            "기린": "giraffe",
+            "원숭이": "monkey",
+            "다람쥐": "squirrel",
+            "거북이": "turtle"
+        }
 
-        for keyword in char_keywords:
-            if keyword in text:
-                characters.append(keyword)
+        characters = []
+        for korean_word, english_word in char_mapping.items():
+            if korean_word in text:
+                characters.append(english_word)
                 if len(characters) >= 3:
                     break
         
@@ -200,11 +233,33 @@ class ImageGenerator(BaseGenerator):
         content = chapter.get("content", "")
         text = f"{title} {content}".lower()
 
-        settings = ["숲", "집", "학교", "공원", "바다", "하늘", "정원", "마을", "유치원"]
+        # Korean to English setting mapping
+        setting_mapping = {
+            "숲": "forest",
+            "집": "house",
+            "학교": "school", 
+            "공원": "park",
+            "바다": "ocean",
+            "하늘": "sky",
+            "정원": "garden",
+            "마을": "village",
+            "유치원": "kindergarten",
+            "놀이터": "playground",
+            "도서관": "library",
+            "병원": "hospital",
+            "가게": "shop",
+            "시장": "market",
+            "강": "river",
+            "호수": "lake",
+            "산": "mountain",
+            "들판": "meadow",
+            "성": "castle",
+            "동굴": "cave"
+        }
 
-        for setting in settings:
-            if setting in text:
-                return f"in a peaceful {setting}"
+        for korean_word, english_word in setting_mapping.items():
+            if korean_word in text:
+                return f"in a peaceful {english_word}"
         return "in a beautiful peaceful place"
     
     def _apply_safety_filters(self, prompt: str, config: Dict[str, Any]) -> str:
@@ -219,7 +274,7 @@ class ImageGenerator(BaseGenerator):
             for old, new in replacements.items():
                 prompt = prompt.replace(old, new)
             
-            max_length = safety_config.get("max_prompt_length", 400)
+            max_length = safety_config.get("max_prompt_length", 1000)  # Increased for better quality
             if len(prompt) > max_length:
                 prompt = prompt[:max_length-3] + "..."
             
