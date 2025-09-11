@@ -1,5 +1,19 @@
 """
-WebSocket 요청 핸들러 모듈
+Voice Handlers Module for JJongal-AI
 
-각 WebSocket 엔드포인트의 구체적인 로직을 담당하는 핸들러들을 포함합니다.
+Audio processing handlers for WebSocket endpoints and real-time
+voice interaction in the storytelling system.
 """
+
+try:
+    from .audio_handler import AudioHandler, get_audio_handler
+    _audio_handler_available = True
+except ImportError:
+    _audio_handler_available = False
+
+__all__ = []
+
+if _audio_handler_available:
+    __all__.extend(["AudioHandler", "get_audio_handler"])
+
+__version__ = "1.0.0"

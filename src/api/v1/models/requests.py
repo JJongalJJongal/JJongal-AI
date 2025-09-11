@@ -22,7 +22,7 @@ class TokenResponse(BaseModel):
     access_token: str
     expires_in: int = 3600
 
-class StoryRequest(BaseModel):
+class StoryGenerationRequest(BaseModel):
     """Story generation request"""
     child_name: str # Child Name
     age: int
@@ -31,6 +31,9 @@ class StoryRequest(BaseModel):
     story_elements: Dict[str, Any]
     child_voice_id: Optional[str] = None
 
+# Backward compatibility alias
+StoryRequest = StoryGenerationRequest
+
 class Chapter(BaseModel):
     """Story chapter"""
     chapter_number: int
@@ -38,6 +41,27 @@ class Chapter(BaseModel):
     content: str
     image_url: Optional[str] = None
     audio_url: Optional[str] = None
+
+class AudioUploadRequest(BaseModel):
+    """Audio upload request"""
+    session_id: str
+    audio_format: Literal["wav", "mp3", "m4a", "ogg"] = "wav"
+    sample_rate: Optional[int] = 16000
+    metadata: Optional[Dict[str, Any]] = None
+
+class VoiceCloneRequest(BaseModel):
+    """Voice cloning request"""
+    session_id: str
+    child_name: str
+    audio_samples: List[str]  # List of audio file paths or base64 encoded audio
+    clone_name: Optional[str] = None
+
+class ChatRequest(BaseModel):
+    """Chat request"""
+    session_id: str
+    message: str
+    message_type: Literal["text", "voice"] = "text"
+    metadata: Optional[Dict[str, Any]] = None
 
 class Story(BaseModel):
     """Complete story response"""

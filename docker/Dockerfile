@@ -1,4 +1,4 @@
-# 꼬꼬북(CCB_AI) - 아동 AI 동화 생성 시스템
+# PeepPeep (쫑알쫑알) - 아동 AI 동화 생성 시스템
 # 멀티스테이지 빌드를 사용하여 이미지 크기 최적화
 
 # =============================================================================
@@ -47,8 +47,8 @@ FROM python:3.11-slim AS runtime
 ARG DEBIAN_FRONTEND=noninteractive
 
 # 메타데이터
-LABEL maintainer="CCB_AI Team"
-LABEL description="꼬꼬북 - 아동 AI 동화 생성 시스템"
+LABEL maintainer="PeepPeep Team"
+LABEL description="PeepPeep (쫑알쫑알) - 아동 AI 동화 생성 시스템"
 LABEL version="1.0.0"
 
 # 시스템 의존성 설치 (런타임에 필요한 것들만)
@@ -60,7 +60,7 @@ RUN apt-get update && apt-get install -y \
     libsndfile1-dev \
     libasound2-dev \
     portaudio19-dev \
-    libflac12 \
+    libflac-dev \
     libvorbis0a \
     libopus0 \
     libmpg123-0 \
@@ -70,7 +70,7 @@ RUN apt-get update && apt-get install -y \
     && rm -rf /var/lib/apt/lists/*
 
 # 비루트 사용자 생성 (보안 강화)
-RUN useradd --create-home --shell /bin/bash ccb_user
+RUN useradd --create-home --shell /bin/bash peeppeep_user
 
 # 가상환경을 빌드 스테이지에서 복사
 COPY --from=builder /opt/venv /opt/venv
@@ -80,7 +80,7 @@ ENV PATH="/opt/venv/bin:$PATH"
 WORKDIR /app
 
 # 애플리케이션 코드 먼저 복사
-COPY --chown=ccb_user:ccb_user . /app/
+COPY --chown=peeppeep_user:peeppeep_user . /app/
 
 # 필요한 디렉토리 생성 및 최종 권한 설정
 # 이 단계에서 모든 디렉토리가 생성되고 올바른 소유자가 설정됩니다.
@@ -92,10 +92,12 @@ RUN mkdir -p /app/output/workflow_states \
              /app/output/temp/voice_samples \
              /app/output/conversations \
              /app/logs \
-             /app/chatbot/data/vector_db/main \
-             /app/chatbot/data/vector_db/detailed \
-             /app/chatbot/data/vector_db/summary \
-    && chown -R ccb_user:ccb_user /app
+             /app/src/data/db \
+             /app/src/data/vector_db/main \
+             /app/src/data/vector_db/detailed \
+             /app/src/data/vector_db/summary \
+             /app/config/prompts \
+    && chown -R peeppeep_user:peeppeep_user /app
 
 # Python 경로 설정
 ENV PYTHONPATH="/app"
@@ -105,7 +107,7 @@ ENV PYTHONDONTWRITEBYTECODE=1
 # 애플리케이션 설정
 ENV APP_ENV=production
 ENV INTEGRATED_MODE=true
-ENV CHROMA_DB_PATH=/app/chatbot/data/vector_db
+ENV CHROMA_DB_PATH=/app/src/data/vector_db
 ENV LOG_LEVEL=INFO
 
 # 성능 최적화 설정
@@ -121,7 +123,7 @@ ENV NUMBA_CACHE_DIR=/tmp/numba_cache
 EXPOSE 8000
 
 # 사용자 전환
-USER ccb_user
+USER peeppeep_user
 
 # 헬스체크 설정
 HEALTHCHECK --interval=30s --timeout=10s --start-period=90s --retries=3 \
@@ -131,7 +133,7 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=90s --retries=3 \
 RUN echo '#!/bin/bash\n\
 set -e\n\
 \n\
-echo "꼬꼬북 AI 시스템 시작 중..."\n\
+echo "PeepPeep (쫑알쫑알) AI 시스템 시작 중..."\n\
 echo "Python 버전: $(python --version)"\n\
 echo "설치된 패키지 확인..."\n\
 \n\
@@ -140,7 +142,7 @@ echo "필수 디렉토리 확인 완료."\n\
 \n\
 # FastAPI 서버 시작\n\
 echo "FastAPI 서버 시작 중... (포트: 8000)"\n\
-exec uvicorn chatbot.app:app \\\n\
+exec uvicorn app:app \\\n\
     --host 0.0.0.0 \\\n\
     --port 8000 \\\n\
     --workers 1 \\\n\
@@ -153,4 +155,4 @@ exec uvicorn chatbot.app:app \\\n\
 CMD ["/app/start.sh"]
 
 # 개발 모드용 오버라이드 (docker-compose.dev.yml에서 사용)
-# CMD ["uvicorn", "chatbot.app:app", "--host", "0.0.0.0", "--port", "8000", "--reload"] 
+# CMD ["uvicorn", "app:app", "--host", "0.0.0.0", "--port", "8000", "--reload"] 

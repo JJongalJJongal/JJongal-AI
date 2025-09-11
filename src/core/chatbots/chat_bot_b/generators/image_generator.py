@@ -29,6 +29,15 @@ class ImageGenerator(BaseGenerator):
     
     def _setup_dalle_tool(self) -> None:
         try:
+            # Auto-load OpenAI API key from environment if not provided
+            if not self.openai_client:
+                import os
+                openai_api_key = os.getenv('OPENAI_API_KEY')
+                if not openai_api_key:
+                    logger.warning("OpenAI API Key not found in environment")
+                    self.dalle_tool = None
+                    return
+            
             self.dalle_wrapper = DallEAPIWrapper(
                 model="dall-e-3",
                 size="1024x1024",
@@ -40,7 +49,7 @@ class ImageGenerator(BaseGenerator):
                 api_wrapper=self.dalle_wrapper
             )
 
-            logger.info("DALL-E Tool initialize")
+            logger.info("DALL-E Tool initialize success")
 
         except Exception as e:
             logger.error(f"DALL-E Tool initialization failed : {e}")

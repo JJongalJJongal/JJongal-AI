@@ -1,0 +1,292 @@
+# JJongal-AI Production Logging Configuration  
+# Optimized for performance, security, and monitoring
+
+version: 1
+disable_existing_loggers: false
+
+# Formatters optimized for production monitoring
+formatters:
+  json_structured:
+    format: '{"timestamp": "%(asctime)s", "level": "%(levelname)s", "service": "jjongal-ai", "logger": "%(name)s", "module": "%(module)s", "function": "%(funcName)s", "line": %(lineno)d, "message": "%(message)s", "process_id": "%(process)d", "thread_id": "%(thread)d"}'
+    datefmt: '%Y-%m-%dT%H:%M:%S.%fZ'
+  
+  compact:
+    format: '%(asctime)s [%(levelname)s] %(name)s: %(message)s'
+    datefmt: '%Y-%m-%d %H:%M:%S'
+  
+  error_detailed:
+    format: '%(asctime)s - %(name)s - %(levelname)s - %(pathname)s:%(lineno)d - %(funcName)s - %(message)s'
+    datefmt: '%Y-%m-%dT%H:%M:%S.%fZ'
+
+# Handlers for production environment
+handlers:
+  # Console output for container logs
+  console:
+    class: logging.StreamHandler
+    level: INFO
+    formatter: json_structured
+    stream: ext://sys.stdout
+  
+  # Application logs
+  app_file:
+    class: logging.handlers.TimedRotatingFileHandler
+    level: INFO
+    formatter: json_structured
+    filename: /var/log/jjongal/app.log
+    when: midnight
+    interval: 1
+    backupCount: 30
+    encoding: utf-8
+    utc: true
+  
+  # Error logs with detailed information
+  error_file:
+    class: logging.handlers.TimedRotatingFileHandler
+    level: ERROR
+    formatter: error_detailed
+    filename: /var/log/jjongal/error.log
+    when: midnight
+    interval: 1
+    backupCount: 90
+    encoding: utf-8
+    utc: true
+  
+  # Security audit logs
+  security_file:
+    class: logging.handlers.TimedRotatingFileHandler
+    level: WARNING
+    formatter: json_structured
+    filename: /var/log/jjongal/security.log
+    when: midnight
+    interval: 1
+    backupCount: 180  # Keep for 6 months
+    encoding: utf-8
+    utc: true
+  
+  # Performance monitoring logs
+  performance_file:
+    class: logging.handlers.TimedRotatingFileHandler
+    level: INFO
+    formatter: json_structured
+    filename: /var/log/jjongal/performance.log
+    when: hourly
+    interval: 6  # Every 6 hours
+    backupCount: 120  # Keep for 30 days
+    encoding: utf-8
+    utc: true
+  
+  # Business metrics and analytics
+  analytics_file:
+    class: logging.handlers.TimedRotatingFileHandler
+    level: INFO
+    formatter: json_structured
+    filename: /var/log/jjongal/analytics.log
+    when: hourly
+    interval: 1
+    backupCount: 720  # Keep for 30 days
+    encoding: utf-8
+    utc: true
+
+# Production loggers configuration
+loggers:
+  # Root application logger
+  jjongal:
+    level: INFO
+    handlers: [console, app_file, error_file]
+    propagate: false
+  
+  # API access logs (minimal in production)
+  uvicorn.access:
+    level: WARNING
+    handlers: [console]
+    propagate: false
+  
+  uvicorn.error:
+    level: ERROR
+    handlers: [console, error_file]
+    propagate: false
+  
+  # FastAPI logs
+  fastapi:
+    level: WARNING
+    handlers: [console, error_file]
+    propagate: false
+  
+  # WebSocket logs (limited for performance)
+  jjongal.websocket:
+    level: WARNING
+    handlers: [console, app_file]
+    propagate: false
+  
+  # AI Chatbot operations
+  jjongal.chatbot.a:
+    level: INFO
+    handlers: [console, app_file, analytics_file]
+    propagate: false
+  
+  jjongal.chatbot.b:
+    level: INFO
+    handlers: [console, app_file, analytics_file]
+    propagate: false
+  
+  # Voice processing (performance critical)
+  jjongal.voice:
+    level: WARNING
+    handlers: [console, performance_file]
+    propagate: false
+  
+  # Vector database (monitor for performance)
+  jjongal.vectordb:
+    level: WARNING
+    handlers: [console, performance_file]
+    propagate: false
+  
+  # Authentication and security (critical monitoring)
+  jjongal.auth:
+    level: WARNING
+    handlers: [console, security_file, error_file]
+    propagate: false
+  
+  # External API integrations
+  jjongal.external_api:
+    level: WARNING
+    handlers: [console, app_file, error_file]
+    propagate: false
+  
+  # Story generation analytics
+  jjongal.story:
+    level: INFO
+    handlers: [console, analytics_file]
+    propagate: false
+  
+  # Database operations (monitor slow queries)
+  sqlalchemy.engine:
+    level: WARNING
+    handlers: [console, performance_file]
+    propagate: false
+  
+  # LangChain operations (minimal logging)
+  langchain:
+    level: ERROR
+    handlers: [console, error_file]
+    propagate: false
+  
+  # External API calls (monitor for failures)
+  openai:
+    level: WARNING
+    handlers: [console, error_file]
+    propagate: false
+  
+  elevenlabs:
+    level: WARNING
+    handlers: [console, error_file]
+    propagate: false
+  
+  # Health monitoring
+  jjongal.health:
+    level: INFO
+    handlers: [console, app_file]
+    propagate: false
+  
+  # Backup and data management
+  jjongal.backup:
+    level: INFO
+    handlers: [console, app_file]
+    propagate: false
+  
+  # Child safety monitoring (critical)
+  jjongal.safety:
+    level: INFO
+    handlers: [console, security_file, analytics_file]
+    propagate: false
+
+# Root logger
+root:
+  level: WARNING
+  handlers: [console]
+
+# Production-specific settings
+production:
+  # Data privacy and security
+  log_sql_queries: false
+  log_request_body: false
+  log_response_body: false
+  log_websocket_messages: false
+  verbose_error_traces: false
+  log_ai_model_calls: false
+  
+  # Never log sensitive data in production
+  log_auth_tokens: false
+  log_api_keys: false
+  log_user_data: false
+  log_personal_info: false
+  
+  # Performance monitoring
+  log_slow_queries: true
+  slow_query_threshold: 2.0  # seconds (stricter than dev)
+  log_memory_usage: true
+  memory_check_interval: 600  # 10 minutes
+  log_performance_metrics: true
+  
+  # Business metrics
+  log_user_interactions: true
+  log_story_generations: true
+  log_voice_processing: true
+  log_error_rates: true
+  
+  # Compliance and audit
+  log_gdpr_requests: true
+  log_data_retention: true
+  log_backup_operations: true
+
+# Log aggregation and monitoring integration
+monitoring:
+  # ELK Stack integration
+  elasticsearch:
+    enabled: true
+    hosts: ["elasticsearch:9200"]
+    index_prefix: "jjongal-logs"
+  
+  # Metrics export
+  prometheus:
+    enabled: true
+    metrics_port: 9090
+    export_log_metrics: true
+  
+  # Alert thresholds
+  alerts:
+    error_rate_threshold: 0.05  # 5% error rate
+    response_time_threshold: 2.0  # seconds
+    memory_usage_threshold: 0.85  # 85% memory usage
+
+# File management for production
+file_management:
+  cleanup_old_logs: true
+  max_age_days: 90
+  compress_rotated: true
+  create_directories: true
+  log_rotation_time: "02:00"  # 2 AM UTC
+  
+  # Log shipping to external systems
+  ship_to_s3: true
+  s3_bucket: "${LOG_BACKUP_BUCKET}"
+  s3_retention_days: 365
+  
+  # Log encryption for sensitive data
+  encrypt_logs: true
+  encryption_key: "${LOG_ENCRYPTION_KEY}"
+
+# Console settings (minimal for production)
+console:
+  colors: false
+  width: 200
+  show_time: true
+  show_level: true
+  show_path: false
+
+# Resource limits
+limits:
+  max_log_size: 1073741824  # 1GB per log file
+  max_memory_usage: 536870912  # 512MB for logging
+  max_queue_size: 10000
+  flush_interval: 5  # seconds

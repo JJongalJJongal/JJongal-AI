@@ -5,14 +5,14 @@ This is the main chatbot for the Jjongi project.
 Langchain + Langsmith 
 """
 
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Optional
 from datetime import datetime
 import time
 
 from src.shared.utils.logging import get_module_logger
-from shared.utils.age_group_utils import AgeGroupManager
+from src.shared.utils.age_group_utils import AgeGroupManager
 
-from langchain.schema import AIMessage, HumanMessage
+from langchain_core.messages import AIMessage, HumanMessage
 
 from src.shared.utils.korean import format_with_josa, process_template_with_particles
 
@@ -21,6 +21,7 @@ from .chains.rag_chain import ModernRAGChain
 from .memory.conversation_memory import ConversationMemoryManager
 from .monitoring.langsmith_config import setup_langsmith_tracing
 from .tools.story_analysis_tool import StoryAnalysisTool
+from .voice_options import JjongiVoiceManager, JjongiVoiceType
 
 logger = get_module_logger(__name__)
 
@@ -32,7 +33,8 @@ class ChatBotA:
     Features:
     - story collection for children having fun with the chatbot
     - conversation (4-7 age, 8-9 age)
-    - real-time voice chat
+    - real-time voice chat with multiple voice options
+    - 3 different voice personalities (cheerful, gentle, playful)
     - Langsmith monitoring
     """
     
@@ -49,6 +51,9 @@ class ChatBotA:
         # Age group manager
         self.age_group_manager = AgeGroupManager()
         
+        # Voice options manager
+        self.voice_manager = JjongiVoiceManager()
+        
         # LangChain components initialize
         self.memory_manager = ConversationMemoryManager()
         self.conversation_chain = ConversationChain(
@@ -57,9 +62,28 @@ class ChatBotA:
             memory_manager=self.memory_manager
         )
         
-        # Modern RAG chain (2025 best practices)
+        # Modern RAG chain (2025 best practices) - ChatBot A uses Summary DB
         import os
-        vector_db_path = os.getenv("VECTOR_DB_PATH", "data/chroma_db")
+        
+        # ChatBot A (쫑이) uses Summary DB for quick story element retrieval
+        summary_db_path = os.getenv("SUMMARY_DB_PATH") or os.getenv("CHATBOT_A_DB_PATH")
+        if not summary_db_path:
+            # Use 3-Tier structure: Summary DB for ChatBot A
+            base_path = os.getenv("VECTOR_DB_PATH") or os.getenv("CHROMA_DB_PATH") or "data/chroma_db"
+            summary_db_path = os.path.join(base_path, "summary")
+            logger.info(f"ChatBot A (쫑이): Summary DB 경로 설정 - {summary_db_path}")
+        
+        # Check if path exists and create if in development
+        if not os.path.exists(summary_db_path):
+            if "data/chroma_db" in summary_db_path:
+                os.makedirs(summary_db_path, exist_ok=True)
+                logger.info(f"Created Summary DB directory for ChatBot A: {summary_db_path}")
+            else:
+                logger.warning(f"Summary DB path doesn't exist: {summary_db_path}")
+                summary_db_path = None
+        
+        vector_db_path = summary_db_path
+                
         self.rag_chain = ModernRAGChain(
             model_name=model_name,
             temperature=temperature,
@@ -79,12 +103,66 @@ class ChatBotA:
         
         logger.info("ChatBot A (Jjongi) initialized with LangChain + LangSmith")
         
+    async def health_check(self) -> bool:
+        """
+        Health check for ChatBot A
+        
+        Returns:
+            bool: True if healthy, False otherwise
+        """
+        try:
+            # Check if core components are available
+            checks = [
+                self.memory_manager is not None,
+                self.conversation_chain is not None,
+                self.rag_chain is not None,
+                self.story_tool is not None
+            ]
+            
+            if not all(checks):
+                logger.warning("ChatBot A health check failed: missing core components")
+                return False
+            
+            # Check if LLM is responsive (development mode - skip if no API key)
+            if hasattr(self.conversation_chain, 'llm'):
+                try:
+                    # Check if OpenAI API key is available
+                    import os
+                    openai_key = os.getenv("OPENAI_API_KEY")
+                    if not openai_key or openai_key.startswith("sk-proj-REPLACE"):
+                        logger.info("ChatBot A health check: 개발 모드 (API 키 없음) - LLM 테스트 건너뛰기")
+                        return True
+                    
+                    # Quick test with minimal token usage only if API key is available
+                    test_result = await self.conversation_chain.llm.ainvoke("테스트")
+                    if not test_result:
+                        logger.warning("ChatBot A health check failed: LLM not responsive")
+                        return False
+                except Exception as e:
+                    logger.info(f"ChatBot A health check: 개발 모드에서 LLM 오류 무시 - {e}")
+                    return True
+            
+            # Check database connection
+            try:
+                if hasattr(self.memory_manager, '_get_optimized_connection'):
+                    conn = self.memory_manager._get_optimized_connection()
+                    conn.close()
+            except Exception as e:
+                logger.warning(f"ChatBot A health check failed: DB error - {e}")
+                return False
+            
+            return True
+            
+        except Exception as e:
+            logger.error(f"ChatBot A health check error: {e}")
+            return False
+        
     async def initialize_chat(
         self,
         child_name: str,
         child_age: int,
-        child_interests: List[str] = None,
-        voice_sample_path: str = None
+        child_interests: List[str] = [],
+        voice_sample_path: str = ""
     ) -> str:
         """
         Conversation initialization
@@ -116,7 +194,8 @@ class ChatBotA:
                 )
             
             # Get age group configuration
-            age_group_config = self.age_group_manager.get_age_group_by_age(child_age)
+            age_group = self.age_group_manager.classify_age_group(child_age)
+            age_group_config = self.age_group_manager.get_settings(age_group)
             
             # sessin state init
             self.active_sessions[session_id] = {
@@ -153,8 +232,8 @@ class ChatBotA:
     async def get_response(
         self, 
         user_input: str,
-        session_id: str,
-        audio_data: bytes = None
+        session_id: Optional[str] = None,
+        audio_data: Optional[bytes] = None
     ) -> Dict[str, Any]:
         """
         Jiongi's response generation for user input
@@ -171,6 +250,12 @@ class ChatBotA:
                 - conversation_stage(str): Current conversation stage
                 - completion_percentage(float): Estimated completion percentage
         """
+        
+        # If no session_id provided, use the first available session (for backward compatibility)
+        if session_id is None:
+            if not self.active_sessions:
+                raise ValueError("No active sessions found")
+            session_id = list(self.active_sessions.keys())[0]
         
         if session_id not in self.active_sessions:
             raise ValueError(f"Session {session_id} not found")
@@ -242,7 +327,7 @@ class ChatBotA:
                 "response": fallback_response,
                 "story_elements_found": [],
                 "conversation_stage": session["conversation_stage"],
-                "completion_percentage": self._calculate_completion_percentage(session_id),
+                "completion_percentage": self._calculate_completion_percentage_safe(session_id),
                 "session_id": session_id,
                 "turn_count": session["turn_count"]
             }
@@ -336,6 +421,7 @@ class ChatBotA:
             if self.tracer:
                 self.tracer.end_conversation_session(story_outline)
             
+            completion_status = "completed" if self._calculate_completion_percentage(session_id) >= 0.80 else "partial"
             session_data = self.active_sessions.pop(session_id)
             
             final_summary = {
@@ -346,7 +432,7 @@ class ChatBotA:
                 "session_duration": (
                     datetime.now() - session_data["start_time"]
                 ).total_seconds() / 60,
-                "completion_status": "completed" if self._calculate_completion_percentage(session_id) >= 0.80 else "partial"
+                "completion_status": completion_status
             }
             
             logger.info(f"Conversation session ended: {session_id}") 
@@ -357,7 +443,7 @@ class ChatBotA:
             raise
         
     # Inner helper functions
-    async def _generate_greeting(self, child_name: str, child_age: int, interests: List[str] = None) -> str:
+    async def _generate_greeting(self, child_name: str, child_age: int, interests: Optional[List[str]] = None) -> str:
         """ first greeting for chatbot A """
         
         import random
@@ -428,7 +514,7 @@ class ChatBotA:
             content = element.get("content")
             confidence = element.get("confidence", 0.8)
             
-            if element_type in session["story_elements"]:
+            if element_type and content and element_type in session["story_elements"]:
                 session["story_elements"][element_type].append({
                     "content": content,
                     "confidence": confidence,
@@ -483,6 +569,12 @@ class ChatBotA:
         
         return round(total_score, 1)
     
+    def _calculate_completion_percentage_safe(self, session_id: str) -> float:
+        """안전한 이야기 수집 완성도 계산 (세션이 존재하지 않을 경우 0 반환)"""
+        if session_id not in self.active_sessions:
+            return 0.0
+        return self._calculate_completion_percentage(session_id)
+    
     def _detect_intent(self, user_input: str) -> str:
         """사용자 입력의 의도 파악"""
         # 기본적인 의도 분류
@@ -536,5 +628,62 @@ class ChatBotA:
             requirements.append("include_princess_theme")
         
         return requirements
+    
+    # === Voice Option Methods ===
+    
+    def get_voice_options(self) -> List[Dict[str, Any]]:
+        """Get available voice options for 쫑이"""
+        return self.voice_manager.get_voice_options()
+    
+    def set_voice_option(self, voice_type: str) -> bool:
+        """Change 쫑이's voice option"""
+        success = self.voice_manager.set_voice_option(voice_type)
+        if success:
+            logger.info(f"Voice option changed to: {voice_type}")
+        return success
+    
+    def get_current_voice_config(self) -> Dict[str, Any]:
+        """Get current voice configuration for TTS generation"""
+        return self.voice_manager.get_current_voice_config()
+    
+    def update_voice_ids(self, voice_id_mapping: Dict[str, str]) -> None:
+        """Update ElevenLabs Voice IDs (for admin use)"""
+        self.voice_manager.update_voice_ids(voice_id_mapping)
+        logger.info("Voice IDs updated for ChatBot A")
+    
+    def get_voice_config_for_conversation(self, session_id: Optional[str] = None, preference: Optional[str] = None) -> Dict[str, Any]:
+        """Get optimized voice configuration for current conversation context"""
+        
+        # If session exists, consider age and context
+        if session_id and session_id in self.active_sessions:
+            session = self.active_sessions[session_id]
+            child_age = session["child_age"]
+            conversation_stage = session["conversation_stage"]
+            
+            # Age-based voice optimization
+            if child_age <= 5:
+                # Younger children prefer gentler voices
+                if not preference:
+                    preference = "gentle"
+            elif child_age >= 8:
+                # Older children can handle more playful interaction
+                if not preference:
+                    preference = "playful"
+        
+        return self.voice_manager.get_voice_config_for_conversation(preference)
+    
+    def validate_voice_configuration(self) -> Dict[str, Any]:
+        """Validate current voice configuration status"""
+        validation_results = self.voice_manager.validate_voice_ids()
+        
+        # Check if any voices need configuration
+        needs_setup = any(not is_valid for is_valid in validation_results.values())
+        
+        return {
+            "validation_results": validation_results,
+            "needs_setup": needs_setup,
+            "current_voice": self.voice_manager.current_voice.value,
+            "total_voices": len(validation_results)
+        }
     
     

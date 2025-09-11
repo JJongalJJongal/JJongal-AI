@@ -54,7 +54,7 @@ class VoiceCloneStatus(BaseModel):
     last_updated: str
 
 # ====== Import Endpoints ======
-from ..endpoints import stories, auth, health
+from ..endpoints import stories, auth, health, family_voices
 
 # ====== Health Check Endpoint ======
 @router.get("/health", response_model=HealthResponse)
@@ -86,6 +86,21 @@ try:
     router.include_router(health.router, tags=["health"])
 except AttributeError:
     logger.info("Additional health endpoints not available")
+
+# ⭐ NEW: Include family voices endpoints
+try:
+    router.include_router(family_voices.router, tags=["family_voices"])
+    logger.info("Family voices endpoints included")
+except AttributeError:
+    logger.info("Family voices endpoints not available")
+
+# ⭐ NEW: Include AI model health monitoring endpoints
+try:
+    from ..endpoints import health_monitoring
+    router.include_router(health_monitoring.router, tags=["monitoring"])
+    logger.info("Health monitoring endpoints included")
+except (AttributeError, ImportError) as e:
+    logger.info(f"Health monitoring endpoints not available: {e}")
 
 
 

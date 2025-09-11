@@ -32,7 +32,8 @@ MYSQL_USER = "root"
 MYSQL_PASSWORD = ""
 
 # Vector Database
-CHROMA_PERSIST_DIR = "data/vector_db"
+CHROMA_PERSIST_DIR = "data/chroma_db"
+CHROMA_DOCKER_PATH = "/app/src/data/vector_db/main"
 PINECONE_INDEX = "ccb-ai"
 
 

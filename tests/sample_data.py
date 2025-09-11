@@ -43,6 +43,119 @@ SAMPLE_VOICE_CONFIG = {
     "parent_voice_id": "test_parent_voice_456",
 }
 
+# ⭐ NEW: Family voice cloning test data
+SAMPLE_FAMILY_VOICE_CONFIG = {
+    "child_voice_id": "test_child_voice_123",
+    "mom_voice_id": "test_mom_voice_456",
+    "dad_voice_id": "test_dad_voice_789",
+    "narrator_voice": "mom",  # "mom", "dad", "child", or "default"
+}
+
+SAMPLE_FAMILY_VOICE_REQUEST = {
+    "family_member": "mom",
+    "voice_name": "엄마 목소리",
+    "audio_samples": [
+        {
+            "sample_number": 1,
+            "audio_data": "base64_encoded_audio_data_1",
+            "duration": 5.2,
+            "format": "mp3"
+        },
+        {
+            "sample_number": 2,
+            "audio_data": "base64_encoded_audio_data_2", 
+            "duration": 4.8,
+            "format": "mp3"
+        },
+        {
+            "sample_number": 3,
+            "audio_data": "base64_encoded_audio_data_3",
+            "duration": 6.1,
+            "format": "mp3"
+        },
+        {
+            "sample_number": 4,
+            "audio_data": "base64_encoded_audio_data_4",
+            "duration": 5.5,
+            "format": "mp3"
+        },
+        {
+            "sample_number": 5,
+            "audio_data": "base64_encoded_audio_data_5",
+            "duration": 4.9,
+            "format": "mp3"
+        }
+    ]
+}
+
+FAMILY_VOICE_PRIORITY_TEST_CASES = [
+    {
+        "name": "explicit_mom_selection",
+        "voice_config": {
+            "mom_voice_id": "test_mom_voice_456",
+            "dad_voice_id": "test_dad_voice_789",
+            "child_voice_id": "test_child_voice_123",
+            "narrator_voice": "mom"
+        },
+        "expected_voice_id": "test_mom_voice_456"
+    },
+    {
+        "name": "explicit_dad_selection", 
+        "voice_config": {
+            "mom_voice_id": "test_mom_voice_456",
+            "dad_voice_id": "test_dad_voice_789",
+            "child_voice_id": "test_child_voice_123",
+            "narrator_voice": "dad"
+        },
+        "expected_voice_id": "test_dad_voice_789"
+    },
+    {
+        "name": "explicit_child_selection",
+        "voice_config": {
+            "mom_voice_id": "test_mom_voice_456",
+            "dad_voice_id": "test_dad_voice_789", 
+            "child_voice_id": "test_child_voice_123",
+            "narrator_voice": "child"
+        },
+        "expected_voice_id": "test_child_voice_123"
+    },
+    {
+        "name": "auto_priority_mom_first",
+        "voice_config": {
+            "mom_voice_id": "test_mom_voice_456",
+            "dad_voice_id": "test_dad_voice_789",
+            "child_voice_id": "test_child_voice_123", 
+            "narrator_voice": "default"
+        },
+        "expected_voice_id": "test_mom_voice_456"
+    },
+    {
+        "name": "auto_priority_dad_when_no_mom",
+        "voice_config": {
+            "dad_voice_id": "test_dad_voice_789",
+            "child_voice_id": "test_child_voice_123",
+            "narrator_voice": "default"
+        },
+        "expected_voice_id": "test_dad_voice_789"
+    },
+    {
+        "name": "auto_priority_child_when_no_parents",
+        "voice_config": {
+            "child_voice_id": "test_child_voice_123",
+            "narrator_voice": "default"
+        },
+        "expected_voice_id": "test_child_voice_123"
+    },
+    {
+        "name": "fallback_to_default_when_no_voices",
+        "voice_config": {
+            "narrator_voice": "default"
+        },
+        "target_age": 6,
+        "expected_voice_id": "default_child_friendly_voice_id"
+    }
+]
+
 SAMPLE_IMAGE_GENERATION_INPUT = {
     "story_data": SAMPLE_STORY_DATA,
     "story_id": "test_story_123",

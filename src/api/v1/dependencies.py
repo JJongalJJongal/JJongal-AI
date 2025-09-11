@@ -6,6 +6,7 @@ from datetime import datetime, timedelta
 from typing import Dict, Any, Optional, Callable, Type, TypeVar
 from functools import lru_cache, wraps
 from fastapi import WebSocket, WebSocketException, Query, Depends, status, HTTPException
+from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from contextlib import asynccontextmanager
 
 from src.shared.utils.logging import get_module_logger
@@ -73,7 +74,7 @@ async def verify_jwt_token_websocket(
         raise AuthenticationError("JWT token required")
 
     try:
-        user_info: jwt_manager.verify_token(token)
+        user_info = jwt_manager.verify_token(token)
         logger.info(f"WebSocket auth success: {user_info.get('user_id', 'unknown')}")
         return user_info
     except jwt.ExpiredSignatureError:
@@ -209,6 +210,123 @@ def Websocket_error_handler(func: Callable) -> Callable:
 
     return wrapper
 
+
+# ====== REST API Dependencies ======
+
+# HTTPBearer security scheme for automatic token extraction
+security = HTTPBearer()
+
+async def verify_jwt_token(
+    credentials: HTTPAuthorizationCredentials = Depends(security),
+    jwt_manager: JWTManager = Depends(get_jwt_manager),
+) -> Dict[str, Any]:
+    """REST API JWT token verification"""
+    token = credentials.credentials
+    if not token:
+        logger.warning("REST API request: no token provided")
+        raise HTTPAuthenticationError("JWT token required")
+
+    try:
+        user_info = jwt_manager.verify_token(token)
+        logger.info(f"REST API auth success: {user_info.get('user_id', 'unknown')}")
+        return user_info
+    except jwt.ExpiredSignatureError:
+        logger.warning("REST API auth failed: token expired")
+        raise HTTPAuthenticationError("Token expired")
+    except jwt.InvalidTokenError as e:
+        logger.warning(f"REST API auth failed: invalid token - {e}")
+        raise HTTPAuthenticationError("Invalid token")
+    except Exception as e:
+        logger.error(f"REST API auth error: {e}")
+        raise HTTPAuthenticationError("Authentication error occurred")
+
+
+async def get_authenticated_user(
+    jwt_manager: JWTManager = Depends(get_jwt_manager)
+) -> Dict[str, Any]:
+    """Get authenticated user from JWT token (for development)"""
+    # For development/demo purposes, return a default user
+    # In production, this would extract token from headers
+    try:
+        dev_token = jwt_manager.create_development_token()
+        user_info = jwt_manager.verify_token(dev_token)
+        return user_info
+    except Exception as e:
+        logger.error(f"Failed to create development user: {e}")
+        raise HTTPAuthenticationError("Authentication failed")
+
+async def get_vector_db():
+    """Get LFU Hybrid vector database instance - 2025 Advanced Architecture"""
+    try:
+        from src.data.vector_db.core import LFUHybridVectorDB, SearchWeights
+        import os
+        
+        # Get vector DB path from environment or use default
+        vector_db_path = os.getenv("VECTOR_DB_PATH", "data/chroma_db")
+        
+        logger.info("🚀 Initializing LFU + Hybrid ChromaDB system...")
+        
+        # Initialize LFU Hybrid VectorDB with optimized settings
+        lfu_vector_db = LFUHybridVectorDB(
+            persist_directory=vector_db_path,
+            collection_name="fairy_tales",
+            use_openai=False,  # Use KURE-v1 Korean embeddings
+            memory_cache_size=1000,  # Large cache for production
+            disk_cache_size=5000,    # Even larger disk cache
+            disk_cache_ttl=86400,    # 24 hour TTL
+            enable_bm25=True,        # Enable hybrid search
+            search_weights=SearchWeights(
+                vector_weight=0.5,    # Vector similarity
+                bm25_weight=0.3,      # Keyword matching
+                metadata_weight=0.2   # Category/metadata filtering
+            )
+        )
+        
+        logger.info("✅ LFU Hybrid VectorDB initialized successfully")
+        
+        # Get collection statistics
+        try:
+            collection_count = lfu_vector_db.vectorstore._collection.count() if hasattr(lfu_vector_db.vectorstore, '_collection') else 0
+        except:
+            collection_count = 0
+        
+        # Get cache statistics
+        cache_stats = lfu_vector_db.get_cache_stats()
+        
+        logger.info(f"📊 Vector DB Status: {collection_count} documents, Cache: {cache_stats['cache_stats']['cache_size']} entries")
+        
+        return {
+            "status": "connected",
+            "type": "lfu_hybrid_chromadb",
+            "vector_db": lfu_vector_db,
+            "vectorstore": lfu_vector_db.vectorstore,
+            "path": vector_db_path,
+            "collection_count": collection_count,
+            "cache_stats": cache_stats,
+            "hybrid_features": {
+                "lfu_cache": True,
+                "bm25_search": lfu_vector_db.enable_bm25,
+                "korean_embeddings": "KURE-v1",
+                "multi_layer_caching": True
+            }
+        }
+        
+    except ImportError as e:
+        logger.error(f"Vector DB dependencies not available: {e}")
+        return {
+            "status": "error",
+            "type": "missing_dependencies",
+            "error": str(e)
+        }
+    except Exception as e:
+        logger.error(f"Vector DB connection failed: {e}")
+        return {
+            "status": "error", 
+            "type": "connection_failed",
+            "error": str(e)
+        }
+
+# Note: Voice cloning processor is now handled via ServiceFactory pattern above
 
 # ====== Development / Testing Support ======
 

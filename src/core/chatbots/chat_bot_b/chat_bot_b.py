@@ -66,8 +66,11 @@ class ModernAri:
         # Initialize OpenAI client
         self.openai_client = initialize_client()
         
-        # Initialize generators
-        self.text_generator = TextGenerator(openai_client=self.openai_client)
+        # Initialize generators with VectorDB support
+        self.text_generator = TextGenerator(
+            openai_client=self.openai_client,
+            enable_rag=True  # Enable RAG for ChatBot B
+        )
         self.image_generator = ImageGenerator(openai_client=self.openai_client)
         self.voice_generator = VoiceGenerator()
         
@@ -158,21 +161,31 @@ JSON 형식으로 응답:
                 story_data, story_id, voice_config, progress_callback
             )
             
-            # Build API v2.0 compliant Story response
+            # Build API v2.0 compliant Story response with SAFE multimedia integration
             chapters = []
+            
+            # 🛡️ SECURITY: Safe multimedia mapping with validation
+            image_map, audio_map = self._create_safe_multimedia_mapping(multimedia_data)
+            logger.info(f"Safe mapping created: {len(image_map)} images, {len(audio_map)} audio files")
+            
             for i, chapter_data in enumerate(story_data.get("chapters", [])):
+                chapter_number = chapter_data.get("chapter_number", i + 1)
+                
                 chapter = {
-                    "chapter_number": chapter_data.get("chapter_number", i + 1),
-                    "title": chapter_data.get("title", f"Chapter {i + 1}"),
+                    "chapter_number": chapter_number,
+                    "title": chapter_data.get("title", f"Chapter {chapter_number}"),
                     "content": chapter_data.get("content", "")
                 }
                 
-                # Add multimedia URLs if available
-                if multimedia_data["images"] and i < len(multimedia_data["images"]):
-                    chapter["image_url"] = multimedia_data["images"][i].get("url", "")
+                # 🎯 PERFORMANCE: O(1) lookup instead of linear search
+                # 🛡️ SECURITY: Safe access with validation
+                if chapter_number in image_map:
+                    chapter["image_url"] = image_map[chapter_number]
+                    logger.debug(f"Chapter {chapter_number}: Image URL attached")
                 
-                if multimedia_data["audio_files"] and i < len(multimedia_data["audio_files"]):
-                    chapter["audio_url"] = multimedia_data["audio_files"][i].get("url", "")
+                if chapter_number in audio_map:
+                    chapter["audio_url"] = audio_map[chapter_number]  
+                    logger.debug(f"Chapter {chapter_number}: Audio URL attached")
                 
                 chapters.append(chapter)
             
@@ -204,7 +217,7 @@ JSON 형식으로 응답:
             }
     
     async def _generate_multimedia(self, story_data: Dict, story_id: str, voice_config: Dict, progress_callback: Optional[Callable]) -> Dict[str, Any]:
-        """Generate multimedia content (images and audio)"""
+        """Generate multimedia content (images and audio) - IMPROVED VERSION"""
         multimedia_result = {
             "images": [],
             "audio_files": []
@@ -212,51 +225,199 @@ JSON 형식으로 응답:
         
         try:
             chapters = story_data.get("chapters", [])
+            logger.info(f"Starting multimedia generation for {len(chapters)} chapters")
             
-            # Generate images for each chapter
-            for chapter in chapters:
-                if progress_callback:
-                    await progress_callback({
-                        "step": f"image_generation_chapter_{chapter.get('chapter_number', 0)}",
-                        "status": "processing"
+            # 🖼️ STEP 1: Generate images for each chapter
+            if chapters:
+                # Prepare image generation data in correct format
+                image_chapters = []
+                for chapter in chapters:
+                    # Auto-generate image prompt if not present
+                    image_prompt = chapter.get("image_prompt", "")
+                    if not image_prompt:
+                        # Create image prompt from chapter content
+                        content = chapter.get("content", "")[:200]  # First 200 chars
+                        title = chapter.get("title", "")
+                        image_prompt = f"Children's book illustration: {title}. {content}. Colorful, friendly, child-appropriate style."
+                    
+                    image_chapters.append({
+                        "title": chapter.get("title", ""),
+                        "content": chapter.get("content", ""),
+                        "image_prompt": image_prompt,
+                        "chapter_number": chapter.get("chapter_number", len(image_chapters) + 1)
                     })
                 
-                image_prompt = chapter.get("image_prompt", "")
-                if image_prompt:
-                    # Use existing image generator
-                    image_data = await self.image_generator.generate({
-                        "prompt": image_prompt,
-                        "story_id": story_id,
-                        "chapter_number": chapter.get("chapter_number", 0)
+                if progress_callback:
+                    await progress_callback({
+                        "step": "image_generation_start",
+                        "status": "processing",
+                        "total_chapters": len(image_chapters)
                     })
-                    
-                    multimedia_result["images"].append(image_data)
+                
+                # Generate images using correct format
+                image_result = await self.image_generator.generate({
+                    "story_data": {"chapters": image_chapters},
+                    "story_id": story_id,
+                    "target_age": 7
+                }, progress_callback)
+                
+                # Extract image results
+                if image_result.get("images"):
+                    multimedia_result["images"] = image_result["images"]
+                    logger.info(f"Generated {len(multimedia_result['images'])} images")
+                else:
+                    logger.warning("No images were generated")
             
-            # Generate audio narration
-            if progress_callback:
+            # 🔊 STEP 2: Generate audio narration
+            if chapters and progress_callback:
                 await progress_callback({"step": "audio_generation", "status": "processing"})
             
-            # Combine all chapter content for audio
-            full_story_text = f"{story_data.get('title', '')}\n\n"
-            for chapter in chapters:
-                full_story_text += f"{chapter.get('title', '')}\n{chapter.get('content', '')}\n\n"
+            # Generate audio using correct VoiceGenerator format
+            if chapters:
+                audio_result = await self.voice_generator.generate({
+                    "story_data": {"chapters": chapters},
+                    "voice_config": voice_config,
+                    "story_id": story_id,
+                    "target_age": 7
+                }, progress_callback)
+                
+                # Extract audio results
+                if audio_result.get("audio_files"):
+                    multimedia_result["audio_files"] = audio_result["audio_files"]
+                    logger.info(f"Generated {len(multimedia_result['audio_files'])} audio files")
+                else:
+                    logger.warning("No audio files were generated")
             
-            # Use existing voice generator with voice config
-            voice_id = voice_config.get("child_voice_id") or voice_config.get("parent_voice_id")
-            audio_data = await self.voice_generator.generate({
-                "text": full_story_text,
-                "story_id": story_id,
-                "voice_id": voice_id,
-                "narrator_voice": voice_config.get("narrator_voice", "default")
-            })
-            
-            multimedia_result["audio_files"] = audio_data.get("audio_files", [])
-            
+            logger.info(f"Multimedia generation completed: {len(multimedia_result['images'])} images, {len(multimedia_result['audio_files'])} audio files")
             return multimedia_result
             
         except Exception as e:
             logger.error(f"Multimedia generation failed: {e}")
+            import traceback
+            logger.error(traceback.format_exc())
             return multimedia_result
+    
+    def _create_safe_multimedia_mapping(self, multimedia_data: Dict[str, Any]) -> tuple[Dict[int, str], Dict[int, str]]:
+        """
+        🛡️ SECURITY-FIRST: Create safe multimedia-to-chapter mapping
+        🎯 PERFORMANCE-OPTIMIZED: O(1) lookup with hashmaps
+        📚 LEARNING: Demonstrates defensive programming principles
+        
+        Args:
+            multimedia_data: Raw multimedia generation results
+            
+        Returns:
+            tuple: (image_map, audio_map) - Chapter number to URL mapping
+            
+        Security Features:
+        - Input validation and type checking
+        - Status verification for each item
+        - Safe dictionary access with .get()
+        - Exception isolation for individual items
+        
+        Performance Features:  
+        - Single-pass iteration O(n)
+        - HashMap lookup O(1)
+        - Memory-efficient processing
+        """
+        image_map = {}
+        audio_map = {}
+        
+        try:
+            # 🛡️ SECURITY: Validate input structure
+            if not isinstance(multimedia_data, dict):
+                logger.warning("Multimedia data is not a dictionary")
+                return image_map, audio_map
+            
+            # 🖼️ PHASE 1: Process Images with Security Validation
+            images = multimedia_data.get("images", [])
+            if isinstance(images, list):
+                for i, img in enumerate(images):
+                    try:
+                        # 🛡️ Multi-layer validation
+                        if (isinstance(img, dict) and 
+                            img.get("status") == "success" and 
+                            isinstance(img.get("chapter_number"), int) and
+                            isinstance(img.get("url"), str) and
+                            len(img.get("url", "")) > 0):
+                            
+                            chapter_num = img["chapter_number"]
+                            image_url = img["url"]
+                            
+                            # 🛡️ URL validation (basic)
+                            if image_url.startswith(("http://", "https://")):
+                                image_map[chapter_num] = image_url
+                                logger.debug(f"✅ Image mapped: Chapter {chapter_num} -> URL")
+                            else:
+                                logger.warning(f"⚠️ Invalid image URL format for chapter {chapter_num}")
+                        else:
+                            logger.debug(f"⚠️ Image {i} validation failed or status != success")
+                    
+                    except Exception as e:
+                        logger.warning(f"⚠️ Error processing image {i}: {str(e)[:100]}")
+                        continue
+            
+            # 🔊 PHASE 2: Process Audio with Security Validation  
+            audio_files = multimedia_data.get("audio_files", [])
+            if isinstance(audio_files, list):
+                for i, audio in enumerate(audio_files):
+                    try:
+                        # 🛡️ Multi-layer validation
+                        if (isinstance(audio, dict) and 
+                            audio.get("status") == "success" and 
+                            isinstance(audio.get("chapter_number"), int) and
+                            audio.get("audio_path") is not None):
+                            
+                            chapter_num = audio["chapter_number"]
+                            audio_path = audio["audio_path"]
+                            
+                            # 🔄 FUTURE: Convert local path to URL
+                            # For now, use local path directly
+                            audio_url = self._convert_audio_path_to_url(audio_path)
+                            
+                            if audio_url:
+                                audio_map[chapter_num] = audio_url
+                                logger.debug(f"✅ Audio mapped: Chapter {chapter_num} -> {audio_url}")
+                            else:
+                                logger.warning(f"⚠️ Failed to convert audio path for chapter {chapter_num}")
+                        else:
+                            logger.debug(f"⚠️ Audio {i} validation failed or status != success")
+                    
+                    except Exception as e:
+                        logger.warning(f"⚠️ Error processing audio {i}: {str(e)[:100]}")
+                        continue
+            
+            # 📊 SUMMARY: Log mapping results
+            logger.info(f"🎯 Safe mapping complete: {len(image_map)} images, {len(audio_map)} audio files successfully mapped")
+            
+            return image_map, audio_map
+            
+        except Exception as e:
+            logger.error(f"❌ Critical error in multimedia mapping: {e}")
+            return {}, {}
+    
+    def _convert_audio_path_to_url(self, audio_path: str) -> str:
+        """
+        🔄 Convert local audio file path to accessible URL
+        📚 LEARNING: Placeholder for future URL conversion logic
+        
+        Args:
+            audio_path: Local file system path
+            
+        Returns:
+            str: Accessible URL or path
+            
+        TODO: Implement proper URL conversion for production
+        - Static file serving
+        - CDN integration  
+        - Signed URLs for security
+        """
+        if not audio_path or not isinstance(audio_path, str):
+            return ""
+        
+        # 🔄 TEMPORARY: Return local path for development
+        # In production, this should convert to a proper URL
+        return audio_path
     
     # Backward compatibility methods
     async def generate_story(self, progress_callback: Optional[Callable] = None) -> Dict[str, Any]:

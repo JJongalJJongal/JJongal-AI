@@ -1,11 +1,11 @@
 services:
-  # 꼬꼬북 메인 애플리케이션 (통합 서버)
-  ccb-ai:
+  # PeepPeep (쫑알쫑알) 메인 애플리케이션 (통합 서버)
+  peeppeep-ai:
     build:
-      context: .
-      dockerfile: Dockerfile
-    image: ccb-ai:latest
-    container_name: ccb-ai-app
+      context: ..
+      dockerfile: docker/Dockerfile
+    image: peeppeep-ai:latest
+    container_name: peeppeep-ai-app
     # user: "${UID:-1000}:${GID:-1000}"  # 이 줄을 주석 처리하여 Dockerfile의 사용자 설정을 따르도록 합니다.
     ports:
       - "8001:8000" # 포트 포워딩 (Host:Container)
@@ -29,7 +29,7 @@ services:
 
       # 통합 서버 모드 설정
       - INTEGRATED_MODE=true # 모든 기능을 하나의 서버에서 실행
-      - CHROMA_DB_PATH=/app/chatbot/data/vector_db # ChromaDB 기본 저장 경로 (통일)
+      - CHROMA_DB_PATH=/app/src/data/vector_db # ChromaDB 기본 저장 경로 (updated)
       
       
       # 멀티미디어 생성 설정
@@ -50,8 +50,8 @@ services:
     volumes:
       # 출력 파일들을 호스트에 저장
       - ./output:/app/output  # 생성된 출력 파일들 저장 (Image, Audio)
-      - ./chatbot/data/vector_db:/app/chatbot/data/vector_db # VectorDB만 마운트
-      - ./chatbot/data/prompts:/app/chatbot/data/prompts # 프롬프트 템플릿 마운트
+      - ./src/data/vector_db:/app/src/data/vector_db # VectorDB만 마운트 (updated path)
+      - ./config/prompts:/app/config/prompts # 프롬프트 템플릿 마운트 (updated path)
       - ./logs:/app/logs # 로그 저장 경로
       
       # 캐시 디렉토리 (성능 향상)
@@ -65,7 +65,7 @@ services:
       start_period: 90s # AI 모델 로딩 시간 고려
     restart: unless-stopped # 컨테이너 재시작 설정
     networks:
-      - ccb-network # Network 연결
+      - peeppeep-network # Network 연결
     
     # 통합 서버 메모리 설정 (AI + VectorDB)
     deploy: # 배포 설정
@@ -83,9 +83,9 @@ services:
         max-file: "3" # 로그 파일 최대 개수
 
   # Nginx (리버스 프록시)
-  nginx:
+  peeppeep-nginx:
     image: nginx:alpine
-    container_name: ccb-nginx
+    container_name: peeppeep-nginx
     ports:
       - "80:80"
       # HTTPS는 필요시 활성화
@@ -95,16 +95,16 @@ services:
       # SSL 설정은 인증서 준비 후 활성화
       # - ./ssl:/etc/nginx/ssl:ro
     depends_on:
-      - ccb-ai  # 단순 의존성으로 변경 (헬스체크 대기 제거)
+      - peeppeep-ai  # 단순 의존성으로 변경 (헬스체크 대기 제거)
     healthcheck:
-      test: ["CMD", "sh", "-c", "nc -z ccb-ai 8000 && nginx -t"]
+      test: ["CMD", "sh", "-c", "nc -z peeppeep-ai 8000 && nginx -t"]
       interval: 30s
       timeout: 10s
       retries: 5
-      start_period: 120s  # ccb-ai 컨테이너 시작 대기 시간
+      start_period: 120s  # peeppeep-ai 컨테이너 시작 대기 시간
     restart: unless-stopped
     networks:
-      - ccb-network
+      - peeppeep-network
     
     deploy:
       resources:
@@ -127,9 +127,9 @@ volumes:
 
 # 네트워크 정의
 networks:
-  ccb-network:
+  peeppeep-network:
     driver: bridge
-    name: ccb-network
+    name: peeppeep-network
 
 # 개발 환경용 오버라이드 (docker-compose.override.yml)
 # 개발 시에는 다음과 같이 실행:

@@ -13,13 +13,20 @@ from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.runnables import RunnableParallel, RunnablePassthrough, RunnableLambda
 from langchain_core.output_parsers import StrOutputParser
 from langchain_openai import ChatOpenAI, OpenAIEmbeddings
-from langchain_community.vectorstores import Chroma
-
 from ..monitoring.langsmith_config import trace_chatbot_method
 from src.shared.utils.logging import get_module_logger
 from src.shared.configs.prompts import load_chatbot_a_prompts
 
 logger = get_module_logger(__name__)
+
+# Modern ChromaDB package - 2025 Best Practices (after logger definition)
+try:
+    from langchain_chroma import Chroma
+    logger.info("✅ RAG Chain: 최신 langchain-chroma 사용")
+except ImportError:
+    # Fallback to legacy import for backward compatibility
+    from langchain_community.vectorstores import Chroma
+    logger.warning("⚠️ RAG Chain: 구버전 langchain_community 사용 - 업그레이드 필요")
 
 class ModernRAGChain:
     """
@@ -46,7 +53,8 @@ class ModernRAGChain:
         self.llm = ChatOpenAI(
             model=model_name,
             temperature=temperature,
-            model_kwargs={"top_p": 0.9, "frequency_penalty": 0.1}
+            top_p=0.9,
+            frequency_penalty=0.1
         )
         
         # Load configuration
@@ -61,32 +69,88 @@ class ModernRAGChain:
         logger.info(f"Modern RAG Chain initialized with {model_name}")
         
     def _setup_vector_store(self, vector_db_path: Optional[str]):
-        """Setup modern ChromaDB vector store"""
+        """Setup LFU Hybrid vector store for advanced RAG capabilities"""
         try:
             if vector_db_path:
-                embeddings = OpenAIEmbeddings(model="text-embedding-3-small")
+                from src.data.vector_db.core import LFUHybridVectorDB, SearchWeights
                 
-                self.vectorstore = Chroma(
+                logger.info("🚀 RAG Chain: Initializing LFU Hybrid Vector Store...")
+                
+                # Initialize LFU Hybrid VectorDB for RAG - ChatBot A uses Summary DB
+                self.lfu_vector_db = LFUHybridVectorDB(
                     persist_directory=vector_db_path,
-                    embedding_function=embeddings,
-                    collection_name="fairy_tales"
+                    collection_name="fairy_tales_summary",  # ChatBot A uses Summary collection
+                    use_openai=False,  # Use KURE-v1 Korean embeddings
+                    memory_cache_size=300,  # Smaller cache for RAG chain
+                    disk_cache_size=1000,
+                    enable_bm25=True,   # Enable keyword search for better RAG
+                    search_weights=SearchWeights(
+                        vector_weight=0.6,    # Higher vector weight for RAG
+                        bm25_weight=0.3,      # Keyword matching
+                        metadata_weight=0.1   # Light metadata filtering
+                    )
                 )
                 
-                # Modern retriever with MMR
-                self.retriever = self.vectorstore.as_retriever(
-                    search_type="mmr",
-                    search_kwargs={"k": 3, "lambda_mult": 0.7}
-                )
+                # For backward compatibility, expose vectorstore
+                self.vectorstore = self.lfu_vector_db.vectorstore
+                
+                # Create hybrid retriever that uses both vector and keyword search
+                self.retriever = self._create_hybrid_retriever()
                 
                 self.rag_enabled = True
-                logger.info("Modern ChromaDB vector store initialized")
+                logger.info("✅ LFU Hybrid Vector Store initialized for RAG")
+                
+                # Log cache stats
+                cache_stats = self.lfu_vector_db.get_cache_stats()
+                logger.info(f"📊 RAG Cache: {cache_stats['cache_stats']['cache_size']} entries, BM25: {cache_stats['bm25_enabled']}")
+                
             else:
                 self.rag_enabled = False
                 logger.info("RAG disabled - no vector DB path provided")
                 
         except Exception as e:
-            logger.error(f"Vector store setup failed: {e}")
+            logger.error(f"LFU Hybrid vector store setup failed: {e}")
             self.rag_enabled = False
+    
+    def _create_hybrid_retriever(self):
+        """Create hybrid retriever using LFU system"""
+        class LFUHybridRetriever:
+            def __init__(self, lfu_vector_db):
+                self.lfu_vector_db = lfu_vector_db
+            
+            def get_relevant_documents(self, query: str, k: int = 3):
+                """Get documents using hybrid search"""
+                try:
+                    # Use hybrid search for better results
+                    hybrid_results = self.lfu_vector_db.hybrid_search(
+                        query=query, 
+                        k=k, 
+                        use_cache=True
+                    )
+                    
+                    # Convert to LangChain Document format
+                    from langchain_core.documents import Document
+                    documents = []
+                    
+                    for result in hybrid_results:
+                        doc = Document(
+                            page_content=result.content,
+                            metadata={
+                                **result.metadata,
+                                'hybrid_score': result.final_score,
+                                'vector_score': result.vector_score,
+                                'bm25_score': result.bm25_score
+                            }
+                        )
+                        documents.append(doc)
+                    
+                    return documents
+                    
+                except Exception as e:
+                    logger.error(f"Hybrid retrieval failed: {e}")
+                    return []
+        
+        return LFUHybridRetriever(self.lfu_vector_db)
         
     def _setup_modern_chains(self):
         """Setup modern LCEL chains"""

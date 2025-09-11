@@ -17,6 +17,11 @@ class VoiceGenerator(BaseGenerator):
     def __init__(self, elevenlabs_api_key: Optional[str] = None, output_dir: str = "output/temp/audio", max_retries: int = 3):
         super().__init__(max_retries=max_retries, timeout=60.0)
 
+        # Auto-load ElevenLabs API key from environment if not provided
+        if not elevenlabs_api_key:
+            import os
+            elevenlabs_api_key = os.getenv('ELEVENLABS_API_KEY')
+            
         self.elevenlabs_api_key = elevenlabs_api_key
         self.output_dir = Path(output_dir)
         self.output_dir.mkdir(parents=True, exist_ok=True)
@@ -117,7 +122,7 @@ class VoiceGenerator(BaseGenerator):
                 self.client.text_to_speech.convert,
                 text=full_text,
                 voice_id=voice_id,
-                model_id="eleven",
+                model_id="eleven_v3",
                 voice_settings=voice_settings,
                 output_format="mp3_44100_128"
             )
@@ -143,33 +148,64 @@ class VoiceGenerator(BaseGenerator):
             return self._error_result(chapter.get("chapter_number", chapter_index + 1), str(e))
 
     def _determine_voice_id(self, voice_config: Dict[str, Any], target_age: int) -> str:
+        """
+        Determine voice ID based on family voice configuration
+        Priority: narrator_voice setting > automatic assignment > default
+        """
         
-        # voice_config check
+        # ⭐ NEW: Get family voice IDs
         child_voice_id = voice_config.get("child_voice_id")
-        if child_voice_id:
+        mom_voice_id = voice_config.get("mom_voice_id") 
+        dad_voice_id = voice_config.get("dad_voice_id")
+        narrator_voice = voice_config.get("narrator_voice", "default")
+        
+        logger.info(f"Voice config: child={bool(child_voice_id)}, mom={bool(mom_voice_id)}, dad={bool(dad_voice_id)}, narrator={narrator_voice}")
+        
+        # ⭐ NEW: Use narrator_voice preference
+        if narrator_voice == "mom" and mom_voice_id:
+            logger.info(f"Using mom voice as narrator: {mom_voice_id}")
+            return mom_voice_id
+        elif narrator_voice == "dad" and dad_voice_id:
+            logger.info(f"Using dad voice as narrator: {dad_voice_id}")
+            return dad_voice_id
+        elif narrator_voice == "child" and child_voice_id:
+            logger.info(f"Using child voice as narrator: {child_voice_id}")
             return child_voice_id
-    
-        # parent_voice_id = voice_config.get("parent_voice_id")
-        # if parent_voice_id:
-        #     return parent_voice_id
+        
+        # ⭐ NEW: Fallback for missing requested voice + Automatic assignment
+        # If specific voice was requested but not available, or if "default" is requested
+        if mom_voice_id:
+            logger.info(f"Auto-assigning mom voice as narrator: {mom_voice_id}")
+            return mom_voice_id
+        elif dad_voice_id:
+            logger.info(f"Auto-assigning dad voice as narrator: {dad_voice_id}")
+            return dad_voice_id
+        elif child_voice_id:
+            logger.info(f"Auto-assigning child voice as narrator: {child_voice_id}")
+            return child_voice_id
 
+        # Fallback to ElevenLabs default voices (commonly available)
         if target_age <= 7:
-            return "default_child_friendly_voice_id"
+            logger.info("Using default child-friendly voice")
+            # Use Rachel (commonly available on ElevenLabs)
+            return "21m00Tcm4TlvDq8ikWAM"  # Rachel - clear female voice
         else:
-            return "default_mature_child_voice_id"
+            logger.info("Using default mature child voice")
+            # Use Clyde (commonly available on ElevenLabs)  
+            return "2EiwWnXFnqijVitWh8rs"  # Clyde - warm male voice
     
     def _get_age_specific_settings(self, target_age: int) -> VoiceSettings:
-
+        # eleven_v3 model requires stability values: 0.0, 0.5, or 1.0 only
         if target_age <= 7:
             return VoiceSettings(
-                stability=0.7,
+                stability=0.5,  # Natural setting for eleven_v3
                 similarity_boost=0.8,
                 style=0.3,
                 use_speaker_boost=True
             )
         else:
             return VoiceSettings(
-                stability=0.6,
+                stability=0.5,  # Natural setting for eleven_v3
                 similarity_boost=0.9,
                 style=0.5, # Expression
                 use_speaker_boost=True
@@ -182,11 +218,20 @@ class VoiceGenerator(BaseGenerator):
 
         try:
             with open(audio_path, 'wb') as f:
-                if hasattr(audio_data, 'read'):
+                # Handle different types of audio_data from ElevenLabs
+                if hasattr(audio_data, '__iter__') and not isinstance(audio_data, (str, bytes)):
+                    # It's a generator/iterator, collect all chunks
                     for chunk in audio_data:
                         f.write(chunk)
-                else:
+                elif hasattr(audio_data, 'read'):
+                    # It's a file-like object
+                    f.write(audio_data.read())
+                elif isinstance(audio_data, bytes):
+                    # It's raw bytes
                     f.write(audio_data)
+                else:
+                    # Try to convert to bytes
+                    f.write(bytes(audio_data))
             
             logger.info(f"Voice file save complete : {audio_path}")
             return audio_path

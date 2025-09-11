@@ -1,7 +1,5 @@
 # 쫑알쫑알 API 명세서 v2.0 (Simple is Better)
 
-> 이 문서는 단순성과 직관성을 최우선으로 하여 작성되었습니다. 복잡한 설정과 중복 기능을 제거하고, 정말 필요한 기능만을 제공합니다.
-
 ## 1. 소개 (Introduction)
 
 ### 1.1. 설계 철학: "Simple is Better"
@@ -18,15 +16,18 @@
 [아이] ↔ [쫑이(대화)] → [아리(동화생성)] → [완성된 멀티미디어 동화]
 ```
 
-### 1.3. API 개요 (총 4개)
+### 1.3. API 개요 (총 7개)
 1. **WebSocket 통합 대화** - 실시간 대화 + 음성 클로닝 + 동화 생성
 2. **JWT 인증** - 간단한 토큰 발급
 3. **동화 생성** - 직접 동화 생성 요청
 4. **동화 조회** - 완성된 동화 확인
+5. **가족 음성 업로드** - 엄마/아빠 목소리 클로닝
+6. **가족 음성 조회** - 업로드된 가족 음성 목록
+7. **가족 음성 삭제** - 불필요한 음성 제거 
 
 ---
 
-## 2. 핵심 데이터 모델 (Core Data Models) - 총 3개
+## 2. 핵심 데이터 모델 (Core Data Models)
 
 ### 2.1. `StoryRequest` - 동화 생성 요청
 ```json
@@ -41,17 +42,20 @@
     "theme": "용기"
   },
   "voice_config": {
-    "child_voice_id": "voice_child_123",        // 아이 음성 (선택사항)
-    "parent_voice_id": "voice_parent_456",      // 부모 음성 (선택사항)
-    "narrator_voice": "child"                   // "child" | "parent" | "default"
+    "child_voice_id": "voice_child_123",        // 아이 음성
+    "mom_voice_id": "voice_mom_789",            // 엄마 음성
+    "dad_voice_id": "voice_dad_012",            // 아빠 음성
+    "narrator_voice": "mother"                     // "default" | "mother" | "dad" | 
   }
 }
 ```
 
 **음성 역할 매핑 규칙:**
 - **아이 음성**: 주인공 캐릭터 음성으로 사용
-- **부모 음성**: 내레이터 또는 어른 캐릭터 음성으로 사용
-- **기본 설정**: 아이 음성이 있으면 주인공에, 부모 음성이 있으면 내레이터에 자동 할당
+- **엄마 음성**: 내레이터, 엄마 캐릭터, 여성 조연 음성으로 사용
+- **아빠 음성**: 내레이터, 아빠 캐릭터, 남성 조연, 악역 음성으로 사용  
+- **narrator_voice 옵션**: "mother"(엄마), "dad"(아빠), "default"(기본 AI)
+- **자동 할당**: narrator_voice 미지정 시 우선순위: 엄마 → 아빠 → 아이 → 기본
 
 ### 2.2. `Chapter` - 동화 챕터
 ```json
@@ -59,8 +63,8 @@
   "chapter_number": 1,
   "title": "마법의 성",
   "content": "옛날 옛적, 마법의 성에 용감한 공주가 살고 있었습니다...",
-  "image_url": "/files/story_456_ch1.jpg",  // 선택사항
-  "audio_url": "/files/story_456_ch1.mp3"   // 선택사항
+  "image_url": "/files/story_456_ch1.jpg", 
+  "audio_url": "/files/story_456_ch1.mp3"  
 }
 ```
 
@@ -178,14 +182,6 @@ GET /api/v1/stories/{story_id}
 
 ### 5.1. 단순화된 ChatBot B 사용법
 ```python
-# 이전 (복잡한 설정)
-chatbot_b = ChatBotB()
-chatbot_b.set_target_age(7)
-chatbot_b.set_cloned_voice_info(voice_id, character_name)  
-chatbot_b.set_story_outline(outline)
-result = await chatbot_b.generate_detailed_story()
-
-# 현재 (단순한 초기화 + 부모 음성 지원)
 chatbot_b = ChatBotB(
     target_age=7,
     story_outline=outline,
@@ -261,7 +257,7 @@ const story = await storyResponse.json();
 
 // 3. 동화 조회
 const getStoryResponse = await fetch(`/api/v1/stories/${story.story_id}`, {
-    headers: { 'Authorization': `Bearer ${access_token}` }
+    headers: { 'Authorization': `Bearer ${access_token}`}
 });
 const completedStory = await getStoryResponse.json();
 ```
@@ -274,21 +270,3 @@ const completedStory = await getStoryResponse.json();
 - **대체 API 문서 (ReDoc)**: `http://localhost:8000/redoc`
 
 ---
-
-## 7. 변경 사항 요약 (v1.0 → v2.0)
-
-### 🔥 제거된 복잡성
-- **엔드포인트 수**: 7개 → 4개 (43% 감소)
-- **데이터 모델**: 15개 → 3개 (80% 감소)
-- **ChatBot B 메서드**: 8개 → 2개 (75% 감소)
-- **설정 단계**: 3단계 → 1단계 (67% 감소)
-- **응답 구조 깊이**: 4레벨 → 2레벨 (50% 감소)
-
-### ✅ 개선된 사항
-- 불필요한 설정 메서드 제거
-- 복잡한 중첩 구조 단순화  
-- 직관적인 API 플로우
-- 최소 필수 파라미터만 유지
-- 플랫하고 이해하기 쉬운 응답
-
-**결과**: 훨씬 깔끔하고 사용하기 쉬운 API! 🚀

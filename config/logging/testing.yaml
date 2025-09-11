@@ -1,0 +1,310 @@
+# JJongal-AI Testing Environment Logging Configuration
+# Minimal overhead with focused debugging for automated testing
+
+version: 1
+disable_existing_loggers: false
+
+# Simple formatters for testing
+formatters:
+  test_simple:
+    format: '[%(levelname)s] %(name)s: %(message)s'
+  
+  test_detailed:
+    format: '%(asctime)s - [%(levelname)s] - %(name)s - %(funcName)s:%(lineno)d - %(message)s'
+    datefmt: '%H:%M:%S'
+  
+  test_json:
+    format: '{"level": "%(levelname)s", "logger": "%(name)s", "message": "%(message)s", "line": %(lineno)d}'
+  
+  minimal:
+    format: '%(levelname)s: %(message)s'
+
+# Handlers optimized for testing environment
+handlers:
+  # Console output for test runners
+  console_test:
+    class: logging.StreamHandler
+    level: WARNING
+    formatter: test_simple
+    stream: ext://sys.stdout
+  
+  # Test-specific file logging
+  test_file:
+    class: logging.FileHandler
+    level: DEBUG
+    formatter: test_detailed
+    filename: ./test_logs/test.log
+    mode: 'w'  # Overwrite on each test run
+    encoding: utf-8
+  
+  # Error capture for test failures
+  test_error:
+    class: logging.FileHandler
+    level: ERROR
+    formatter: test_detailed
+    filename: ./test_logs/test_errors.log
+    mode: 'w'
+    encoding: utf-8
+  
+  # Memory handler for test assertions
+  memory_handler:
+    class: logging.handlers.MemoryHandler
+    level: DEBUG
+    capacity: 1000
+    flushLevel: ERROR
+    target: test_error
+  
+  # Null handler for performance tests
+  null_handler:
+    class: logging.NullHandler
+    level: DEBUG
+
+# Test-specific loggers
+loggers:
+  # Root test logger
+  jjongal:
+    level: WARNING
+    handlers: [console_test, test_file, test_error]
+    propagate: false
+  
+  # Test framework logs
+  pytest:
+    level: INFO
+    handlers: [console_test]
+    propagate: false
+  
+  # Unit test specific
+  jjongal.test.unit:
+    level: DEBUG
+    handlers: [test_file, memory_handler]
+    propagate: false
+  
+  # Integration test specific  
+  jjongal.test.integration:
+    level: DEBUG
+    handlers: [test_file, memory_handler]
+    propagate: false
+  
+  # API test specific
+  jjongal.test.api:
+    level: DEBUG
+    handlers: [test_file, console_test]
+    propagate: false
+  
+  # WebSocket test logging
+  jjongal.test.websocket:
+    level: DEBUG
+    handlers: [test_file]
+    propagate: false
+  
+  # Mock service logging
+  jjongal.mock:
+    level: INFO
+    handlers: [test_file]
+    propagate: false
+  
+  # AI Chatbot tests (reduced logging for speed)
+  jjongal.chatbot.a:
+    level: ERROR
+    handlers: [test_error]
+    propagate: false
+  
+  jjongal.chatbot.b:
+    level: ERROR
+    handlers: [test_error]
+    propagate: false
+  
+  # Voice processing tests
+  jjongal.voice:
+    level: WARNING
+    handlers: [test_file]
+    propagate: false
+  
+  # Vector database tests
+  jjongal.vectordb:
+    level: WARNING
+    handlers: [test_file]
+    propagate: false
+  
+  # Authentication tests
+  jjongal.auth:
+    level: INFO
+    handlers: [test_file, test_error]
+    propagate: false
+  
+  # External API mocks
+  jjongal.external_api:
+    level: INFO
+    handlers: [test_file]
+    propagate: false
+  
+  # Story generation tests
+  jjongal.story:
+    level: WARNING
+    handlers: [test_file]
+    propagate: false
+  
+  # Database test operations
+  sqlalchemy.engine:
+    level: WARNING
+    handlers: [test_file]
+    propagate: false
+  
+  # Suppress external library logs during tests
+  uvicorn:
+    level: CRITICAL
+    handlers: [null_handler]
+    propagate: false
+  
+  fastapi:
+    level: CRITICAL
+    handlers: [null_handler]
+    propagate: false
+  
+  langchain:
+    level: CRITICAL
+    handlers: [null_handler]
+    propagate: false
+  
+  openai:
+    level: CRITICAL
+    handlers: [null_handler]
+    propagate: false
+  
+  elevenlabs:
+    level: CRITICAL
+    handlers: [null_handler]
+    propagate: false
+  
+  # HTTP client libraries (suppress during tests)
+  urllib3:
+    level: CRITICAL
+    handlers: [null_handler]
+    propagate: false
+  
+  aiohttp:
+    level: CRITICAL
+    handlers: [null_handler]
+    propagate: false
+  
+  # Performance test logging
+  jjongal.performance:
+    level: INFO
+    handlers: [test_file]
+    propagate: false
+  
+  # Load test logging
+  jjongal.load_test:
+    level: WARNING
+    handlers: [console_test, test_file]
+    propagate: false
+
+# Root logger for tests
+root:
+  level: WARNING
+  handlers: [console_test]
+
+# Testing-specific settings
+testing:
+  # Data logging (safe in test environment)
+  log_sql_queries: false  # Disable for performance
+  log_request_body: true
+  log_response_body: false  # Too verbose
+  log_websocket_messages: true
+  verbose_error_traces: true
+  log_ai_model_calls: false  # Using mocks
+  
+  # Test data logging (safe in isolated environment)
+  log_auth_tokens: false  # Never log tokens
+  log_api_keys: false     # Never log API keys
+  log_user_data: true     # Test data only
+  log_test_fixtures: true
+  
+  # Performance monitoring (minimal)
+  log_slow_queries: true
+  slow_query_threshold: 5.0  # seconds (very lenient for tests)
+  log_memory_usage: false
+  log_performance_metrics: false
+  
+  # Test-specific logging
+  log_test_setup: true
+  log_test_teardown: true
+  log_test_data_creation: true
+  log_mock_responses: true
+  log_assertion_failures: true
+  
+  # Coverage and metrics
+  log_coverage_data: true
+  log_test_timing: true
+  log_resource_usage: true
+
+# Test environment configuration
+test_environment:
+  # Quick setup
+  fast_logging: true
+  minimal_formatting: true
+  reduce_external_logs: true
+  
+  # Test isolation
+  clear_logs_on_start: true
+  separate_test_runs: false
+  capture_warnings: true
+  
+  # Debugging support
+  enable_debug_mode: true
+  log_test_context: true
+  preserve_failed_test_logs: true
+  
+  # Parallel testing support
+  thread_safe_logging: true
+  process_safe_logging: true
+  unique_log_files: false
+
+# Console settings for test output
+console:
+  colors: true
+  width: 100
+  show_time: false
+  show_level: true
+  show_path: false
+  compact_output: true
+
+# File management for test logs
+file_management:
+  cleanup_old_logs: true
+  max_age_days: 7  # Keep test logs for a week
+  compress_rotated: false
+  create_directories: true
+  auto_cleanup_on_start: true
+  
+  # Test artifact management
+  preserve_failure_logs: true
+  cleanup_success_logs: true
+  max_log_files: 10
+
+# Performance settings for testing
+performance:
+  # Minimal overhead
+  async_logging: false  # Synchronous for test reliability
+  buffer_size: 1024
+  flush_immediately: true
+  
+  # Resource limits (conservative for CI/CD)
+  max_memory_usage: 67108864  # 64MB
+  max_file_size: 10485760     # 10MB
+  queue_timeout: 1.0          # 1 second
+
+# CI/CD specific settings
+ci_cd:
+  # GitHub Actions / Jenkins integration
+  export_junit_xml: true
+  export_coverage_xml: true
+  structured_output: true
+  
+  # Artifact collection
+  collect_logs_on_failure: true
+  upload_test_artifacts: true
+  
+  # Notifications
+  notify_on_test_failure: false
+  notify_on_performance_regression: false

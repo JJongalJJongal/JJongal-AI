@@ -1,11 +1,13 @@
 """
-Voice WebSocket Router Module
+API Router Module
 
-FastAPI APIRouter 를 사용해서 WebSocket endpoint 를 관리
+FastAPI APIRouter 를 사용해서 API endpoints 를 관리
 
 """
-from .websocket_routers import router as websocket_router
+from .api_routers import router as api_router
+from .health_routers import router as health_router
 
 __all__ = [
-    "websocket_router"
+    "api_router",
+    "health_router"
 ]

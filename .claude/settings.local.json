@@ -3,7 +3,21 @@
     "allow": [
       "Bash(rm:*)",
       "Bash(mkdir:*)",
-      "Bash(python3:*)"
+      "Bash(python3:*)",
+      "Bash(find:*)",
+      "Bash(cat:*)",
+      "Bash(docker logs:*)",
+      "Bash(docker-compose:*)",
+      "Bash(python:*)",
+      "Bash(grep:*)",
+      "Bash(bash -n:*)",
+      "Bash(chmod:*)",
+      "Read(//**)",
+      "Bash(sed:*)",
+      "Bash(pip install:*)",
+      "Bash(curl:*)",
+      "Bash(make:*)",
+      "Bash(git checkout:*)"
     ],
     "deny": []
   }

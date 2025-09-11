@@ -14,9 +14,9 @@ def get_project_root() -> Path:
     Returns:
         Path: 프로젝트 루트 디렉토리 경로
     """
-    # 현재 파일 기준 상위 디렉토리 탐색
-    current_dir = Path(__file__).resolve().parent  # /shared/configs
-    return current_dir.parent.parent  # /CCB_AI
+    # 현재 파일 기준으로 4단계 위로 이동 (src/shared/configs/app.py -> JJongal-AI)
+    current_path = Path(__file__).resolve()
+    return current_path.parent.parent.parent.parent
 
 
 def initialize_env() -> Dict[str, str]:
@@ -96,6 +96,35 @@ def get_app_settings() -> Dict[str, Any]:
         # 웹소켓 설정
         "ws_connection_timeout": 30 * 60,  # 30분
     }
+
+
+class AppConfig:
+    """Application configuration class"""
+    
+    def __init__(self):
+        initialize_env()
+        self.env_vars = get_env_vars()
+        self.app_settings = get_app_settings()
+    
+    @property
+    def openai_api_key(self) -> str:
+        return self.env_vars.get("openai_api_key", "")
+    
+    @property
+    def elevenlabs_api_key(self) -> str:
+        return self.env_vars.get("elevenlabs_api_key", "")
+    
+    @property
+    def ws_auth_token(self) -> str:
+        return self.env_vars.get("ws_auth_token", "")
+    
+    @property
+    def log_level(self) -> str:
+        return self.env_vars.get("log_level", "INFO")
+    
+    @property
+    def token_limit(self) -> int:
+        return int(self.env_vars.get("token_limit", "10000"))
 
 
 # 환경 변수 미리 초기화

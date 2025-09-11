@@ -1,9 +1,9 @@
-# 꼬꼬북 동화 생성 프로젝트 Makefile
+# PeepPeep (쫑알쫑알) 동화 생성 프로젝트 Makefile
 
 # 기본 변수 설정
-DOCKER_IMAGE = ccb-ai
+DOCKER_IMAGE = peeppeep-ai
 DOCKER_TAG = latest
-CONTAINER_NAME = ccb-ai-app
+CONTAINER_NAME = peeppeep-ai-app
 
 # =============================================================================
 # 기본 Docker 명령어
@@ -12,27 +12,40 @@ CONTAINER_NAME = ccb-ai-app
 # Docker 빌드
 .PHONY: build
 build:
-	docker build -t $(DOCKER_IMAGE):$(DOCKER_TAG) .
+	docker build -f docker/Dockerfile -t $(DOCKER_IMAGE):$(DOCKER_TAG) .
 
 # Docker 실행 (프로덕션)
 .PHONY: run
 run:
-	docker-compose up -d
+	docker-compose -f docker/docker-compose.yml up -d
 
 # Docker 실행 (개발 환경)
 .PHONY: dev
 dev:
-	docker-compose -f docker-compose.yml -f docker-compose.dev.yml up
+	docker-compose -f docker/docker-compose.yml -f docker-compose.dev.yml up
+
+# Python 직접 실행 (개발 환경 - Docker 없이)
+.PHONY: dev-local
+dev-local:
+	@echo "🚀 쫑알쫑알 AI 로컬 개발 서버 시작..."
+	@echo "📍 주소: http://localhost:8001"
+	@echo "📖 API 문서: http://localhost:8001/docs"
+	@echo "🔍 Health: http://localhost:8001/api/v1/health"
+	@echo ""
+	@if [ ! -f .env ]; then \
+		echo "⚠️ .env 파일이 없습니다. API 키를 설정해주세요."; \
+	fi
+	python app.py
 
 # Docker 정지
 .PHONY: stop
 stop:
-	docker-compose down
+	docker-compose -f docker/docker-compose.yml down
 
 # Docker 완전 정리 (볼륨 포함)
 .PHONY: clean
 clean:
-	docker-compose down -v
+	docker-compose -f docker/docker-compose.yml down -v
 	docker rmi $(DOCKER_IMAGE):$(DOCKER_TAG) || true
 
 # =============================================================================
@@ -42,7 +55,7 @@ clean:
 # 시연 준비 (환경 변수 체크 + 빌드 + 실행)
 .PHONY: demo-setup
 demo-setup:
-	@echo "꼬꼬북 AI 시연 준비 중..."
+	@echo "PeepPeep (쫑알쫑알) AI 시연 준비 중..."
 	@if [ ! -f .env ]; then \
 		echo ".env 파일이 없습니다. env.example을 참고하여 생성하세요."; \
 		exit 1; \
@@ -61,7 +74,7 @@ demo-setup:
 # 시연용 빠른 시작
 .PHONY: demo-start
 demo-start:
-	@echo "꼬꼬북 AI 빠른 시작..."
+	@echo "PeepPeep (쫑알쫑알) AI 빠른 시작..."
 	docker-compose up -d
 	@echo "30초 대기 중..."
 	@sleep 30
@@ -73,21 +86,21 @@ demo-start:
 # 시연 상태 확인
 .PHONY: demo-status
 demo-status:
-	@echo "꼬꼬북 AI 서비스 상태:"
+	@echo "PeepPeep (쫑알쫑알) AI 서비스 상태:"
 	@echo ""
 	@echo "컨테이너 상태:"
-	@docker ps --format "table {{.Names}}\t{{.Status}}\t{{.Ports}}" | grep -E "(ccb-|NAMES)"
+	@docker ps --format "table {{.Names}}\t{{.Status}}\t{{.Ports}}" | grep -E "(peeppeep-|NAMES)"
 	@echo ""
 	@echo "헬스체크:"
 	@curl -s http://localhost:8001/api/v1/health | jq '.' || echo "API 서버 연결 실패"
 	@echo ""
 	@echo "메모리 사용량:"
-	@docker stats --no-stream --format "table {{.Name}}\t{{.MemUsage}}\t{{.MemPerc}}" | grep -E "(ccb-|NAME)"
+	@docker stats --no-stream --format "table {{.Name}}\t{{.MemUsage}}\t{{.MemPerc}}" | grep -E "(peeppeep-|NAME)"
 
 # 시연용 테스트 실행
 .PHONY: demo-test
 demo-test:
-	@echo "꼬꼬북 AI 기능 테스트 중..."
+	@echo "PeepPeep (쫑알쫑알) AI 기능 테스트 중..."
 	@echo ""
 	@echo "1️⃣ API 헬스체크:"
 	@curl -s http://localhost:8001/api/v1/health || echo "실패"
@@ -145,7 +158,7 @@ monitor:
 	@echo "Ctrl+C로 종료"
 	@while true; do \
 		clear; \
-		echo "=== 꼬꼬북 AI 성능 모니터링 ==="; \
+		echo "=== 쫑알쫑알 AI 성능 모니터링 ==="; \
 		echo "시간: $$(date)"; \
 		echo ""; \
 		docker stats --no-stream --format "table {{.Name}}\t{{.CPUPerc}}\t{{.MemUsage}}\t{{.MemPerc}}\t{{.NetIO}}" | grep -E "(ccb-|NAME)"; \
@@ -178,12 +191,13 @@ info:
 # 도움말
 .PHONY: help
 help:
-	@echo "꼬꼬북 동화 생성 프로젝트 Makefile 명령어:"
+	@echo "쫑알쫑알 동화 생성 프로젝트 Makefile 명령어:"
 	@echo ""
 	@echo "기본 명령어:"
 	@echo "  build       - Docker 이미지 빌드"
 	@echo "  run         - 프로덕션 환경으로 실행"
-	@echo "  dev         - 개발 환경으로 실행"
+	@echo "  dev         - 개발 환경으로 실행 (Docker 필요)"
+	@echo "  dev-local   - 개발 환경으로 실행 (Python 직접, Docker 불필요)"
 	@echo "  stop        - 서비스 정지"
 	@echo "  clean       - 컨테이너 및 이미지 정리"
 	@echo ""

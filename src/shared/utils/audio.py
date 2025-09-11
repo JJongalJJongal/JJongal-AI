@@ -1,18 +1,33 @@
 """
-오디오 처리 관련 유틸리티 모듈
+Enhanced Audio Processing Utilities for JJongal-AI
+
+Comprehensive audio processing with robust error handling,
+validation, and performance optimization.
 """
 import os
 import logging
 import asyncio
 import traceback
+import time
 from pathlib import Path
-from typing import Tuple, Optional, Any, Dict
+from typing import Tuple, Optional, Any, Dict, Union
 from elevenlabs.client import ElevenLabs
-from elevenlabs import play, stream, save
+from elevenlabs import play, stream, save, Voice, VoiceSettings
 
 from ..configs.app import get_env_vars
+from .logging import get_module_logger
 
-logger = logging.getLogger(__name__)
+logger = get_module_logger(__name__)
+
+
+class AudioError(Exception):
+    """Custom exception for audio-related errors"""
+    pass
+
+
+class ElevenLabsClientError(AudioError):
+    """Exception for ElevenLabs API client errors"""
+    pass
 
 
 def ensure_audio_directory() -> Path:
@@ -31,24 +46,47 @@ def ensure_audio_directory() -> Path:
 
 def initialize_elevenlabs() -> Optional[ElevenLabs]:
     """
-    ElevenLabs 클라이언트 초기화
+    Enhanced ElevenLabs client initialization with validation
     
     Returns:
-        Optional[ElevenLabs]: 초기화된 ElevenLabs 클라이언트 (실패 시 None)
+        Optional[ElevenLabs]: Initialized client or None if failed
     """
-    env_vars = get_env_vars()
-    api_key = env_vars.get("elevenlabs_api_key")
-    
-    if not api_key:
-        logger.warning("ELEVENLABS_API_KEY가 설정되지 않았습니다.")
-        return None
-    
     try:
+        # Try multiple environment variable names for flexibility
+        api_key = (
+            os.getenv("ELEVENLABS_API_KEY") or 
+            get_env_vars().get("elevenlabs_api_key")
+        )
+        
+        if not api_key:
+            logger.warning("ELEVENLABS_API_KEY not found in environment variables")
+            return None
+            
+        # Check for placeholder values
+        if api_key in ["sk_REPLACE_WITH_YOUR_ACTUAL_ELEVENLABS_API_KEY", "", "your-api-key-here"]:
+            logger.warning("ELEVENLABS_API_KEY appears to be a placeholder value")
+            return None
+        
+        # Validate API key format (ElevenLabs keys typically start with 'sk_')
+        if not api_key.startswith('sk_'):
+            logger.warning(f"ELEVENLABS_API_KEY format seems invalid (should start with 'sk_')")
+        
         client = ElevenLabs(api_key=api_key)
-        logger.info("ElevenLabs 클라이언트 초기화 성공")
-        return client
+        
+        # Test the connection with a simple API call
+        try:
+            voices = client.voices.get_all()
+            voice_count = len(voices.voices) if voices and voices.voices else 0
+            logger.info(f"ElevenLabs client initialized successfully. Available voices: {voice_count}")
+            return client
+            
+        except Exception as e:
+            logger.error(f"ElevenLabs API key validation failed: {e}")
+            # Return None instead of raising to allow graceful degradation
+            return None
+            
     except Exception as e:
-        logger.error(f"ElevenLabs 클라이언트 초기화 실패: {e}")
+        logger.error(f"Failed to initialize ElevenLabs client: {e}")
         return None
 
 
@@ -105,53 +143,249 @@ async def transcribe_audio(model: Any, file_path: str, language: str = "ko") -> 
 async def generate_speech(
     client: Optional[ElevenLabs], 
     text: str, 
-    voice_id: str = "21m00Tcm4TlvDq8ikWAM",
-    output_path: Optional[str] = None
+    voice_id: Optional[str] = None,
+    output_path: Optional[str] = None,
+    voice_settings: Optional[VoiceSettings] = None
 ) -> Tuple[Optional[bytes], Optional[str]]:
     """
-    ElevenLabs를 사용하여 음성 생성
+    Enhanced speech generation with comprehensive error handling
     
     Args:
-        client (Optional[ElevenLabs]): ElevenLabs 클라이언트
-        text (str): 음성으로 변환할 텍스트
-        voice_id (str): 사용할 음성 ID (기본값: "21m00Tcm4TlvDq8ikWAM" - 한국어 여성 음성)
-        output_path (Optional[str]): 저장할 파일 경로
+        client (Optional[ElevenLabs]): ElevenLabs client
+        text (str): Text to synthesize
+        voice_id (Optional[str]): Voice ID (uses default if None)
+        output_path (Optional[str]): Path to save audio file
+        voice_settings (Optional[VoiceSettings]): Voice settings
         
     Returns:
-        Tuple[Optional[bytes], Optional[str]]: 오디오 데이터와 파일 경로 (실패 시 None, None)
+        Tuple[Optional[bytes], Optional[str]]: Audio data and file path
+        
+    Raises:
+        AudioError: If speech generation fails
     """
-    if client is None:
-        logger.error("ElevenLabs 클라이언트가 초기화되지 않았습니다")
-        return None, None
-        
     try:
-        if not text.strip():
-            logger.warning("변환할 텍스트가 비어있습니다")
-            return None, None
+        # Input validation
+        if client is None:
+            raise ElevenLabsClientError("ElevenLabs client not initialized")
             
-        # 음성 생성
-        audio = await asyncio.to_thread(
-            client.text_to_speech.convert,
-            text=text,
-            voice_id=voice_id,
-            model_id="eleven_multilingual_v2",
-            output_format="wav_44100"
-        )
+        if not text or not text.strip():
+            raise AudioError("Text cannot be empty")
+            
+        # Text length validation (ElevenLabs has limits)
+        if len(text) > 5000:
+            logger.warning(f"Text length ({len(text)}) exceeds recommended limit (5000)")
+            text = text[:5000] + "..."
         
-        # 파일로 저장 (필요한 경우)
+        # Use default voice if none specified
+        if voice_id is None:
+            try:
+                voices = await asyncio.to_thread(client.voices.get_all)
+                if voices and voices.voices:
+                    # Prefer Korean voices if available
+                    korean_voices = [v for v in voices.voices if 'korean' in v.name.lower() or '한국' in v.name.lower()]
+                    if korean_voices:
+                        voice_id = korean_voices[0].voice_id
+                        logger.debug(f"Using Korean voice: {voice_id}")
+                    else:
+                        voice_id = voices.voices[0].voice_id
+                        logger.debug(f"Using default voice: {voice_id}")
+                else:
+                    raise AudioError("No voices available")
+            except Exception as e:
+                logger.error(f"Failed to get default voice: {e}")
+                voice_id = "21m00Tcm4TlvDq8ikWAM"  # Fallback to known working voice
+        
+        # Set default voice settings if not provided
+        if voice_settings is None:
+            voice_settings = VoiceSettings(
+                stability=0.7,
+                similarity_boost=0.8,
+                style=0.3,
+                use_speaker_boost=True
+            )
+        
+        logger.debug(f"Generating speech: {len(text)} chars with voice {voice_id}")
+        
+        # Generate audio with timeout
+        try:
+            audio_data = await asyncio.wait_for(
+                asyncio.to_thread(
+                    client.text_to_speech.convert,
+                    text=text,
+                    voice_id=voice_id,
+                    voice_settings=voice_settings,
+                    model_id="eleven_multilingual_v2",
+                    output_format="mp3_44100_128"
+                ),
+                timeout=60.0  # 60 second timeout
+            )
+        except asyncio.TimeoutError:
+            raise AudioError("Speech generation timeout")
+        except Exception as e:
+            logger.error(f"ElevenLabs API call failed: {e}")
+            raise ElevenLabsClientError(f"Speech generation failed: {e}")
+        
+        if not audio_data:
+            raise AudioError("Empty audio data received from API")
+        
+        # Validate audio data
+        if len(audio_data) < 1000:  # Less than 1KB seems suspicious
+            logger.warning(f"Generated audio is very small: {len(audio_data)} bytes")
+        
+        # Save to file if path provided
+        file_path = None
         if output_path:
-            # output_path가 상대 경로인 경우 /output/temp/audio 기준으로 처리
-            if not os.path.isabs(output_path):
-                audio_dir = ensure_audio_directory()
-                output_path = str(audio_dir / output_path)
-            
-            with open(output_path, "wb") as f:
-                f.write(audio)
-            logger.info(f"음성 파일 저장 완료: {output_path}")
-            return audio, output_path
-            
-        return audio, None
+            try:
+                # Handle relative paths
+                if not os.path.isabs(output_path):
+                    audio_dir = ensure_audio_directory()
+                    output_path = str(audio_dir / output_path)
+                
+                # Ensure parent directory exists
+                Path(output_path).parent.mkdir(parents=True, exist_ok=True)
+                
+                with open(output_path, "wb") as f:
+                    f.write(audio_data)
+                
+                file_path = output_path
+                logger.info(f"Audio saved successfully: {file_path} ({len(audio_data)} bytes)")
+                
+            except Exception as e:
+                logger.error(f"Failed to save audio to {output_path}: {e}")
+                # Don't raise here, return audio data anyway
+        
+        logger.debug(f"Speech generation completed: {len(audio_data)} bytes")
+        return audio_data, file_path
+        
+    except AudioError:
+        raise  # Re-raise our custom errors
+    except Exception as e:
+        logger.error(f"Unexpected error in speech generation: {e}")
+        raise AudioError(f"Speech generation failed: {e}")
+
+
+def validate_audio_data(audio_data: bytes) -> Dict[str, Any]:
+    """
+    Validate audio data and extract basic information
+    
+    Args:
+        audio_data: Audio data bytes
+        
+    Returns:
+        Dict with validation results and metadata
+    """
+    validation_result = {
+        "valid": False,
+        "size_bytes": 0,
+        "estimated_duration": 0.0,
+        "format": "unknown",
+        "issues": []
+    }
+    
+    try:
+        if not audio_data:
+            validation_result["issues"].append("Empty audio data")
+            return validation_result
+        
+        size_bytes = len(audio_data)
+        validation_result["size_bytes"] = size_bytes
+        
+        # Basic size validation
+        if size_bytes < 1000:  # Less than 1KB
+            validation_result["issues"].append("Audio data suspiciously small")
+        elif size_bytes > 50 * 1024 * 1024:  # More than 50MB
+            validation_result["issues"].append("Audio data very large")
+        
+        # Format detection based on header
+        if audio_data.startswith(b'ID3') or audio_data.startswith(b'\xff\xfb'):
+            validation_result["format"] = "mp3"
+            # Rough duration estimation for MP3 at 128kbps
+            validation_result["estimated_duration"] = round(size_bytes / (128 * 1024 / 8), 2)
+        elif audio_data.startswith(b'RIFF'):
+            validation_result["format"] = "wav"
+            # Rough duration estimation for WAV (assuming 44.1kHz 16-bit)
+            validation_result["estimated_duration"] = round(size_bytes / (44100 * 2), 2)
+        else:
+            validation_result["issues"].append("Unknown audio format")
+        
+        # Mark as valid if no critical issues
+        critical_issues = ["Empty audio data"]
+        has_critical = any(issue in validation_result["issues"] for issue in critical_issues)
+        validation_result["valid"] = not has_critical
+        
+        return validation_result
         
     except Exception as e:
-        logger.error(f"음성 생성 중 오류 발생: {e}")
-        return None, None 
+        logger.error(f"Audio validation error: {e}")
+        validation_result["issues"].append(f"Validation error: {e}")
+        return validation_result
+
+
+async def cleanup_temp_audio_files(
+    directory: Union[str, Path],
+    max_age_hours: int = 24,
+    dry_run: bool = False
+) -> Dict[str, Any]:
+    """
+    Clean up temporary audio files with proper error handling
+    
+    Args:
+        directory: Directory to clean
+        max_age_hours: Maximum age in hours for files to keep
+        dry_run: If True, only report what would be deleted
+        
+    Returns:
+        Cleanup summary
+    """
+    cleanup_summary = {
+        "files_found": 0,
+        "files_deleted": 0,
+        "bytes_freed": 0,
+        "errors": []
+    }
+    
+    try:
+        directory = Path(directory)
+        if not directory.exists():
+            cleanup_summary["errors"].append(f"Directory does not exist: {directory}")
+            return cleanup_summary
+        
+        current_time = time.time()
+        max_age_seconds = max_age_hours * 3600
+        
+        audio_extensions = {'.mp3', '.wav', '.ogg', '.m4a', '.flac'}
+        
+        for file_path in directory.rglob("*"):
+            if file_path.is_file() and file_path.suffix.lower() in audio_extensions:
+                cleanup_summary["files_found"] += 1
+                
+                try:
+                    file_age = current_time - file_path.stat().st_mtime
+                    
+                    if file_age > max_age_seconds:
+                        file_size = file_path.stat().st_size
+                        
+                        if not dry_run:
+                            file_path.unlink()
+                            cleanup_summary["files_deleted"] += 1
+                            cleanup_summary["bytes_freed"] += file_size
+                            logger.debug(f"Deleted old audio file: {file_path}")
+                        else:
+                            logger.info(f"Would delete: {file_path} ({file_size} bytes)")
+                            
+                except Exception as e:
+                    error_msg = f"Failed to process {file_path}: {e}"
+                    cleanup_summary["errors"].append(error_msg)
+                    logger.error(error_msg)
+        
+        if not dry_run:
+            logger.info(f"Audio cleanup completed: {cleanup_summary['files_deleted']} files deleted, "
+                       f"{cleanup_summary['bytes_freed']} bytes freed")
+        
+        return cleanup_summary
+        
+    except Exception as e:
+        error_msg = f"Audio cleanup failed: {e}"
+        cleanup_summary["errors"].append(error_msg)
+        logger.error(error_msg)
+        return cleanup_summary 

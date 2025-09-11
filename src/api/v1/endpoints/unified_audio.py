@@ -87,6 +87,10 @@ class JjongAlAudioHandler:
             "user_message": self.handle_user_message,
             "end_conversation": self.handle_end_conversation,
             "audio_config": self.handle_audio_config,
+            # ⭐ NEW: Family voice handlers
+            "family_voice_upload": self.handle_family_voice_upload,
+            "family_voice_sample": self.handle_family_voice_sample,
+            "family_voice_status": self.handle_family_voice_status,
         }
 
     async def handle_json_message(
@@ -411,6 +415,264 @@ class JjongAlAudioHandler:
         except Exception as e:
             logger.warning(f"TTS generation failed: {e}")
             return None
+
+    # ⭐ NEW: Family voice message handlers
+    async def handle_family_voice_upload(
+        self,
+        websocket: WebSocket,
+        client_id: str,
+        message: Dict[str, Any],
+        services: Dict[str, Any],
+    ) -> Optional[Dict[str, Any]]:
+        """Handle family voice upload initiation"""
+        try:
+            data = message.get("data", {})
+            family_member = data.get("family_member")  # "mom" | "dad"
+            voice_name = data.get("voice_name", f"{family_member}_voice")
+            
+            # Validate family member
+            if family_member not in ["mom", "dad"]:
+                return WebSocketMessageBuilder.error(
+                    "INVALID_FAMILY_MEMBER",
+                    "Family member must be 'mom' or 'dad'",
+                    {"family_member": family_member}
+                )
+            
+            # Initialize family voice collection for this session
+            if client_id not in self.active_sessions:
+                self.active_sessions[client_id] = {}
+            
+            self.active_sessions[client_id][f"{family_member}_voice"] = {
+                "family_member": family_member,
+                "voice_name": voice_name,
+                "samples_collected": 0,
+                "samples_needed": 5,
+                "status": "collecting_samples",
+                "started_at": datetime.now().isoformat()
+            }
+            
+            logger.info(f"Family voice upload started - client: {client_id}, member: {family_member}")
+            
+            return WebSocketMessageBuilder.success(
+                "family_voice_upload_started",
+                {
+                    "family_member": family_member,
+                    "voice_name": voice_name,
+                    "samples_needed": 5,
+                    "message": f"{family_member.title()} 음성 수집을 시작합니다. 5개 샘플이 필요합니다."
+                }
+            )
+            
+        except Exception as e:
+            logger.error(f"Family voice upload handler error: {e}")
+            return WebSocketMessageBuilder.error(
+                "FAMILY_VOICE_UPLOAD_ERROR",
+                "Family voice upload processing failed"
+            )
+
+    async def handle_family_voice_sample(
+        self,
+        websocket: WebSocket,
+        client_id: str,
+        message: Dict[str, Any],
+        services: Dict[str, Any],
+    ) -> Optional[Dict[str, Any]]:
+        """Handle individual family voice sample upload"""
+        try:
+            data = message.get("data", {})
+            family_member = data.get("family_member")
+            sample_number = data.get("sample_number", 1)
+            audio_data = data.get("audio_data")  # Base64 encoded
+            
+            if not audio_data:
+                return WebSocketMessageBuilder.error(
+                    "MISSING_AUDIO_DATA",
+                    "Audio data is required for voice sample"
+                )
+            
+            # Get voice cloning processor
+            voice_processor = services.get("voice_cloning_processor")
+            if not voice_processor:
+                return WebSocketMessageBuilder.error(
+                    "SERVICE_UNAVAILABLE",
+                    "Voice processing service not available"
+                )
+            
+            # Get user_id from session or use client_id
+            user_id = client_id  # In real app, get from authenticated session
+            voice_name = self.active_sessions.get(client_id, {}).get(f"{family_member}_voice", {}).get("voice_name", f"{family_member}_voice")
+            
+            # Decode and process audio sample
+            import base64
+            audio_bytes = base64.b64decode(audio_data)
+            
+            # Collect family voice sample
+            result = await voice_processor.collect_family_voice_sample(
+                user_id=user_id,
+                family_member=family_member,
+                voice_name=voice_name,
+                audio_data=audio_bytes,
+                file_format="mp3"
+            )
+            
+            if result["success"]:
+                # Update session info
+                if client_id in self.active_sessions and f"{family_member}_voice" in self.active_sessions[client_id]:
+                    self.active_sessions[client_id][f"{family_member}_voice"]["samples_collected"] = result["samples_collected"]
+                
+                # Check if ready for cloning
+                if result["ready_for_cloning"]:
+                    # Start background cloning process
+                    asyncio.create_task(
+                        self._process_family_voice_cloning(
+                            websocket,
+                            client_id,
+                            user_id,
+                            family_member,
+                            voice_processor
+                        )
+                    )
+                    
+                    return WebSocketMessageBuilder.success(
+                        "family_voice_cloning_started",
+                        {
+                            "family_member": family_member,
+                            "samples_collected": result["samples_collected"],
+                            "message": f"{family_member.title()} 음성 클로닝을 시작합니다..."
+                        }
+                    )
+                else:
+                    return WebSocketMessageBuilder.progress(
+                        "family_voice_progress",
+                        current=result["samples_collected"],
+                        total=result["samples_needed"],
+                        message=f"{family_member.title()} 음성 샘플 {result['samples_collected']}/{result['samples_needed']} 수집 완료"
+                    )
+            else:
+                return WebSocketMessageBuilder.error(
+                    "VOICE_SAMPLE_FAILED",
+                    result["error"]
+                )
+                
+        except Exception as e:
+            logger.error(f"Family voice sample handler error: {e}")
+            return WebSocketMessageBuilder.error(
+                "FAMILY_VOICE_SAMPLE_ERROR",
+                "Voice sample processing failed"
+            )
+
+    async def handle_family_voice_status(
+        self,
+        websocket: WebSocket,
+        client_id: str,
+        message: Dict[str, Any],
+        services: Dict[str, Any],
+    ) -> Optional[Dict[str, Any]]:
+        """Handle family voice status request"""
+        try:
+            data = message.get("data", {})
+            family_member = data.get("family_member")
+            
+            # Get voice cloning processor
+            voice_processor = services.get("voice_cloning_processor")
+            if not voice_processor:
+                return WebSocketMessageBuilder.error(
+                    "SERVICE_UNAVAILABLE",
+                    "Voice processing service not available"
+                )
+            
+            user_id = client_id  # In real app, get from authenticated session
+            
+            if family_member:
+                # Get specific family member status
+                status = voice_processor.get_family_voice_status(user_id, family_member)
+            else:
+                # Get all family voices status
+                status = voice_processor.get_family_voice_status(user_id)
+            
+            return WebSocketMessageBuilder.success(
+                "family_voice_status",
+                status
+            )
+            
+        except Exception as e:
+            logger.error(f"Family voice status handler error: {e}")
+            return WebSocketMessageBuilder.error(
+                "FAMILY_VOICE_STATUS_ERROR",
+                "Status retrieval failed"
+            )
+
+    async def _process_family_voice_cloning(
+        self,
+        websocket: WebSocket,
+        client_id: str,
+        user_id: str,
+        family_member: str,
+        voice_processor
+    ):
+        """Background task for family voice cloning"""
+        try:
+            # Send cloning progress
+            await websocket.send_json(
+                WebSocketMessageBuilder.progress(
+                    "family_voice_cloning_progress",
+                    current=1,
+                    total=3,
+                    message=f"{family_member.title()} 음성 분석 중..."
+                )
+            )
+            
+            await asyncio.sleep(2)  # Simulate processing time
+            
+            await websocket.send_json(
+                WebSocketMessageBuilder.progress(
+                    "family_voice_cloning_progress",
+                    current=2,
+                    total=3,
+                    message=f"{family_member.title()} 음성 클로닝 중..."
+                )
+            )
+            
+            # Actual voice cloning
+            result = await voice_processor.create_family_voice_clone(user_id, family_member)
+            
+            if result["success"]:
+                await websocket.send_json(
+                    WebSocketMessageBuilder.success(
+                        "family_voice_ready",
+                        {
+                            "voice_id": result["voice_id"],
+                            "family_member": family_member,
+                            "voice_name": result["voice_name"],
+                            "message": f"{family_member.title()} 음성 클로닝이 완료되었습니다!"
+                        }
+                    )
+                )
+                
+                # Update session status
+                if client_id in self.active_sessions and f"{family_member}_voice" in self.active_sessions[client_id]:
+                    self.active_sessions[client_id][f"{family_member}_voice"]["status"] = "completed"
+                    self.active_sessions[client_id][f"{family_member}_voice"]["voice_id"] = result["voice_id"]
+                    
+                logger.info(f"Family voice cloning completed - client: {client_id}, member: {family_member}, voice_id: {result['voice_id']}")
+            else:
+                await websocket.send_json(
+                    WebSocketMessageBuilder.error(
+                        "FAMILY_VOICE_CLONING_FAILED",
+                        result["error"],
+                        {"family_member": family_member}
+                    )
+                )
+                
+        except Exception as e:
+            logger.error(f"Family voice cloning background task error: {e}")
+            await websocket.send_json(
+                WebSocketMessageBuilder.error(
+                    "FAMILY_VOICE_CLONING_ERROR",
+                    "Voice cloning processing failed",
+                    {"family_member": family_member}
+                )
+            )
 
     async def _generate_story_with_progress(
         self,

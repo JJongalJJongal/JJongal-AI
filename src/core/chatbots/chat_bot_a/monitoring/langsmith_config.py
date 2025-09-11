@@ -12,8 +12,12 @@ import uuid
 
 from langsmith import Client, traceable
 from langsmith.run_helpers import trace
-from langchain.callbacks import LangChainTracer
-from langchain.schema import BaseMessage
+# from langchain_community.callbacks import LangChainTracer  # Deprecated in newer versions
+try:
+    from langsmith import LangChainTracer
+except ImportError:
+    LangChainTracer = None  # Fallback for when LangSmith is not available
+from langchain_core.messages import BaseMessage
 
 from src.shared.utils.logging import get_module_logger
 

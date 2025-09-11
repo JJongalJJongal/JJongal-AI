@@ -1,0 +1,199 @@
+# JJongal-AI Development Logging Configuration
+# Verbose logging for development debugging
+
+version: 1
+disable_existing_loggers: false
+
+# Formatters for different log output formats
+formatters:
+  detailed:
+    format: '%(asctime)s - %(name)s - %(levelname)s - %(module)s:%(lineno)d - %(message)s'
+    datefmt: '%Y-%m-%d %H:%M:%S'
+  
+  simple:
+    format: '%(levelname)s - %(name)s - %(message)s'
+  
+  json:
+    format: '{"timestamp": "%(asctime)s", "level": "%(levelname)s", "logger": "%(name)s", "module": "%(module)s", "line": %(lineno)d, "message": "%(message)s"}'
+    datefmt: '%Y-%m-%dT%H:%M:%S'
+
+# Handlers define where logs are sent
+handlers:
+  console:
+    class: logging.StreamHandler
+    level: DEBUG
+    formatter: detailed
+    stream: ext://sys.stdout
+  
+  file_debug:
+    class: logging.handlers.RotatingFileHandler
+    level: DEBUG
+    formatter: detailed
+    filename: ./logs/dev/debug.log
+    maxBytes: 10485760  # 10MB
+    backupCount: 5
+    encoding: utf-8
+  
+  file_info:
+    class: logging.handlers.RotatingFileHandler
+    level: INFO
+    formatter: detailed
+    filename: ./logs/dev/info.log
+    maxBytes: 10485760  # 10MB
+    backupCount: 5
+    encoding: utf-8
+  
+  file_error:
+    class: logging.handlers.RotatingFileHandler
+    level: ERROR
+    formatter: detailed
+    filename: ./logs/dev/error.log
+    maxBytes: 10485760  # 10MB
+    backupCount: 10
+    encoding: utf-8
+  
+  websocket_file:
+    class: logging.handlers.RotatingFileHandler
+    level: DEBUG
+    formatter: json
+    filename: ./logs/dev/websocket.log
+    maxBytes: 5242880  # 5MB
+    backupCount: 5
+    encoding: utf-8
+
+# Loggers for different components
+loggers:
+  # Root application logger
+  jjongal:
+    level: DEBUG
+    handlers: [console, file_debug, file_info, file_error]
+    propagate: false
+  
+  # API request/response logging
+  uvicorn.access:
+    level: DEBUG
+    handlers: [console, file_info]
+    propagate: false
+  
+  uvicorn.error:
+    level: DEBUG
+    handlers: [console, file_error]
+    propagate: false
+  
+  # FastAPI application logs
+  fastapi:
+    level: DEBUG
+    handlers: [console, file_debug]
+    propagate: false
+  
+  # WebSocket specific logging
+  jjongal.websocket:
+    level: DEBUG
+    handlers: [console, websocket_file]
+    propagate: false
+  
+  # AI Chatbot logging
+  jjongal.chatbot.a:
+    level: DEBUG
+    handlers: [console, file_debug]
+    propagate: false
+  
+  jjongal.chatbot.b:
+    level: DEBUG
+    handlers: [console, file_debug]
+    propagate: false
+  
+  # Voice processing
+  jjongal.voice:
+    level: DEBUG
+    handlers: [console, file_debug]
+    propagate: false
+  
+  # Vector database operations
+  jjongal.vectordb:
+    level: DEBUG
+    handlers: [console, file_debug]
+    propagate: false
+  
+  # Authentication and security
+  jjongal.auth:
+    level: INFO
+    handlers: [console, file_info, file_error]
+    propagate: false
+  
+  # External API integrations
+  jjongal.external_api:
+    level: DEBUG
+    handlers: [console, file_debug]
+    propagate: false
+  
+  # Story generation pipeline
+  jjongal.story:
+    level: DEBUG
+    handlers: [console, file_debug]
+    propagate: false
+  
+  # Database operations
+  sqlalchemy.engine:
+    level: INFO
+    handlers: [console, file_info]
+    propagate: false
+  
+  # LangChain operations
+  langchain:
+    level: DEBUG
+    handlers: [console, file_debug]
+    propagate: false
+  
+  # OpenAI API calls
+  openai:
+    level: INFO
+    handlers: [console, file_info]
+    propagate: false
+  
+  # ElevenLabs API calls
+  elevenlabs:
+    level: INFO
+    handlers: [console, file_info]
+    propagate: false
+
+# Root logger configuration
+root:
+  level: DEBUG
+  handlers: [console, file_debug]
+
+# Development-specific settings
+development:
+  log_sql_queries: true
+  log_request_body: true
+  log_response_body: false
+  log_websocket_messages: true
+  verbose_error_traces: true
+  log_ai_model_calls: true
+  log_performance_metrics: true
+  
+  # Sensitive data logging (only in dev)
+  log_auth_tokens: false  # Never log auth tokens even in dev
+  log_api_keys: false     # Never log API keys
+  log_user_data: true     # Log user data for debugging
+  
+  # Performance monitoring
+  log_slow_queries: true
+  slow_query_threshold: 1.0  # seconds
+  log_memory_usage: true
+  memory_check_interval: 300  # seconds
+
+# Console output settings
+console:
+  colors: true
+  width: 120
+  show_time: true
+  show_level: true
+  show_path: true
+
+# File rotation and cleanup
+file_management:
+  cleanup_old_logs: true
+  max_age_days: 30
+  compress_rotated: false
+  create_directories: true

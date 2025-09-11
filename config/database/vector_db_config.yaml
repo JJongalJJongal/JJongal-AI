@@ -1,0 +1,181 @@
+# JJongal-AI Vector Database Configuration
+# ChromaDB and OpenAI Embeddings setup for RAG system
+
+# ChromaDB Configuration
+chromadb:
+  # Storage settings
+  persist_directory: "./data/vector_db"
+  collection_name: "fairy_tales"
+  
+  # Performance settings
+  allow_reset: true
+  is_persistent: true
+  anonymized_telemetry: false
+  
+  # Memory settings  
+  cache_size: 268435456  # 256MB
+  
+  # Query settings
+  default_n_results: 5
+  max_n_results: 20
+  
+  # Search configuration
+  search:
+    default_type: "similarity"  # similarity, mmr, similarity_score_threshold
+    mmr_lambda: 0.7  # MMR diversity parameter
+    score_threshold: 0.7  # Minimum similarity score
+    
+  # Indexing settings
+  hnsw_space: "cosine"  # cosine, l2, ip
+  ef_construction: 200
+  ef_search: 50
+  m: 16
+
+# OpenAI Embeddings Configuration
+embeddings:
+  model: "text-embedding-3-small"  # text-embedding-3-small, text-embedding-3-large
+  dimensions: 1536  # Embedding dimensions
+  encoding_format: "float"
+  
+  # Performance settings
+  chunk_size: 1000  # Documents per batch
+  max_retries: 3
+  request_timeout: 60
+  
+  # Rate limiting
+  requests_per_minute: 3000
+  tokens_per_minute: 1000000
+
+# Document Processing
+documents:
+  # Text splitting
+  chunk_size: 1000
+  chunk_overlap: 100
+  
+  # Supported formats
+  supported_formats:
+    - "txt"
+    - "json"
+    - "md"
+    - "pdf"
+  
+  # Metadata extraction
+  include_metadata: true
+  metadata_fields:
+    - "source"
+    - "page"
+    - "title"
+    - "author"
+    - "age_group"
+    - "genre"
+    - "themes"
+
+# RAG Configuration
+rag:
+  # Retrieval settings
+  top_k: 5
+  relevance_threshold: 0.75
+  
+  # Context settings
+  max_context_length: 4000
+  context_overlap: 50
+  
+  # Reranking
+  enable_reranking: true
+  rerank_threshold: 0.8
+
+# Fairy Tale Knowledge Base
+knowledge_base:
+  # Data sources
+  data_sources:
+    - "data/fairy_tales/korean_traditional.json"
+    - "data/fairy_tales/world_classics.json"
+    - "data/fairy_tales/educational_stories.json"
+    - "data/fairy_tales/age_appropriate_4_6.json"
+    - "data/fairy_tales/age_appropriate_7_9.json"
+  
+  # Categories
+  categories:
+    - "traditional"
+    - "adventure" 
+    - "friendship"
+    - "family"
+    - "fantasy"
+    - "educational"
+    - "moral"
+  
+  # Age groups
+  age_groups:
+    young: "4-6"
+    old: "7-9"
+  
+  # Languages
+  supported_languages:
+    - "ko"  # Korean
+    - "en"  # English
+
+# Monitoring and Logging
+monitoring:
+  enable_metrics: true
+  log_queries: true
+  log_results: false  # Don't log for privacy
+  
+  # Performance tracking
+  track_latency: true
+  track_accuracy: true
+  
+  # Health checks
+  health_check_interval: 300  # seconds
+  
+# Security
+security:
+  # Access control
+  require_authentication: true
+  
+  # Data privacy
+  anonymize_queries: true
+  retention_days: 30
+  
+  # Validation
+  validate_inputs: true
+  sanitize_queries: true
+
+# Cache Configuration
+cache:
+  enable_query_cache: true
+  cache_ttl: 3600  # seconds
+  max_cache_size: 1000  # number of cached queries
+  
+  # Redis cache (optional)
+  redis:
+    enabled: false
+    host: "localhost" 
+    port: 6379
+    db: 0
+    ttl: 3600
+
+# Development Settings
+development:
+  debug_mode: true
+  verbose_logging: true
+  load_sample_data: true
+  auto_create_collections: true
+  
+# Production Settings  
+production:
+  debug_mode: false
+  verbose_logging: false
+  load_sample_data: false
+  auto_create_collections: false
+  
+  # Performance optimizations
+  enable_compression: true
+  optimize_for_reads: true
+  background_indexing: true
+
+# Testing Settings
+testing:
+  use_in_memory_db: true
+  reset_db_on_start: true
+  load_test_fixtures: true
+  mock_external_calls: true
