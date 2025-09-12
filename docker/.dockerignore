@@ -34,6 +34,8 @@ ENV/
 env.bak/
 venv.bak/
 fairy_tail/
+.venv/
+.env/
 
 # IDE 관련
 .vscode/
@@ -52,6 +54,7 @@ ehthumbs.db
 Thumbs.db
 
 # 테스트 관련
+tests/
 .pytest_cache/
 .coverage
 htmlcov/
@@ -90,6 +93,10 @@ README.md
 CHANGELOG.md
 LICENSE
 docs/
+scripts/
+*.md
+Makefile
+.claude/
 
 # 테스트 응답 파일들
 chatbot/tests/responses/
@@ -102,7 +109,11 @@ chatbot/tests/*.mp3
 *.safetensors
 models/
 
-# 대용량 원본 데이터 (VectorDB만 필요)
+# 대용량 데이터 폴더들 제외 (Docker 빌드 최적화)
+data/
+!data/chroma_db/
+
+# 기존 대용량 원본 데이터 (VectorDB만 필요)
 chatbot/data/raw/
 chatbot/data/processed/
 chatbot/data/results/

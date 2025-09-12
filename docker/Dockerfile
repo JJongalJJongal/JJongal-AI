@@ -9,22 +9,12 @@ FROM python:3.11-slim AS builder
 # 빌드 인수
 ARG DEBIAN_FRONTEND=noninteractive
 
-# 빌드 도구 설치
+# 빌드 도구 설치 (최소한만)
 RUN apt-get update && apt-get install -y \
     build-essential \
     gcc \
-    g++ \
-    git \
-    curl \
-    # 오디오 라이브러리 개발 헤더 (librosa, soundfile 컴파일용)
-    libsndfile1-dev \
-    libasound2-dev \
-    portaudio19-dev \
-    libflac-dev \
-    libvorbis-dev \
-    libopus-dev \
-    libmpg123-dev \
     pkg-config \
+    libsndfile1-dev \
     && rm -rf /var/lib/apt/lists/*
 
 # Python 의존성 설치를 위한 가상환경 생성
@@ -51,20 +41,10 @@ LABEL maintainer="PeepPeep Team"
 LABEL description="PeepPeep (쫑알쫑알) - 아동 AI 동화 생성 시스템"
 LABEL version="1.0.0"
 
-# 시스템 의존성 설치 (런타임에 필요한 것들만)
+# 런타임 의존성만 설치
 RUN apt-get update && apt-get install -y \
-    # FFmpeg (음성 처리용)
     ffmpeg \
-    # 오디오 라이브러리 (librosa, soundfile용)
     libsndfile1 \
-    libsndfile1-dev \
-    libasound2-dev \
-    portaudio19-dev \
-    libflac-dev \
-    libvorbis0a \
-    libopus0 \
-    libmpg123-0 \
-    # 네트워킹 도구
     curl \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
@@ -79,24 +59,15 @@ ENV PATH="/opt/venv/bin:$PATH"
 # 작업 디렉토리 설정
 WORKDIR /app
 
-# 애플리케이션 코드 먼저 복사
-COPY --chown=peeppeep_user:peeppeep_user . /app/
+# 필수 파일만 선택적으로 복사
+COPY --chown=peeppeep_user:peeppeep_user src/ /app/src/
+COPY --chown=peeppeep_user:peeppeep_user shared/ /app/shared/
+COPY --chown=peeppeep_user:peeppeep_user config/ /app/config/
+COPY --chown=peeppeep_user:peeppeep_user app.py main.py /app/
+COPY --chown=peeppeep_user:peeppeep_user data/chroma_db/ /app/data/chroma_db/
 
-# 필요한 디렉토리 생성 및 최종 권한 설정
-# 이 단계에서 모든 디렉토리가 생성되고 올바른 소유자가 설정됩니다.
-RUN mkdir -p /app/output/workflow_states \
-             /app/output/metadata \
-             /app/output/stories \
-             /app/output/temp/images \
-             /app/output/temp/audio \
-             /app/output/temp/voice_samples \
-             /app/output/conversations \
-             /app/logs \
-             /app/src/data/db \
-             /app/src/data/vector_db/main \
-             /app/src/data/vector_db/detailed \
-             /app/src/data/vector_db/summary \
-             /app/config/prompts \
+# 필요한 디렉토리 생성
+RUN mkdir -p /app/output /app/logs \
     && chown -R peeppeep_user:peeppeep_user /app
 
 # Python 경로 설정

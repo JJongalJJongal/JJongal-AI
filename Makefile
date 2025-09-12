@@ -22,7 +22,7 @@ run:
 # Docker 실행 (개발 환경)
 .PHONY: dev
 dev:
-	docker-compose -f docker/docker-compose.yml -f docker-compose.dev.yml up
+	docker-compose -f docker/docker-compose.yml up
 
 # Python 직접 실행 (개발 환경 - Docker 없이)
 .PHONY: dev-local
@@ -180,7 +180,7 @@ deploy: build
 # 개발 도구 실행 (Jupyter 포함)
 .PHONY: dev-tools
 dev-tools:
-	docker-compose -f docker-compose.yml -f docker-compose.dev.yml --profile dev-tools up -d
+	docker-compose -f docker/docker-compose.yml --profile dev-tools up -d
 
 # 도커 이미지 정보 확인
 .PHONY: info
